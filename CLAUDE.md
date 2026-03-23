@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
 ## What This Project Is
 
@@ -8,23 +8,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 It is **not** a semantic code understanding engine, LSP, vector database, or IDE replacement. See `DESIGN_PHILOSOPHY.md` for the guiding principles (orientation > intelligence, drift must be loud, degrade don't guess).
 
+**This project is independent of the GSD (Get Shit Done) Claude Code plugin.** It was originally developed inside a GSD fork but has been split into its own repo. GSD does not depend on sextant and sextant does not depend on GSD.
+
 ## Commands
 
 ```bash
-npm install          # install dependencies (chokidar, fast-glob, sql.js)
+npm install          # install dependencies (chokidar, fast-glob, sql.js, @babel/parser)
 npm link             # make `sextant` globally available (`codebase-intel` still works as alias)
 npm test             # runs scripts/test-refresh.sh (refresh hook regression tests)
 ```
 
 No build step. CommonJS throughout, no transpilation.
 
+## Deploying to a new project
+
+```bash
+cd /path/to/project
+sextant init         # creates .planning/intel/, wires hooks into .claude/settings.json
+sextant scan --force # indexes files, builds dependency graph
+```
+
+The watcher auto-starts on next Claude Code session. To start manually: `sextant watch-start`
+
 ## Architecture
 
 ### Pipeline
 
 1. **Extractors** (`lib/extractors/`) parse imports/exports from source files
-   - JS/TS: regex-based (`javascript.js`)
+   - JS/TS imports: regex-based (`javascript.js`)
+   - JS/TS exports: AST-based via `@babel/parser` (`js_ast_exports.js`), falls back to regex on parse failure
    - Python: AST-based via `python_ast.py` (`python.js`)
+   - Registry: `extractors/index.js` maps extensions to extractors
 
 2. **Resolver** (`lib/resolver.js`) maps import specifiers to file paths
    - JS/TS: relative paths, tsconfig `paths`/`baseUrl`, workspace packages
@@ -32,49 +46,141 @@ No build step. CommonJS throughout, no transpilation.
    - Returns `{ specifier, resolved, kind }` where kind is `relative|external|tsconfig|workspace|asset|unresolved`
 
 3. **Graph** (`lib/graph.js`) stores the dependency graph in SQLite (via sql.js)
-   - Tables: `files`, `imports`, `exports`, `meta`
+   - Tables: `files`, `imports`, `exports`, `reexports`, `meta`
    - Provides fan-in/fan-out queries, neighbor expansion, hotspot detection
+   - `findExportsBySymbol()` — export-graph lookup for common-term retrieval
+   - `findReexportChain()` — BFS through re-export chains for barrel-file tracing
 
 4. **Intel** (`lib/intel.js`) orchestrates everything — the central module (highest fan-in)
    - Per-root state management via `stateByRoot` Map
    - Serialized operations via `withQueue()` promise chain
    - Debounced flushing for index, graph, and summary writes
-   - Auto-migrates stale index formats on load (INDEX_VERSION gated)
+   - Auto-migrates stale index formats on load (INDEX_VERSION 2)
+   - Separates re-exports from regular exports during indexing
 
 5. **Summary** (`lib/summary.js`) generates bounded markdown summaries (~2200 chars max)
    - Health metrics, module types, dependency hotspots, entry points, recent git changes
    - Emits `ALERT:` lines when resolution < 90% or index is stale
 
-6. **Retrieve** (`lib/retrieve.js`) provides ranked search combining text search with graph reranking
-   - **Scoring** (`lib/scoring.js`): symbol-aware signals — exact match (+40%), definition-site priority (+25%), noise penalty, CommonJS/Python pattern recognition
-   - **rg backend** (`lib/rg.js`): two-phase collection — source files first, then docs/config. Prevents changelog saturation for common terms
-   - **Fan-in suppression**: halves graph boost on hub files when a definition match exists in the result set
+6. **Retrieve** (`lib/retrieve.js`) provides ranked search — three layers:
+   - **Layer 1: rg text search** — two-phase (source files first, then docs/config), 5x raw limit
+   - **Layer 2: Export-graph lookup** — queries exports table for each query term, injects files that export the symbol even if rg missed them
+   - **Layer 3: Re-export chain tracing** — follows barrel-file re-exports to find original definition files
+   - **Scoring** (`lib/scoring.js`): exact symbol +40%, definition-site +25%, fan-in suppression, doc/test/vendor penalties
    - **Health gating**: graph boosts disabled when resolution < 90%
+
+7. **Watcher** (`watch.js`) — chokidar file watcher with live dashboard
+   - Writes heartbeat every 30s (periodic) + on each flush (activity)
+   - Writes last-processed filename to `.watcher_last_file`
+   - Auto-started by SessionStart hook when heartbeat is missing/stale
+   - `watch-start`/`watch-stop` CLI commands, `/watch` slash command in Claude Code
+
+### Visibility Model (CRITICAL — read this)
+
+There are three output channels. They go to different places:
+
+| Channel | Where it goes | What sees it |
+|---------|--------------|-------------|
+| Hook **stdout** | Injected as Claude context (`<system-reminder>`) | Claude only |
+| Hook **stderr** | Nowhere visible | Nobody |
+| **statusLine** in settings.json | Persistent line at bottom of Claude Code | User only |
+
+**There is no channel that both the user and Claude see simultaneously.**
+
+- Do NOT write user-facing UI to stderr in hooks — nobody sees it
+- The user's only visual indicator is the `statusLine` in `~/.claude/statusline-command.sh`
+- Claude's only input is the `<codebase-intelligence>` block on stdout
+
+The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12s ← config.py`
+- `◆` green/yellow/red = health
+- `⟳`/`⏸` = watcher running/off
+- `→ Xs` = when context was last sent to Claude
+- `← file` = last file watcher processed
 
 ### Injection into Claude Code
 
-Two hooks (configured in `.claude/settings.json`):
-- **SessionStart**: `sextant hook sessionstart` — injects summary on session start/resume
-- **UserPromptSubmit**: `node tools/codebase_intel/refresh.js` — re-injects if summary changed (per-session SHA-256 dedupe)
+Two hooks (configured in project `.claude/settings.json` by `sextant init`):
+- **SessionStart**: `sextant hook sessionstart` — injects summary + auto-starts watcher
+- **UserPromptSubmit**: `node tools/codebase_intel/refresh.js` — re-injects if summary changed (SHA-256 dedupe)
+
+Both emit under `<codebase-intelligence>` XML tag on stdout.
 
 ### Per-Repo State
 
 All state lives in `.planning/intel/` (never committed):
-- `graph.db` — SQLite dependency graph
+- `graph.db` — SQLite dependency graph (files, imports, exports, reexports)
 - `index.json` — file metadata and import/export records (INDEX_VERSION 2)
 - `summary.md` — the injected summary
 - `history.json` — health snapshots for sparkline trends
-- `.last_injected_hash.*` — per-session dedupe hashes
+- `.watcher_heartbeat` — watcher alive signal (mtime checked by statusline)
+- `.watcher_last_file` — last file the watcher processed
+- `.last_injected_hash.*` — per-session context dedupe hashes
 
 ## Key Design Decisions
 
 - **Health-gated ranking**: graph reranking disabled when import resolution drops below 90%
 - **Definition over hub**: scoring prioritizes files that define a symbol over files that merely import it — fan-in suppression + definition-site priority signals
-- **Source-first search**: rg searches source files before docs/config to prevent changelog saturation on common terms
-- **Auto-migration**: stale index entries (v1 format) are detected and re-extracted transparently on load
-- **Debounced writes**: index, graph, and summary use independent debounce timers during watch mode
+- **Source-first search**: rg searches source files before docs/config to prevent changelog saturation
+- **Export-graph lookup**: queries the exports table to find which file exports a queried symbol, bypassing rg hit order entirely. Solves "common term in large repo" failures (React `useState`, etc.)
+- **Re-export chain tracing**: follows `export { X } from './Y'` chains through barrel files to find original definition. Uses the `reexports` table with BFS up to 5 hops.
+- **AST export extraction**: `@babel/parser` extracts exports from JS/TS (including re-exports with source specifiers). Falls back to regex on parse failure. Imports still use regex (96-100% accurate).
+- **Auto-migration**: stale index entries (v1 format with absolute-path keys or string imports) are detected and re-extracted transparently on load
 - **Queue serialization**: all operations on a root are serialized through a promise chain to prevent concurrent SQLite access
 - **Summary is clamped**: hard-capped at ~2200 chars to stay within useful context budget
-- **Per-repo config**: `.codebase-intel.json` at repo root overrides default globs, ignore patterns, and summary throttle interval
-- **Periodic heartbeats**: background processes (watcher) must ping a heartbeat file periodically, not just on activity — idle processes that only write on flush look dead to status monitors
-- **No redundant metrics**: don't display values that are always identical (e.g., indexed files vs graph nodes are always equal)
+- **Periodic heartbeats**: watcher pings every 30s even when idle — writing only on flush makes idle watchers look dead
+- **Entry point path exclusion**: `isEntryPoint()` rejects files in `fixtures/`, `tests/`, `examples/`, `demos/` etc. — prevents false positives from ranking above real results
+- **No redundant metrics**: don't display values that are always identical (e.g., indexed files vs graph nodes)
+
+## Eval Harness
+
+Self-referential evaluation: 19 queries across 7 categories (symbol, multiword, path, cross-file, scoring, scope, negative). Measures P@k, MRR, nDCG, usefulness, graph lift.
+
+```bash
+node scripts/eval-retrieve.js             # terminal output
+node scripts/eval-retrieve.js --verbose   # hit lines + scoring signals
+node scripts/eval-retrieve.js --json      # machine-readable
+```
+
+Current metrics: **MRR 0.963, nDCG 0.979, 19/19 pass.**
+
+Cross-project validation (Express 142 files, Flask 83 files, React 4,337 files): all critical queries resolved correctly including React `useState` (via export-graph) and `createElement` (via re-export chain).
+
+## Repo History (why this exists separately)
+
+**The confusion**: This project started inside a fork of the GSD (Get Shit Done) Claude Code plugin at `/root/gsd` → `Skidudeaa/get-shit-done`. The codebase-intel code was developed alongside 91 GSD plugin files (agents, commands, templates) in the same repo. The directory was named `gsd`, the remote pointed to `get-shit-done`, and the GSD plugin was still actively used — creating constant confusion about what was what.
+
+**The reality**: Sextant and GSD are completely independent. GSD's hooks (`session-start.js`, `gsd-check-update.js`, `context-monitor.js`) don't reference sextant. GSD's `map-codebase` command writes to `.planning/codebase/` — different directory, different format. Zero cross-dependencies.
+
+**What happened (2026-03-23)**:
+- Split sextant into its own repo: `Skidudeaa/sextant`
+- Archived the fork: `Skidudeaa/get-shit-done` (archived on GitHub, backed up locally at `/root/gsd-archived`)
+- GSD plugin is installed normally via its package manager (`/gsd:update`), no local clone needed
+- Binary renamed from `codebase-intel` to `sextant` (alias kept for backward compat)
+- Existing hooks in projects use `codebase-intel` command name — still works via alias
+
+**If confused**: sextant lives at `/root/sextant`. GSD is a Claude Code plugin installed globally. They don't talk to each other. The old `/root/gsd-archived` is a backup you probably don't need.
+
+## Development History
+
+Built in a single intensive session. Key milestones:
+
+1. **Scoring fix**: definition-site priority signals + fan-in suppression. Solved hub files (intel.js) outranking definition files. MRR 0.838 → 0.931.
+2. **File sort fix**: promoted `bestAdjustedHitScore` above raw fan-in in `rerankFiles()`. The linchpin that made all scoring signals flow through to file ranking.
+3. **Auto-migration**: stale v1 index entries (absolute paths, string imports) detected and re-extracted on load. Resolution jumped from 54% to 100%.
+4. **Source-first rg**: two-phase collection (source files first, then docs). Fixed Flask "Flask" query where CHANGES.rst dominated results.
+5. **Export-graph lookup**: queries exports table for each query term, injects files rg missed. Fixed React "useState" (716 source files, definition never reached scorer).
+6. **AST export extraction**: `@babel/parser` for JS/TS exports with re-export tracking. 1,004 re-exports captured in React. Fixed React "createElement" via barrel-file chain tracing.
+7. **Entry point refinement**: path exclusion + removed entry point as sort key (kept as +10% scoring signal only). Fixed Express fixtures outranking lib files.
+8. **Visibility model**: learned (the hard way) that stderr from hooks is invisible. Moved user-facing output to Claude Code's `statusLine` config.
+9. **Watcher lifecycle**: heartbeat file, auto-start from SessionStart hook, `/watch` slash command, `watch-start`/`watch-stop` CLI.
+10. **Repo split**: separated from GSD fork into independent `Skidudeaa/sextant` repo. Binary renamed to `sextant` with `codebase-intel` alias for backward compatibility.
+
+## What NOT to add
+
+- Embeddings or vector search
+- LLM calls in the pipeline
+- Semantic claims (LSP-like behavior)
+- Summaries > 2200 chars
+- UI that writes to stderr in hooks (nobody sees it)
+
+Use eval metrics to justify changes.
