@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "description": "Retrieval evaluation queries for sextant (self-referential)",
+  "cases": [
+    {
+      "id": "sym-001",
+      "category": "symbol",
+      "query": "rerankFiles",
+      "relevantFiles": ["lib/retrieve.js"],
+      "relevantHitPatterns": ["function rerankFiles"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "Exact function name lookup. Definition must surface at rank 1."
+    },
+    {
+      "id": "sym-002",
+      "category": "symbol",
+      "query": "computeEnhancedSignals",
+      "relevantFiles": ["lib/scoring.js"],
+      "acceptableFiles": ["lib/retrieve.js"],
+      "relevantHitPatterns": ["function computeEnhancedSignals"],
+      "topK": 3,
+      "minUsefulnessScore": 0.7,
+      "notes": "Defined in scoring.js, called in retrieve.js. Definition should rank first; retrieve.js is acceptable."
+    },
+    {
+      "id": "sym-003",
+      "category": "symbol",
+      "query": "fanInByPaths",
+      "relevantFiles": ["lib/graph.js", "lib/retrieve.js"],
+      "relevantHitPatterns": ["function fanInByPaths"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Symbol defined in graph.js, consumed in retrieve.js."
+    },
+    {
+      "id": "sym-004",
+      "category": "symbol",
+      "query": "isEntryPoint",
+      "relevantFiles": ["lib/utils.js", "lib/retrieve.js", "lib/summary.js"],
+      "relevantHitPatterns": ["function isEntryPoint"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Defined in utils.js, used in retrieve.js and summary.js. Tests breadth of symbol retrieval."
+    },
+    {
+      "id": "sym-005",
+      "category": "symbol",
+      "query": "extractSymbolDef",
+      "relevantFiles": ["lib/scoring.js"],
+      "relevantHitPatterns": ["function extractSymbolDef"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "Scoring utility function. Tests symbol lookup in secondary lib file."
+    },
+    {
+      "id": "multi-001",
+      "category": "multiword",
+      "query": "useGraphBoost",
+      "relevantFiles": ["lib/retrieve.js"],
+      "relevantHitPatterns": ["useGraphBoost"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Boolean variable controlling graph boost gating. Tests variable name retrieval."
+    },
+    {
+      "id": "multi-002",
+      "category": "multiword",
+      "query": "noiseWordRatio",
+      "relevantFiles": ["lib/scoring.js"],
+      "relevantHitPatterns": ["function noiseWordRatio"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "CamelCase function name. Tests compound-word symbol retrieval."
+    },
+    {
+      "id": "multi-003",
+      "category": "multiword",
+      "query": "resolutionPct",
+      "relevantFiles": ["lib/summary.js", "lib/intel.js"],
+      "relevantHitPatterns": ["resolutionPct"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Variable used across multiple files. Tests breadth of results."
+    },
+    {
+      "id": "path-001",
+      "category": "path",
+      "query": "resolveImport",
+      "relevantFiles": ["lib/resolver.js"],
+      "relevantHitPatterns": ["function resolveImport"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "Function name that is also the module's main export. Should rank resolver.js first."
+    },
+    {
+      "id": "path-002",
+      "category": "path",
+      "query": "writeSummaryMarkdown",
+      "relevantFiles": ["lib/summary.js", "lib/intel.js"],
+      "relevantHitPatterns": ["function writeSummaryMarkdown"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Defined in summary.js, called from intel.js. Tests cross-module reach."
+    },
+    {
+      "id": "cross-001",
+      "category": "cross-file",
+      "query": "scheduleGraphPersist",
+      "relevantFiles": ["lib/intel.js"],
+      "relevantHitPatterns": ["function scheduleGraphPersist", "persistDb"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Function in intel.js calling graph.persistDb. Tests graph-aware related expansion."
+    },
+    {
+      "id": "cross-002",
+      "category": "cross-file",
+      "query": "hitsPerFileCap",
+      "relevantFiles": ["lib/retrieve.js", "bin/intel.js"],
+      "relevantHitPatterns": ["hitsPerFileCap"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Option threaded from CLI through retrieve(). Both files should surface."
+    },
+    {
+      "id": "scoring-001",
+      "category": "scoring",
+      "query": "COMMON_NOISE_WORDS",
+      "relevantFiles": ["lib/scoring.js"],
+      "relevantHitPatterns": ["COMMON_NOISE_WORDS"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "ALL_CAPS constant. Tests exact-symbol boost for well-named constants."
+    },
+    {
+      "id": "scoring-002",
+      "category": "scoring",
+      "query": "SYMBOL_DEF_PATTERNS",
+      "relevantFiles": ["lib/scoring.js"],
+      "relevantHitPatterns": ["SYMBOL_DEF_PATTERNS"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "ALL_CAPS constant lookup. Tests exact-symbol-match boost."
+    },
+    {
+      "id": "cross-003",
+      "category": "cross-file",
+      "query": "extractImports",
+      "relevantFiles": ["lib/extractor.js", "lib/extractors/javascript.js"],
+      "acceptableFiles": ["lib/extractors/index.js", "lib/extractors/python.js", "lib/intel.js"],
+      "relevantHitPatterns": ["function extractImports"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Dispatcher + implementation. Tests whether both the public API (extractor.js) and the JS extractor surface. Python extractor and registry are acceptable."
+    },
+    {
+      "id": "cross-004",
+      "category": "cross-file",
+      "query": "ensureSchema",
+      "relevantFiles": ["lib/graph.js"],
+      "acceptableFiles": ["lib/intel.js"],
+      "relevantHitPatterns": ["function ensureSchema", "CREATE TABLE"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "SQLite schema setup in graph.js. Intel.js calls graph.loadDb which triggers ensureSchema."
+    },
+    {
+      "id": "scope-001",
+      "category": "scope",
+      "query": "findEnclosingScopeBatch",
+      "relevantFiles": ["lib/scope-finder.js"],
+      "acceptableFiles": ["lib/rg.js", "lib/retrieve.js"],
+      "relevantHitPatterns": ["function findEnclosingScopeBatch"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "Core scope detection function. rg.js and retrieve.js call it as consumers."
+    },
+    {
+      "id": "scope-002",
+      "category": "scope",
+      "query": "parseJsScopes",
+      "relevantFiles": ["lib/scope-finder.js"],
+      "relevantHitPatterns": ["function parseJsScopes"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "Internal function for JS/TS scope parsing. Tests that module-private functions are retrievable."
+    },
+    {
+      "id": "negative-001",
+      "category": "negative",
+      "query": "xyzzy_nonexistent_token_abc123",
+      "relevantFiles": [],
+      "relevantHitPatterns": [],
+      "topK": 5,
+      "minUsefulnessScore": 0.0,
+      "notes": "Garbage query. Must return zero results."
+    }
+  ]
+}

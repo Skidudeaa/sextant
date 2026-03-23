@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.DS_Store
+__pycache__/
+
+# Per-repo state (generated, not checked in)
+.planning/

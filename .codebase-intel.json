@@ -1,0 +1,12 @@
+{
+  "globs": ["**/*.{ts,tsx,js,jsx,mjs,cjs}"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/.planning/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**"
+  ],
+  "summaryEverySec": 5
+}

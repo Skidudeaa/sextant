@@ -1,0 +1,21 @@
+{
+  "name": "sextant",
+  "version": "1.0.0",
+  "description": "Health-aware codebase intelligence for LLM coding agents",
+  "private": true,
+  "type": "commonjs",
+  "main": "lib/intel.js",
+  "bin": {
+    "sextant": "bin/intel.js",
+    "codebase-intel": "bin/intel.js"
+  },
+  "scripts": {
+    "test": "bash scripts/test-refresh.sh"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.2",
+    "chokidar": "^3.6.0",
+    "fast-glob": "^3.3.2",
+    "sql.js": "^1.12.0"
+  }
+}
