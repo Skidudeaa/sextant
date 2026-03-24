@@ -4,7 +4,7 @@ Items identified by full codebase review (2026-03-24).
 
 ## Performance
 
-- [ ] **index.json O(N) serialization per flush** — `lib/intel.js:161-172` serializes entire index on every debounced flush (~5MB at 10k files). Consider storing index in SQLite alongside graph, or incremental format.
+- [x] **index.json O(N) serialization per flush** — Resolved: migrated index storage into graph.db SQLite. graph.db is now the single source of truth for file metadata, imports, and exports. Legacy index.json is auto-migrated on init and renamed to index.json.migrated.
 
 ## Patterns / Refactoring
 

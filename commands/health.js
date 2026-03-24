@@ -20,7 +20,7 @@ async function run(ctx) {
     lines.push(`  ${viz.c("Resolution".padEnd(14), viz.colors.dim)}${viz.bar(pct, 25)} ${resolved}/${total}`);
 
     // Index stats
-    const indexed = h.metrics?.indexedFiles ?? h.index?.files ?? h.indexedFiles ?? 0;
+    const indexed = h.metrics?.indexedFiles ?? h.indexedFiles ?? h.index?.files ?? 0;
     lines.push(`  ${viz.c("Indexed".padEnd(14), viz.colors.dim)}${indexed} files`);
     const ageSec = h.metrics?.indexAgeSec ?? h.indexAgeSec ?? null;
     lines.push(`  ${viz.c("Index Age".padEnd(14), viz.colors.dim)}${viz.ageStatus(ageSec)}`);

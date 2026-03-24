@@ -9,6 +9,49 @@ const os = require("os");
 const { health, writeSummaryMarkdown } = require("../lib/summary");
 const graphMod = require("../lib/graph");
 
+// Helper: populate graph.db from an index-like object for test convenience.
+// Clears existing data first so each test gets a clean state.
+function populateGraphFromIndex(db, indexFiles) {
+  // Clear existing data
+  db.run("DELETE FROM files");
+  db.run("DELETE FROM imports");
+  db.run("DELETE FROM exports");
+  db.run("DELETE FROM reexports");
+
+  for (const [relPath, entry] of Object.entries(indexFiles || {})) {
+    graphMod.upsertFile(db, {
+      relPath,
+      type: entry.type || null,
+      sizeBytes: entry.sizeBytes || 0,
+      mtimeMs: entry.mtimeMs || 1,
+    });
+
+    if (Array.isArray(entry.imports)) {
+      const importsForGraph = entry.imports.map((imp) => ({
+        specifier: imp.specifier,
+        toPath: imp.resolved || null,
+        kind: imp.kind || null,
+        isExternal: imp.kind === "external" || imp.kind === "asset",
+      }));
+      graphMod.replaceImports(db, relPath, importsForGraph);
+    }
+
+    if (Array.isArray(entry.exports)) {
+      const regularExports = [];
+      const reexports = [];
+      for (const ex of entry.exports) {
+        if (ex.from) {
+          reexports.push(ex);
+        } else {
+          regularExports.push(ex);
+        }
+      }
+      graphMod.replaceExports(db, relPath, regularExports);
+      graphMod.replaceReexports(db, relPath, reexports);
+    }
+  }
+}
+
 describe("summary health()", () => {
   let tmpDir, db;
 
@@ -23,20 +66,18 @@ describe("summary health()", () => {
   });
 
   it("resolution metrics with local imports", () => {
-    const index = {
-      files: {
-        "a.js": {
-          type: "js",
-          imports: [
-            { specifier: "./b", resolved: "b.js", kind: "relative" },
-            { specifier: "./c", resolved: null, kind: "unresolved" },
-          ],
-        },
-        "b.js": { type: "js", imports: [] },
+    populateGraphFromIndex(db, {
+      "a.js": {
+        type: "js",
+        imports: [
+          { specifier: "./b", resolved: "b.js", kind: "relative" },
+          { specifier: "./c", resolved: null, kind: "unresolved" },
+        ],
       },
-    };
+      "b.js": { type: "js", imports: [] },
+    });
 
-    const result = health(tmpDir, { index, db, graph: graphMod });
+    const result = health(tmpDir, { db, graph: graphMod });
     assert.equal(result.localTotal, 2);
     assert.equal(result.localResolved, 1);
     assert.equal(result.resolutionPct, 50);
@@ -44,62 +85,62 @@ describe("summary health()", () => {
   });
 
   it("empty index gives 100% resolution", () => {
-    const index = { files: {} };
-    const result = health(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, {});
+
+    const result = health(tmpDir, { db, graph: graphMod });
     assert.equal(result.resolutionPct, 100);
     assert.equal(result.indexedFiles, 0);
     assert.equal(result.localTotal, 0);
   });
 
   it("external imports are excluded from resolution", () => {
-    const index = {
-      files: {
-        "a.js": {
-          type: "js",
-          imports: [
-            { specifier: "react", resolved: null, kind: "external" },
-            { specifier: "./b", resolved: "b.js", kind: "relative" },
-          ],
-        },
+    populateGraphFromIndex(db, {
+      "a.js": {
+        type: "js",
+        imports: [
+          { specifier: "react", resolved: null, kind: "external" },
+          { specifier: "./b", resolved: "b.js", kind: "relative" },
+        ],
       },
-    };
-    const result = health(tmpDir, { index, db, graph: graphMod });
+    });
+
+    const result = health(tmpDir, { db, graph: graphMod });
     assert.equal(result.localTotal, 1);
     assert.equal(result.localResolved, 1);
     assert.equal(result.resolutionPct, 100);
   });
 
   it("asset imports are excluded from resolution", () => {
-    const index = {
-      files: {
-        "a.js": {
-          type: "js",
-          imports: [
-            { specifier: "./style.css", resolved: null, kind: "asset" },
-          ],
-        },
+    populateGraphFromIndex(db, {
+      "a.js": {
+        type: "js",
+        imports: [
+          { specifier: "./style.css", resolved: null, kind: "asset" },
+        ],
       },
-    };
-    const result = health(tmpDir, { index, db, graph: graphMod });
+    });
+
+    const result = health(tmpDir, { db, graph: graphMod });
     assert.equal(result.localTotal, 0);
     assert.equal(result.resolutionPct, 100);
   });
 
-  it("null index handled gracefully", () => {
-    const result = health(tmpDir, { index: null, db, graph: graphMod });
+  it("empty db handled gracefully", () => {
+    populateGraphFromIndex(db, {});
+
+    const result = health(tmpDir, { db, graph: graphMod });
     assert.equal(result.indexedFiles, 0);
     assert.equal(result.resolutionPct, 100);
   });
 
   it("typeCounts in health output", () => {
-    const index = {
-      files: {
-        "a.js": { type: "js", imports: [] },
-        "b.ts": { type: "ts", imports: [] },
-        "c.js": { type: "js", imports: [] },
-      },
-    };
-    const result = health(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, {
+      "a.js": { type: "js", imports: [] },
+      "b.ts": { type: "ts", imports: [] },
+      "c.js": { type: "js", imports: [] },
+    });
+
+    const result = health(tmpDir, { db, graph: graphMod });
     // js should appear before ts (2 > 1)
     assert.ok(result.typeCounts.length >= 2);
     assert.equal(result.typeCounts[0].t, "js");
@@ -114,13 +155,6 @@ describe("summary writeSummaryMarkdown()", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-summary-write-"));
     fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
     db = await graphMod.loadDb(tmpDir);
-
-    // Populate graph for hotspot detection
-    graphMod.upsertFile(db, { relPath: "lib/core.js", type: "js", sizeBytes: 100, mtimeMs: 1 });
-    graphMod.upsertFile(db, { relPath: "lib/a.js", type: "js", sizeBytes: 50, mtimeMs: 2 });
-    graphMod.replaceImports(db, "lib/a.js", [
-      { specifier: "./core", toPath: "lib/core.js", kind: "relative" },
-    ]);
   });
 
   after(() => {
@@ -128,20 +162,20 @@ describe("summary writeSummaryMarkdown()", () => {
   });
 
   it("includes header for non-empty index", () => {
-    const index = {
-      files: {
-        "lib/core.js": { type: "js", imports: [] },
-        "lib/a.js": { type: "js", imports: [{ specifier: "./core", resolved: "lib/core.js", kind: "relative" }] },
-      },
-    };
-    const md = writeSummaryMarkdown(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, {
+      "lib/core.js": { type: "js", imports: [] },
+      "lib/a.js": { type: "js", imports: [{ specifier: "./core", resolved: "lib/core.js", kind: "relative" }] },
+    });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     assert.ok(md.includes("## Codebase intelligence"), "should include header");
     assert.ok(md.includes("Indexed files"), "should include file count");
   });
 
   it("empty index shows rescan message", () => {
-    const index = { files: {} };
-    const md = writeSummaryMarkdown(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, {});
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     assert.ok(md.includes("No indexed files yet"), "should show empty state message");
     assert.ok(md.includes("sextant rescan"), "should suggest rescan");
   });
@@ -155,8 +189,9 @@ describe("summary writeSummaryMarkdown()", () => {
         imports: [{ specifier: `./missing${i}`, resolved: null, kind: "unresolved" }],
       };
     }
-    const index = { files };
-    const md = writeSummaryMarkdown(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, files);
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     assert.ok(md.includes("ALERT"), "should include ALERT for low resolution");
   });
 
@@ -180,20 +215,18 @@ describe("summary writeSummaryMarkdown()", () => {
         exports: [{ name: `VeryLongExportName${i}`, kind: "named" }],
       };
     }
-    const index = { files };
-    const md = writeSummaryMarkdown(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, files);
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     assert.ok(md.length <= 2200, `summary should be <= 2200 chars, got ${md.length}`);
   });
 
   it("XML escaping of paths with special chars", () => {
-    // Use a tmpDir with angle brackets isn't practical, but we can verify
-    // the output escapes the root path
-    const index = {
-      files: {
-        "a.js": { type: "js", imports: [] },
-      },
-    };
-    const md = writeSummaryMarkdown(tmpDir, { index, db, graph: graphMod });
+    populateGraphFromIndex(db, {
+      "a.js": { type: "js", imports: [] },
+    });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     // The root path should appear in the output (at minimum)
     assert.ok(md.includes("Root"), "should include root path");
   });
@@ -216,18 +249,17 @@ describe("summary XML escaping", () => {
 
   it("paths with & < > are escaped in output", () => {
     // We cannot easily create files with <> in names on most filesystems,
-    // but we can verify the function handles them via the index
-    const index = {
-      files: {
-        "a.js": {
-          type: "js",
-          imports: [
-            { specifier: "./missing<script>", resolved: null, kind: "unresolved" },
-          ],
-        },
+    // but we can verify the function handles them via the graph
+    populateGraphFromIndex(db, {
+      "a.js": {
+        type: "js",
+        imports: [
+          { specifier: "./missing<script>", resolved: null, kind: "unresolved" },
+        ],
       },
-    };
-    const md = writeSummaryMarkdown(tmpDir, { index, db, graph: graphMod });
+    });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     // The unresolved specifier should appear XML-escaped in misses
     if (md.includes("Misses")) {
       assert.ok(!md.includes("<script>"), "should not contain raw <script>");

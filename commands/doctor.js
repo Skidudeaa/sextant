@@ -18,13 +18,11 @@ async function run(ctx) {
   lines.push(viz.header("State"));
   const sd = path.join(rootAbs, ".planning", "intel");
   const graphDb = path.join(sd, "graph.db");
-  const indexJson = path.join(sd, "index.json");
   const summaryMd = path.join(sd, "summary.md");
   const claudeSettings = path.join(rootAbs, ".claude", "settings.json");
 
   lines.push(viz.metric("state dir", fs.existsSync(sd) ? viz.status("ok", sd) : viz.status("error", sd)));
   lines.push(viz.metric("graph.db", fs.existsSync(graphDb) ? viz.status("ok", "exists") : viz.status("error", "missing")));
-  lines.push(viz.metric("index.json", fs.existsSync(indexJson) ? viz.status("ok", "exists") : viz.status("error", "missing")));
   lines.push(viz.metric("summary.md", fs.existsSync(summaryMd) ? viz.status("ok", "exists") : viz.status("error", "missing")));
   lines.push(viz.metric("claude settings", fs.existsSync(claudeSettings) ? viz.status("ok", "exists") : viz.status("warn", "missing")));
 
@@ -34,7 +32,7 @@ async function run(ctx) {
   const resolved = h.metrics?.localResolved ?? h.localResolved ?? 0;
   const total = h.metrics?.localTotal ?? h.localTotal ?? 0;
   const ageSec = h.metrics?.indexAgeSec ?? h.indexAgeSec ?? 0;
-  const indexed = h.metrics?.indexedFiles ?? h.index?.files ?? 0;
+  const indexed = h.metrics?.indexedFiles ?? h.indexedFiles ?? h.index?.files ?? 0;
 
   // Resolution with bar chart
   let resStatus = viz.status("ok", "healthy");
