@@ -291,7 +291,7 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
   await new Promise(() => {});
 }
 
-module.exports = { watchRoots };
+module.exports = { watchRoots, writeHeartbeat, clearHeartbeat };
 
 // Standalone runner (optional)
 if (require.main === module) {

@@ -2,13 +2,17 @@
 """
 Parse Python source via stdlib ast and emit imports/exports in JSON.
 
-Supports two modes:
+Supports three modes:
 
 1. Extract mode (default):
    Input: { "path": "relative/path.py", "content": "<file text>" }
    Output: { "path", "imports", "exports" }
 
-2. Find scopes mode:
+2. Batch extract mode:
+   Input: { "mode": "batch_extract", "items": [{ "path": "...", "content": "..." }, ...] }
+   Output: { "results": [{ "path", "imports", "exports" }, ...] }
+
+3. Find scopes mode:
    Input: { "mode": "find_scopes", "content": "<file text>", "lines": [1, 5, 10], "scope_mode": "function"|"class" }
    Output: { "scopes": { "1": {...}|null, "5": {...}|null, ... } }
 """
@@ -269,7 +273,7 @@ def main() -> None:
     """Read JSON from stdin, dispatch to appropriate mode, write JSON to stdout."""
     data = json.load(sys.stdin)
     mode = data.get("mode", "extract")
-    
+
     if mode == "find_scopes":
         # Find enclosing scopes for given line numbers
         content = data.get("content", "")
@@ -277,6 +281,14 @@ def main() -> None:
         scope_mode = data.get("scope_mode", "function")
         scopes = find_enclosing_scopes(content, lines, scope_mode)
         json.dump({"scopes": scopes}, sys.stdout)
+    elif mode == "batch_extract":
+        # Extract imports/exports for multiple files in one invocation
+        items = data.get("items", [])
+        results = []
+        for item in items:
+            result = extract(item.get("path", ""), item.get("content", ""))
+            results.append(result)
+        json.dump({"results": results}, sys.stdout)
     else:
         # Default: extract imports/exports
         out = extract(data.get("path", ""), data.get("content", ""))

@@ -32,6 +32,9 @@ async function main() {
   if (!summary) process.exit(0);
 
   // Per-session dedupe: derive session key from hook payload or env
+  // NOTE: This is an intentional copy of lib/session.js deriveSessionKey().
+  // This script is deployed standalone into target projects, so it cannot
+  // require the lib/ module. If you change this logic, update lib/session.js too.
   const sessionKey = (
     data?.session_id ||
     data?.conversation_id ||

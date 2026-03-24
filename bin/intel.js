@@ -5,6 +5,7 @@ const path = require("path");
 
 const intel = require("../lib/intel");
 const { retrieve } = require("../lib/retrieve");
+const { deriveSessionKey } = require("../lib/session");
 const zoekt = require("../lib/zoekt");
 const viz = require("../lib/terminal-viz");
 
@@ -277,19 +278,7 @@ Usage:
     if (!summary) process.exit(0);
 
     // Per-session dedupe: derive session key from hook payload or env
-    const sessionKey = (
-      data?.session_id ||
-      data?.conversation_id ||
-      data?.run_id ||
-      data?.terminal_id ||
-      process.env.CURSOR_SESSION_ID ||
-      process.env.TMUX_PANE ||
-      process.env.SSH_TTY ||
-      String(process.ppid || process.pid)
-    )
-      .toString()
-      .replace(/[^a-zA-Z0-9._-]/g, "_")
-      .slice(0, 80);
+    const sessionKey = deriveSessionKey(data);
 
     const cachePath = path.join(
       root,
