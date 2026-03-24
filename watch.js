@@ -135,6 +135,7 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
   const isTTY = process.stderr.isTTY && dashboard;
   const dashboardStates = [];
   const heartbeatIntervals = [];
+  const healthCache = new Map(); // root -> { data, ts }
 
   for (const root of roots) {
     const cfg = loadRepoConfig(root);
@@ -194,11 +195,22 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
       
       // Refresh health metrics + heartbeat after each flush
       writeHeartbeat(root, dashState.lastUpdateFile);
-      try {
-        const h = await intel.health(root);
-        dashState.resolutionPct = h.resolutionPct ?? h.metrics?.resolutionPct ?? null;
-        dashState.indexedFiles = h.index?.files ?? h.metrics?.indexedFiles ?? null;
-      } catch {}
+      // WHY: Health check iterates all files/imports in the index (~6ms at 10k files).
+      // Dashboard renders once per second, so computing health more often is wasted work
+      // that also blocks the queue.
+      const now = Date.now();
+      const cached = healthCache.get(root);
+      if (!cached || now - cached.ts >= 1000) {
+        try {
+          const h = await intel.health(root);
+          healthCache.set(root, { data: h, ts: now });
+          dashState.resolutionPct = h.resolutionPct ?? h.metrics?.resolutionPct ?? null;
+          dashState.indexedFiles = h.index?.files ?? h.metrics?.indexedFiles ?? null;
+        } catch {}
+      } else {
+        dashState.resolutionPct = cached.data.resolutionPct ?? cached.data.metrics?.resolutionPct ?? null;
+        dashState.indexedFiles = cached.data.index?.files ?? cached.data.metrics?.indexedFiles ?? null;
+      }
       
     }, 250);
 

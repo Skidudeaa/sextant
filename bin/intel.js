@@ -8,6 +8,18 @@ const { retrieve } = require("../lib/retrieve");
 const zoekt = require("../lib/zoekt");
 const viz = require("../lib/terminal-viz");
 
+// WHY: Defense-in-depth — strip XML tags that LLMs treat as structural boundaries.
+// summary.md has xmlEscape at generation time, but a tampered file could inject
+// closing tags to break out of the wrapper or inject fake system instructions.
+function stripUnsafeXmlTags(s) {
+  return s
+    .replace(/<\/?codebase-intelligence[^>]*>/gi, "")
+    .replace(/<\/?system-reminder[^>]*>/gi, "")
+    .replace(/<\/?tool_call[^>]*>/gi, "")
+    .replace(/<\/?tool_result[^>]*>/gi, "")
+    .replace(/<\/?antml:[a-z_]+[^>]*>/gi, "");
+}
+
 // WHY: stderr goes to the user as visible hook output in Claude Code.
 // stdout goes to Claude as injected context.  The banner gives the user
 // visual confirmation that sextant is active and what it sees.
@@ -260,10 +272,7 @@ Usage:
     if (!summary || !summary.trim()) process.exit(0);
 
     // stdout → Claude context
-    // WHY: Strip XML-closing-tag patterns as defense-in-depth — summary.md has
-    // xmlEscape at generation time, but a tampered file could inject a closing
-    // tag to break out of the wrapper. Full re-escape would double-encode.
-    const safeSummary = summary.trim().replace(/<\/?codebase-intelligence[^>]*>/gi, "");
+    const safeSummary = stripUnsafeXmlTags(summary.trim());
     process.stdout.write(
       `<codebase-intelligence>\n${safeSummary}\n</codebase-intelligence>`
     );
@@ -355,7 +364,7 @@ Usage:
     fs.writeFileSync(cachePath, h);
 
     // stdout → Claude context (only when changed)
-    const safeRefresh = summary.replace(/<\/?codebase-intelligence[^>]*>/gi, "");
+    const safeRefresh = stripUnsafeXmlTags(summary);
     process.stdout.write(
       `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${safeRefresh}\n</codebase-intelligence>`
     );
@@ -367,7 +376,7 @@ Usage:
     await intel.init(root);
     const summary = intel.readSummary(root);
     if (!summary || !summary.trim()) process.exit(0);
-    const safeInject = summary.trim().replace(/<\/?codebase-intelligence[^>]*>/gi, "");
+    const safeInject = stripUnsafeXmlTags(summary.trim());
     process.stdout.write(
       `<codebase-intelligence>\n${safeInject}\n</codebase-intelligence>`
     );
@@ -686,8 +695,9 @@ Usage:
 
       // Search backends
       lines.push(viz.header("Search Backends"));
-      const rgInstalled = require("child_process").spawnSync("which", ["rg"]).status === 0;
-      const zoektInstalled = require("child_process").spawnSync("which", ["zoekt-webserver"]).status === 0;
+      // WHY: Uses "command -v" (POSIX) instead of "which" (not POSIX, missing on Alpine).
+      const rgInstalled = require("child_process").spawnSync("sh", ["-lc", 'command -v "$1" 2>/dev/null', "--", "rg"], { encoding: "utf8", timeout: 5000 }).status === 0;
+      const zoektInstalled = require("child_process").spawnSync("sh", ["-lc", 'command -v "$1" 2>/dev/null', "--", "zoekt-webserver"], { encoding: "utf8", timeout: 5000 }).status === 0;
       lines.push(viz.metric("ripgrep (rg)", rgInstalled ? viz.status("ok", "installed") : viz.status("error", "missing")));
       lines.push(viz.metric("zoekt", zoektInstalled ? viz.status("ok", "installed") : viz.status("info", "not installed (optional)")));
 
