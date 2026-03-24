@@ -15,7 +15,9 @@ It is **not** a semantic code understanding engine, LSP, vector database, or IDE
 ```bash
 npm install          # install dependencies (chokidar, fast-glob, sql.js, @babel/parser)
 npm link             # make `sextant` globally available (`codebase-intel` still works as alias)
-npm test             # runs scripts/test-refresh.sh (refresh hook regression tests)
+npm test             # unit tests (node:test) + 5 bash integration scripts + eval harness
+npm run test:unit    # just the 178 unit tests (~590ms)
+npm run test:eval    # just the 19-query eval harness
 ```
 
 No build step. CommonJS throughout, no transpilation.
@@ -54,8 +56,8 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
 4. **Intel** (`lib/intel.js`) orchestrates everything — the central module (highest fan-in)
    - Per-root state management via `stateByRoot` Map
    - Serialized operations via `withQueue()` promise chain
-   - Debounced flushing for index, graph, and summary writes
-   - Auto-migrates stale index formats on load (INDEX_VERSION 2)
+   - Debounced flushing for graph and summary writes (graph.db is single source of truth)
+   - One-time migration of legacy `index.json` into graph.db on init
    - Separates re-exports from regular exports during indexing
 
 5. **Summary** (`lib/summary.js`) generates bounded markdown summaries (~2200 chars max)
@@ -97,6 +99,15 @@ The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12
 - `→ Xs` = when context was last sent to Claude
 - `← file` = last file watcher processed
 
+### CLI Commands (`commands/`)
+
+`bin/intel.js` is a slim ~100-line dispatcher. All command logic lives in `commands/*.js`:
+- Each file exports `{ run }` where `run` is `async function run(ctx)`
+- `ctx = { argv, roots, root, flags }` — `flags` has bound `flag(name)` and `hasFlag(name)` helpers
+- Hook commands (`hook-sessionstart.js`, `hook-refresh.js`) bypass `rootsFromArgs` and use `process.cwd()`
+- `scan.js` handles both `scan` and `rescan` (checks `ctx.argv[0]` for `pruneMissing`)
+- Shared utilities in `lib/cli.js`: `stripUnsafeXmlTags`, `getWatcherStatus`, `renderBanner`, `renderStatusLine`, `readStdinJson`, etc.
+
 ### Injection into Claude Code
 
 Two hooks (configured in project `.claude/settings.json` by `sextant init`):
@@ -108,13 +119,13 @@ Both emit under `<codebase-intelligence>` XML tag on stdout.
 ### Per-Repo State
 
 All state lives in `.planning/intel/` (never committed):
-- `graph.db` — SQLite dependency graph (files, imports, exports, reexports)
-- `index.json` — file metadata and import/export records (INDEX_VERSION 2)
+- `graph.db` — SQLite database: dependency graph + file metadata + resolution stats (single source of truth)
 - `summary.md` — the injected summary
 - `history.json` — health snapshots for sparkline trends
 - `.watcher_heartbeat` — watcher alive signal (mtime checked by statusline)
 - `.watcher_last_file` — last file the watcher processed
 - `.last_injected_hash.*` — per-session context dedupe hashes
+- `index.json.migrated` — legacy index.json renamed after one-time migration to graph.db
 
 ## Key Design Decisions
 
@@ -124,12 +135,14 @@ All state lives in `.planning/intel/` (never committed):
 - **Export-graph lookup**: queries the exports table to find which file exports a queried symbol, bypassing rg hit order entirely. Solves "common term in large repo" failures (React `useState`, etc.)
 - **Re-export chain tracing**: follows `export { X } from './Y'` chains through barrel files to find original definition. Uses the `reexports` table with BFS up to 5 hops.
 - **AST export extraction**: `@babel/parser` extracts exports from JS/TS (including re-exports with source specifiers). Falls back to regex on parse failure. Imports still use regex (96-100% accurate).
-- **Auto-migration**: stale index entries (v1 format with absolute-path keys or string imports) are detected and re-extracted transparently on load
+- **Auto-migration**: legacy index.json files are automatically migrated into graph.db on first init and renamed to `.migrated`. Stale v1 format entries (absolute-path keys, string imports) are flagged for re-extraction.
 - **Queue serialization**: all operations on a root are serialized through a promise chain to prevent concurrent SQLite access
 - **Summary is clamped**: hard-capped at ~2200 chars to stay within useful context budget
 - **Periodic heartbeats**: watcher pings every 30s even when idle — writing only on flush makes idle watchers look dead
 - **Entry point path exclusion**: `isEntryPoint()` rejects files in `fixtures/`, `tests/`, `examples/`, `demos/` etc. — prevents false positives from ranking above real results
 - **No redundant metrics**: don't display values that are always identical (e.g., indexed files vs graph nodes)
+- **graph.db is single source of truth**: index.json was eliminated — file metadata, imports, exports all live in SQLite. No more O(N) JSON.stringify per flush.
+- **Test fixtures cause false-positive imports**: regex extractors parse test files and find import specifiers inside string literals (e.g., `import("./lazy")` in a test assertion). This produces harmless unresolved imports in health output — 99% resolution with 1 false positive is clean.
 
 ## Eval Harness
 
@@ -141,7 +154,7 @@ node scripts/eval-retrieve.js --verbose   # hit lines + scoring signals
 node scripts/eval-retrieve.js --json      # machine-readable
 ```
 
-Current metrics: **MRR 0.963, nDCG 0.979, 19/19 pass.**
+Current metrics: **MRR 0.958, nDCG 0.951, 19/19 pass.**
 
 Cross-project validation (Express 142 files, Flask 83 files, React 4,337 files): all critical queries resolved correctly including React `useState` (via export-graph) and `createElement` (via re-export chain).
 
