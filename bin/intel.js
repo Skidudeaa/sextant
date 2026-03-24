@@ -260,8 +260,12 @@ Usage:
     if (!summary || !summary.trim()) process.exit(0);
 
     // stdout → Claude context
+    // WHY: Strip XML-closing-tag patterns as defense-in-depth — summary.md has
+    // xmlEscape at generation time, but a tampered file could inject a closing
+    // tag to break out of the wrapper. Full re-escape would double-encode.
+    const safeSummary = summary.trim().replace(/<\/?codebase-intelligence[^>]*>/gi, "");
     process.stdout.write(
-      `<codebase-intelligence>\n${summary.trim()}\n</codebase-intelligence>`
+      `<codebase-intelligence>\n${safeSummary}\n</codebase-intelligence>`
     );
 
     // stderr → visible to user in terminal
@@ -351,8 +355,9 @@ Usage:
     fs.writeFileSync(cachePath, h);
 
     // stdout → Claude context (only when changed)
+    const safeRefresh = summary.replace(/<\/?codebase-intelligence[^>]*>/gi, "");
     process.stdout.write(
-      `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${summary}\n</codebase-intelligence>`
+      `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${safeRefresh}\n</codebase-intelligence>`
     );
     process.exit(0);
   }
@@ -362,8 +367,9 @@ Usage:
     await intel.init(root);
     const summary = intel.readSummary(root);
     if (!summary || !summary.trim()) process.exit(0);
+    const safeInject = summary.trim().replace(/<\/?codebase-intelligence[^>]*>/gi, "");
     process.stdout.write(
-      `<codebase-intelligence>\n${summary.trim()}\n</codebase-intelligence>`
+      `<codebase-intelligence>\n${safeInject}\n</codebase-intelligence>`
     );
     process.exit(0);
   }

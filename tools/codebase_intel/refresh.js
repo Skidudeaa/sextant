@@ -63,8 +63,10 @@ async function main() {
   fs.writeFileSync(cachePath, h);
 
   // stdout -> Claude context
+  // WHY: Strip XML wrapper tags as defense-in-depth against tampered summary.md
+  const safe = summary.replace(/<\/?codebase-intelligence[^>]*>/gi, "");
   process.stdout.write(
-    `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${summary}\n</codebase-intelligence>`
+    `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${safe}\n</codebase-intelligence>`
   );
 }
 
