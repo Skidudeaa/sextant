@@ -10,7 +10,7 @@
     "codebase-intel": "bin/intel.js"
   },
   "scripts": {
-    "test": "bash scripts/test-refresh.sh"
+    "test": "bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && node scripts/eval-retrieve.js"
   },
   "dependencies": {
     "@babel/parser": "^7.29.2",

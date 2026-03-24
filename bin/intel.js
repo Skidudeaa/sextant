@@ -37,14 +37,9 @@ function getWatcherStatus(root) {
 }
 
 function getGitBranch(root) {
-  try {
-    const { execSync } = require("child_process");
-    return execSync("git rev-parse --abbrev-ref HEAD", {
-      cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
+  const { getGitInfo } = require("../lib/git");
+  const info = getGitInfo(root);
+  return info ? info.branch : null;
 }
 
 function getSearchBackend(root) {
@@ -168,49 +163,7 @@ function rootsFromArgs(argv) {
   return [process.cwd()];
 }
 
-function loadRepoConfig(root) {
-  const p = path.join(root, ".codebase-intel.json");
-  const defaults = {
-    globs: [
-      // JavaScript / TypeScript
-      "src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
-      "lib/**/*.{ts,tsx,js,jsx,mjs,cjs}",
-      "app/**/*.{ts,tsx,js,jsx,mjs,cjs}",
-      // Python
-      "**/*.py",
-    ],
-    ignore: [
-      "**/node_modules/**",
-      "**/.git/**",
-      "**/.planning/**",
-      "**/.claude/**",
-      "**/dist/**",
-      "**/build/**",
-      "**/.next/**",
-      // Python
-      "**/__pycache__/**",
-      "**/.venv/**",
-      "**/venv/**",
-      "**/.tox/**",
-      "**/site-packages/**",
-    ],
-    summaryEverySec: 5,
-  };
-
-  if (!fs.existsSync(p)) return defaults;
-  try {
-    const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
-    return {
-      globs: cfg.globs?.length ? cfg.globs : defaults.globs,
-      ignore: cfg.ignore?.length ? cfg.ignore : defaults.ignore,
-      summaryEverySec: Number.isFinite(cfg.summaryEverySec)
-        ? cfg.summaryEverySec
-        : defaults.summaryEverySec,
-    };
-  } catch {
-    return defaults;
-  }
-}
+const { loadRepoConfig } = require("../lib/config");
 
 async function readStdinJson() {
   return new Promise((resolve) => {
@@ -607,10 +560,10 @@ Usage:
 
       // State files
       lines.push(viz.header("State"));
-      const stateDir = path.join(rootAbs, ".planning", "intel");
-      const graphDb = path.join(stateDir, "graph.db");
-      const indexJson = path.join(stateDir, "index.json");
-      const summaryMd = path.join(stateDir, "summary.md");
+      const sd = path.join(rootAbs, ".planning", "intel");
+      const graphDb = path.join(sd, "graph.db");
+      const indexJson = path.join(sd, "index.json");
+      const summaryMd = path.join(sd, "summary.md");
       const claudeSettings = path.join(rootAbs, ".claude", "settings.json");
 
       lines.push(viz.metric("state dir", fs.existsSync(stateDir) ? viz.status("ok", stateDir) : viz.status("error", stateDir)));
