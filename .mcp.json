@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "sextant": {
+      "type": "stdio",
+      "command": "sextant",
+      "args": ["mcp"]
+    }
+  }
+}

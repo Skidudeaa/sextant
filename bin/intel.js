@@ -20,7 +20,8 @@ Usage:
   sextant hook refresh
   sextant inject
   sextant retrieve <query>
-  sextant zoekt <index|serve|search>`);
+  sextant zoekt <index|serve|search>
+  sextant mcp`);
   process.exit(exitCode);
 }
 
@@ -82,6 +83,13 @@ const commandMap = {
   if (cmd === "watch-stop") {
     const { run } = require("../commands/watch-stop");
     await run();
+    return;
+  }
+
+  // ---- mcp server: no roots parsing, long-running stdio ----
+  if (cmd === "mcp") {
+    const { startServer } = require("../mcp/server");
+    startServer();
     return;
   }
 
