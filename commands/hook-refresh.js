@@ -5,6 +5,13 @@ const intel = require("../lib/intel");
 const { deriveSessionKey } = require("../lib/session");
 const { stripUnsafeXmlTags, renderStatusLine, readStdinJson } = require("../lib/cli");
 
+// NOTE: This hook receives the user's prompt via stdin JSON (data.prompt) but
+// ignores it. It reads a static summary.md and re-injects it only when the
+// hash changes. The retrieval pipeline (lib/retrieve.js) — which does query-aware
+// ranked search using the graph — is never called here. The watcher keeps
+// graph.db fresh in real-time, but this hook never queries it.
+// See: project_retrieval_disconnect memory for full context.
+
 async function run() {
   const root = process.cwd();
   const summaryPath = path.join(root, ".planning", "intel", "summary.md");
