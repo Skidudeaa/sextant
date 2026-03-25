@@ -102,7 +102,9 @@ describe("shouldReindex conditions", () => {
   // assuming the binary check either passes or fails externally.
 
   it("returns false when reindex is already in progress", () => {
-    writeReindexState(tmpDir, { lastReindexMs: 0, inProgress: true });
+    // NOTE: inProgressSince must be recent to avoid the stuck-recovery logic
+    // clearing the flag (recovery triggers after 10 minutes)
+    writeReindexState(tmpDir, { lastReindexMs: 0, inProgress: true, inProgressSince: Date.now() });
     // Even with files changed, in-progress blocks reindex
     const result = shouldReindex(tmpDir, { filesChanged: 5 });
     assert.equal(result, false);

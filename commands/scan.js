@@ -75,14 +75,16 @@ async function run(ctx) {
 
     await intel.scan(r, globs, { ignore: cfg.ignore, pruneMissing, onProgress, force: forceReindex });
 
-    // WHY: Build Zoekt index after scan so search is ready immediately.
-    // Non-critical — log but don't fail the scan if Zoekt indexing fails.
-    if (zoekt.isInstalled()) {
-      try {
-        zoekt.buildIndex(r, { force: forceReindex });
-      } catch (err) {
-        process.stderr.write(`[sextant] zoekt index: ${err.message}\n`);
+    // WHY: Trigger Zoekt reindex after scan so search is ready soon.
+    // Uses triggerReindex (non-blocking background spawn) instead of buildIndex
+    // (synchronous spawnSync) to avoid blocking the scan for 10-60s on large repos.
+    try {
+      const { triggerReindex } = require("../lib/zoekt-reindex");
+      if (zoekt.isInstalled()) {
+        triggerReindex(r);
       }
+    } catch (err) {
+      process.stderr.write(`[sextant] zoekt reindex: ${err.message}\n`);
     }
   }
 }

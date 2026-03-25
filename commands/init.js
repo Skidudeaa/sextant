@@ -3,22 +3,23 @@ const path = require("path");
 const intel = require("../lib/intel");
 
 // WHY: .mcp.json registers the sextant MCP server with Claude Code.
-// Written once on init if it doesn't exist; never overwritten to avoid
-// clobbering user customizations to their MCP config.
-const MCP_TEMPLATE = {
-  mcpServers: {
-    sextant: {
-      type: "stdio",
-      command: "sextant",
-      args: ["mcp"],
-    },
-  },
+// Merges into existing file to avoid clobbering other MCP servers.
+const SEXTANT_MCP_ENTRY = {
+  type: "stdio",
+  command: "sextant",
+  args: ["mcp"],
 };
 
 function ensureMcpJson(root) {
   const p = path.join(root, ".mcp.json");
-  if (fs.existsSync(p)) return;
-  fs.writeFileSync(p, JSON.stringify(MCP_TEMPLATE, null, 2) + "\n");
+  let existing = {};
+  if (fs.existsSync(p)) {
+    try { existing = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+  }
+  if (existing?.mcpServers?.sextant) return; // already registered
+  existing.mcpServers = existing.mcpServers || {};
+  existing.mcpServers.sextant = SEXTANT_MCP_ENTRY;
+  fs.writeFileSync(p, JSON.stringify(existing, null, 2) + "\n");
 }
 
 async function run(ctx) {
