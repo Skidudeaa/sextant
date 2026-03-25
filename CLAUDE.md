@@ -77,6 +77,30 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
    - Auto-started by SessionStart hook when heartbeat is missing/stale
    - `watch-start`/`watch-stop` CLI commands, `/watch` slash command in Claude Code
 
+8. **Classifier** (`lib/classifier.js`) — heuristic prompt classification (<1ms)
+   - Decides whether a user prompt warrants code retrieval or static summary
+   - Positive signals: identifier shapes (+3), file paths (+4), technical questions (+3), action + code target (+3)
+   - Negative signals: very short with no identifiers (-3), git commands (-4), meta/conversational (-3)
+   - Threshold: score >= 3 triggers retrieval, 1-2 borderline (fewer results), <= 0 skips
+   - SKIP_TERMS set (~200 words): action verbs are signals for detection but noise for search terms
+
+9. **Graph Retrieval** (`lib/graph-retrieve.js`) — fast graph-only search for hooks (<50ms)
+   - Three layers: export-graph symbol lookup, re-export chain tracing, filename path matching
+   - No subprocesses — purely in-memory SQLite queries against graph.db
+   - Uses `graph.loadDb()` directly (not `intel.init()`) to avoid 90ms init overhead
+
+10. **Merge + Format** (`lib/merge-results.js`, `lib/format-retrieval.js`) — result fusion
+    - Merges graph structural results with Zoekt text search hits
+    - Graph hits get 1.4x authority boost, files in both sources get 1.2x fusion bonus
+    - Formats as compact markdown (~500-1000 chars) with file path, match reason, fan-in
+
+11. **MCP Server** (`mcp/server.js`) — JSON-RPC 2.0 over stdio, replaces standalone Zoekt MCP
+    - `sextant_search` — wraps full `retrieve()` pipeline (graph + zoekt + rg + scoring)
+    - `sextant_related` — calls `graph.neighbors()`
+    - `sextant_explain` — fan-in, exports, imports for a file
+    - `sextant_health` — index resolution, file count, age
+    - Registered per-project via `.mcp.json` by `sextant init`
+
 ### Visibility Model (CRITICAL — read this)
 
 There are three output channels. They go to different places:
@@ -91,7 +115,7 @@ There are three output channels. They go to different places:
 
 - Do NOT write user-facing UI to stderr in hooks — nobody sees it
 - The user's only visual indicator is the `statusLine` in `~/.claude/statusline-command.sh`
-- Claude's only input is the `<codebase-intelligence>` block on stdout
+- Claude's input comes via two XML tags on stdout: `<codebase-intelligence>` (static summary) and `<codebase-retrieval>` (query-aware results)
 
 The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12s ← config.py`
 - `◆` green/yellow/red = health
@@ -107,14 +131,19 @@ The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12
 - Hook commands (`hook-sessionstart.js`, `hook-refresh.js`) bypass `rootsFromArgs` and use `process.cwd()`
 - `scan.js` handles both `scan` and `rescan` (checks `ctx.argv[0]` for `pruneMissing`)
 - Shared utilities in `lib/cli.js`: `stripUnsafeXmlTags`, `getWatcherStatus`, `renderBanner`, `renderStatusLine`, `readStdinJson`, etc.
+- `sextant mcp` launches the MCP server (`mcp/server.js`) over stdio for Claude Code integration
 
 ### Injection into Claude Code
 
 Two hooks (configured in project `.claude/settings.json` by `sextant init`):
-- **SessionStart**: `sextant hook sessionstart` — injects summary + auto-starts watcher
-- **UserPromptSubmit**: `node tools/codebase_intel/refresh.js` — re-injects if summary changed (SHA-256 dedupe)
+- **SessionStart**: `sextant hook sessionstart` — injects static summary + auto-starts watcher (unchanged)
+- **UserPromptSubmit**: `sextant hook refresh` — query-aware retrieval pipeline:
+  1. Classifies prompt via `shouldRetrieve()` (<1ms)
+  2. If code-relevant: runs graph retrieval + Zoekt HTTP search in parallel (35-70ms)
+  3. Merges results, formats as compact markdown, dedupes via SHA-256, injects as `<codebase-retrieval>`
+  4. If not code-relevant or no results: falls back to static summary injection as `<codebase-intelligence>` (v1 behavior)
 
-Both emit under `<codebase-intelligence>` XML tag on stdout.
+Note: `tools/codebase_intel/refresh.js` is the legacy standalone script still deployed for backward compatibility. New installs use `sextant hook refresh`.
 
 ### Per-Repo State
 
@@ -124,7 +153,8 @@ All state lives in `.planning/intel/` (never committed):
 - `history.json` — health snapshots for sparkline trends
 - `.watcher_heartbeat` — watcher alive signal (mtime checked by statusline)
 - `.watcher_last_file` — last file the watcher processed
-- `.last_injected_hash.*` — per-session context dedupe hashes
+- `.last_injected_hash.summary.*` — per-session dedupe hashes for static summary injection
+- `.last_injected_hash.retrieval.*` — per-session dedupe hashes for query-aware retrieval injection
 - `index.json.migrated` — legacy index.json renamed after one-time migration to graph.db
 
 ## Key Design Decisions
@@ -143,6 +173,11 @@ All state lives in `.planning/intel/` (never committed):
 - **No redundant metrics**: don't display values that are always identical (e.g., indexed files vs graph nodes)
 - **graph.db is single source of truth**: index.json was eliminated — file metadata, imports, exports all live in SQLite. No more O(N) JSON.stringify per flush.
 - **Test fixtures cause false-positive imports**: regex extractors parse test files and find import specifiers inside string literals (e.g., `import("./lazy")` in a test assertion). This produces harmless unresolved imports in health output — 99% resolution with 1 false positive is clean.
+- **Query-aware hooks**: the UserPromptSubmit hook classifies prompts and runs graph + Zoekt retrieval for code-relevant prompts, falling back to static summary for non-code prompts
+- **Graph-only fast path**: graph-retrieve.js runs in <50ms with no subprocesses — purely in-memory SQLite queries. Used in hooks alongside Zoekt HTTP for the 200ms budget.
+- **Shared deadline**: zoekt.searchFast() uses a 180ms total budget, not stacked independent timeouts. Graph and Zoekt run in parallel.
+- **Separate cache namespaces**: retrieval and summary dedupe hashes use distinct files (`.last_injected_hash.retrieval.*` vs `.last_injected_hash.summary.*`) to prevent alternating code/non-code prompts from invalidating each other's dedupe.
+- **Sextant MCP server**: replaces standalone Python Zoekt MCP with graph-ranked search. Registered per-project via `.mcp.json`. Four tools: search, related, explain, health.
 
 ## Eval Harness
 
@@ -187,6 +222,7 @@ Built in a single intensive session. Key milestones:
 8. **Visibility model**: learned (the hard way) that stderr from hooks is invisible. Moved user-facing output to Claude Code's `statusLine` config.
 9. **Watcher lifecycle**: heartbeat file, auto-start from SessionStart hook, `/watch` slash command, `watch-start`/`watch-stop` CLI.
 10. **Repo split**: separated from GSD fork into independent `Skidudeaa/sextant` repo. Binary renamed to `sextant` with `codebase-intel` alias for backward compatibility.
+11. **Query-aware retrieval (v2)**: UserPromptSubmit hook now classifies prompts and runs graph + Zoekt search in parallel (35-70ms). Classifier, graph-retrieve, merge-results, format-retrieval pipeline. MCP server replaces standalone Python Zoekt MCP.
 
 ## What NOT to add
 

@@ -4,6 +4,7 @@ const fs = require("fs");
 
 const intel = require("./lib/intel");
 const viz = require("./lib/terminal-viz");
+const { shouldReindex, triggerReindex } = require("./lib/zoekt-reindex");
 
 // WHY: Heartbeat file lets hooks detect whether the watcher is running.
 // Written on start and after each flush.  Hooks read the mtime to
@@ -211,7 +212,14 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
         dashState.resolutionPct = cached.data.resolutionPct ?? cached.data.metrics?.resolutionPct ?? null;
         dashState.indexedFiles = cached.data.index?.files ?? cached.data.metrics?.indexedFiles ?? null;
       }
-      
+
+      // WHY: Piggyback on the flush cycle rather than adding a separate interval.
+      // Non-blocking: triggerReindex spawns a detached child and returns immediately.
+      // shouldReindex checks: binaries installed, 3min cooldown, not in progress, files changed.
+      if (shouldReindex(root, { filesChanged: files.length })) {
+        triggerReindex(root);
+      }
+
     }, 250);
 
     const w = chokidar.watch(globs, {

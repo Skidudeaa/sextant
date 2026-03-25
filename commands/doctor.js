@@ -108,6 +108,28 @@ async function run(ctx) {
   lines.push(viz.metric("ripgrep (rg)", rgInstalled ? viz.status("ok", "installed") : viz.status("error", "missing")));
   lines.push(viz.metric("zoekt", zoektInstalled ? viz.status("ok", "installed") : viz.status("info", "not installed (optional)")));
 
+  // Zoekt per-project index status
+  if (zoektInstalled) {
+    const zoektIdxDir = path.join(sd, "zoekt", "index");
+    let hasZoektShards = false;
+    try {
+      hasZoektShards = fs.existsSync(zoektIdxDir) && fs.readdirSync(zoektIdxDir).some(f => f.endsWith(".zoekt"));
+    } catch {}
+    lines.push(viz.metric("zoekt index", hasZoektShards ? viz.status("ok", "exists") : viz.status("warn", "missing (run sextant scan)")));
+
+    // Reindex state
+    const { readReindexState } = require("../lib/zoekt-reindex");
+    const reindexState = readReindexState(rootAbs);
+    if (reindexState.lastReindexMs > 0) {
+      const reindexAgeSec = Math.floor((Date.now() - reindexState.lastReindexMs) / 1000);
+      const reindexAgeStr = viz.ageStatus(reindexAgeSec, { warn: 600, danger: 3600 });
+      const statusStr = reindexState.inProgress ? viz.status("info", "in progress") : (reindexState.lastReindexOk === false ? viz.status("warn", "last run failed") : "");
+      lines.push(`  ${viz.c("last reindex".padEnd(18), viz.colors.dim)}${reindexAgeStr}  ${statusStr}`);
+    } else if (reindexState.inProgress) {
+      lines.push(viz.metric("reindex", viz.status("info", "in progress (first run)")));
+    }
+  }
+
   // Hints
   lines.push(viz.header("Hints"));
   if (!fs.existsSync(sd)) {

@@ -1,6 +1,7 @@
 const intel = require("../lib/intel");
 const { loadRepoConfig } = require("../lib/config");
 const { hasFlag } = require("../lib/cli");
+const zoekt = require("../lib/zoekt");
 
 async function run(ctx) {
   const pruneMissing = ctx.argv[0] === "rescan";
@@ -73,6 +74,16 @@ async function run(ctx) {
     };
 
     await intel.scan(r, globs, { ignore: cfg.ignore, pruneMissing, onProgress, force: forceReindex });
+
+    // WHY: Build Zoekt index after scan so search is ready immediately.
+    // Non-critical — log but don't fail the scan if Zoekt indexing fails.
+    if (zoekt.isInstalled()) {
+      try {
+        zoekt.buildIndex(r, { force: forceReindex });
+      } catch (err) {
+        process.stderr.write(`[sextant] zoekt index: ${err.message}\n`);
+      }
+    }
   }
 }
 
