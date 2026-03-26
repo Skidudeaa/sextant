@@ -117,6 +117,25 @@ async function run(ctx) {
     } catch {}
     lines.push(viz.metric("zoekt index", hasZoektShards ? viz.status("ok", "exists") : viz.status("warn", "missing (run sextant scan)")));
 
+    // Webserver status — check daemon.json, PID, and probe
+    const zoekt = require("../lib/zoekt");
+    const daemonPath = path.join(sd, "zoekt", "daemon.json");
+    let daemonInfo = null;
+    try { daemonInfo = JSON.parse(fs.readFileSync(daemonPath, "utf8")); } catch {}
+
+    if (daemonInfo?.pid && daemonInfo?.port) {
+      let pidAlive = false;
+      try { process.kill(daemonInfo.pid, 0); pidAlive = true; } catch {}
+
+      if (pidAlive) {
+        lines.push(viz.metric("webserver", viz.status("ok", `running (pid ${daemonInfo.pid}, port ${daemonInfo.port})`)));
+      } else {
+        lines.push(viz.metric("webserver", viz.status("warn", `stale (pid ${daemonInfo.pid} dead, port ${daemonInfo.port})`)));
+      }
+    } else {
+      lines.push(viz.metric("webserver", viz.status("warn", "not running (will start on next search)")));
+    }
+
     // Reindex state
     const { readReindexState } = require("../lib/zoekt-reindex");
     const reindexState = readReindexState(rootAbs);
