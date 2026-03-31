@@ -81,13 +81,13 @@ const path = require('path');
 const hbPath = path.join('$tmp', '.planning', 'intel', '.watcher_heartbeat');
 const stat = fs.statSync(hbPath);
 const ageSec = Math.floor((Date.now() - stat.mtimeMs) / 1000);
-// getWatcherStatus considers > 120s as not running
-if (ageSec < 120) {
-  console.error('Expected stale heartbeat (age ' + ageSec + 's), need >= 120s');
+// getWatcherStatus considers > 90s as not running (3x the 30s write interval)
+if (ageSec < 90) {
+  console.error('Expected stale heartbeat (age ' + ageSec + 's), need >= 90s');
   process.exit(1);
 }
 "
-echo "  stale heartbeat detection (>120s = not running): OK"
+echo "  stale heartbeat detection (>90s = not running): OK"
 
 # Test 7: Fresh heartbeat detected as running
 node -e "
@@ -100,12 +100,12 @@ const path = require('path');
 const hbPath = path.join('$tmp', '.planning', 'intel', '.watcher_heartbeat');
 const stat = fs.statSync(hbPath);
 const ageSec = Math.floor((Date.now() - stat.mtimeMs) / 1000);
-if (ageSec >= 120) {
-  console.error('Expected fresh heartbeat (age ' + ageSec + 's), need < 120s');
+if (ageSec >= 90) {
+  console.error('Expected fresh heartbeat (age ' + ageSec + 's), need < 90s');
   process.exit(1);
 }
 "
-echo "  fresh heartbeat detection (<120s = running): OK"
+echo "  fresh heartbeat detection (<90s = running): OK"
 
 # Test 8: Missing heartbeat detected as not running
 rm -f "$tmp/.planning/intel/.watcher_heartbeat"

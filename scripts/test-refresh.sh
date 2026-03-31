@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# WHY: Integration test for the UserPromptSubmit hook (sextant hook refresh).
+# Tests that the hook emits context on first call, dedupes on unchanged summary,
+# and emits again after summary content changes.
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
-SCRIPT="$ROOT/tools/codebase_intel/refresh.js"
 
 fail() {
   echo "FAIL: $1" >&2
@@ -12,7 +15,7 @@ fail() {
 run_refresh() {
   local dir="$1"
   local payload="$2"
-  (cd "$dir" && printf '%s' "$payload" | node "$SCRIPT")
+  (cd "$dir" && printf '%s' "$payload" | sextant hook refresh 2>/dev/null)
 }
 
 tmp="$(mktemp -d)"

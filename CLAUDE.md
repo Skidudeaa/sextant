@@ -16,7 +16,7 @@ It is **not** a semantic code understanding engine, LSP, vector database, or IDE
 npm install          # install dependencies (chokidar, fast-glob, sql.js, @babel/parser)
 npm link             # make `sextant` globally available (`codebase-intel` still works as alias)
 npm test             # unit tests (node:test) + 5 bash integration scripts + eval harness
-npm run test:unit    # just the 178 unit tests (~590ms)
+npm run test:unit    # unit tests (326+, ~900ms)
 npm run test:eval    # just the 19-query eval harness
 ```
 
@@ -26,7 +26,7 @@ No build step. CommonJS throughout, no transpilation.
 
 ```bash
 cd /path/to/project
-sextant init         # creates .planning/intel/, wires hooks into .claude/settings.json
+sextant init         # creates .planning/intel/, registers sextant MCP server in .mcp.json
 sextant scan --force # indexes files, builds dependency graph
 ```
 
@@ -68,7 +68,7 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
    - **Layer 1: rg text search** — two-phase (source files first, then docs/config), 5x raw limit
    - **Layer 2: Export-graph lookup** — queries exports table for each query term, injects files that export the symbol even if rg missed them
    - **Layer 3: Re-export chain tracing** — follows barrel-file re-exports to find original definition files
-   - **Scoring** (`lib/scoring.js`): exact symbol +40%, definition-site +25%, fan-in suppression, doc/test/vendor penalties
+   - **Scoring** (`lib/scoring.js` + `lib/retrieve.js`, constants in `lib/scoring-constants.js`): exact symbol +40% (scoring.js), definition-site +25% (retrieve.js) — these stack to +65% on the defining line. Additional: export match +10%, symbol-contains-query +12%, export line +5%, def line +3%, fan-in up to +15%, hotspot +15%, entry point +10%. Penalties: test −25%, doc −40%, vendor −50%, noise −8%/−15%. Fan-in suppression halves graph boost for non-definition files when a definition match exists.
    - **Health gating**: graph boosts disabled when resolution < 90%
 
 7. **Watcher** (`watch.js`) — chokidar file watcher with live dashboard
@@ -114,7 +114,7 @@ There are three output channels. They go to different places:
 **There is no channel that both the user and Claude see simultaneously.**
 
 - Do NOT write user-facing UI to stderr in hooks — nobody sees it
-- The user's only visual indicator is the `statusLine` in `~/.claude/statusline-command.sh`
+- The user's only visual indicator is the `statusLine` configured in `~/.claude/settings.json`, which runs `~/.claude/statusline-command.sh`. Note: sextant does not install this script — it must be set up manually.
 - Claude's input comes via two XML tags on stdout: `<codebase-intelligence>` (static summary) and `<codebase-retrieval>` (query-aware results)
 
 The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12s ← config.py`
@@ -125,9 +125,9 @@ The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12
 
 ### CLI Commands (`commands/`)
 
-`bin/intel.js` is a slim ~100-line dispatcher. All command logic lives in `commands/*.js`:
+`bin/intel.js` is a slim ~110-line dispatcher. All command logic lives in `commands/*.js`:
 - Each file exports `{ run }` where `run` is `async function run(ctx)`
-- `ctx = { argv, roots, root, flags }` — `flags` has bound `flag(name)` and `hasFlag(name)` helpers
+- `ctx = { argv, roots, root }` — commands import `flag(argv, name)` and `hasFlag(argv, name)` from `lib/cli.js`, calling them with `process.argv`
 - Hook commands (`hook-sessionstart.js`, `hook-refresh.js`) bypass `rootsFromArgs` and use `process.cwd()`
 - `scan.js` handles both `scan` and `rescan` (checks `ctx.argv[0]` for `pruneMissing`)
 - Shared utilities in `lib/cli.js`: `stripUnsafeXmlTags`, `getWatcherStatus`, `renderBanner`, `renderStatusLine`, `readStdinJson`, etc.
@@ -135,7 +135,7 @@ The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12
 
 ### Injection into Claude Code
 
-Two hooks (configured in project `.claude/settings.json` by `sextant init`):
+Two hooks (must be manually added to the project's `.claude/settings.json` — `sextant init` does not configure them):
 - **SessionStart**: `sextant hook sessionstart` — injects static summary + auto-starts watcher (unchanged)
 - **UserPromptSubmit**: `sextant hook refresh` — query-aware retrieval pipeline:
   1. Classifies prompt via `shouldRetrieve()` (<1ms)
@@ -143,7 +143,7 @@ Two hooks (configured in project `.claude/settings.json` by `sextant init`):
   3. Merges results, formats as compact markdown, dedupes via SHA-256, injects as `<codebase-retrieval>`
   4. If not code-relevant or no results: falls back to static summary injection as `<codebase-intelligence>` (v1 behavior)
 
-Note: `tools/codebase_intel/refresh.js` is the legacy standalone script still deployed for backward compatibility. New installs use `sextant hook refresh`.
+The legacy `tools/codebase_intel/refresh.js` standalone script has been removed. All installs use `sextant hook refresh`.
 
 ### Per-Repo State
 

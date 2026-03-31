@@ -87,7 +87,7 @@ The watcher auto-starts when a Claude Code session begins (via the SessionStart 
 
 **What the watcher actually monitors**: files matching the configured globs (`lib/**/*.js`, `src/**/*.ts`, `**/*.py` by default). If you're editing files outside those patterns (e.g., `bin/`, root-level scripts), the watcher won't see them. Add broader globs to `.codebase-intel.json` if needed.
 
-**Heartbeat**: the watcher writes `.planning/intel/.watcher_heartbeat` every 30 seconds and on each file-change flush. Status line reads this file's mtime. If it's > 120s old, watcher is considered dead.
+**Heartbeat**: the watcher writes `.planning/intel/.watcher_heartbeat` every 30 seconds and on each file-change flush. Status line reads this file's mtime. If it's > 90s old (3x the write interval), watcher is considered dead.
 
 ## Commands
 

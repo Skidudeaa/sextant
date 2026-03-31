@@ -18,10 +18,6 @@
           {
             "type": "command",
             "command": "sextant hook refresh"
-          },
-          {
-            "type": "command",
-            "command": "node tools/codebase_intel/refresh.js"
           }
         ]
       }

@@ -8,7 +8,7 @@ const { shouldReindex, triggerReindex } = require("./lib/zoekt-reindex");
 
 // WHY: Heartbeat file lets hooks detect whether the watcher is running.
 // Written on start and after each flush.  Hooks read the mtime to
-// determine watcher status (alive if < 60s old, stale otherwise).
+// determine watcher status (alive if < 90s old, stale otherwise).
 function writeHeartbeat(root, lastFile) {
   try {
     const dir = path.join(root, ".planning", "intel");

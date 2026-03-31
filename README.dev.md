@@ -78,7 +78,7 @@ Both emit under `<codebase-intelligence>` XML tag on stdout. Both write to stder
 1. **Auto-start**: SessionStart hook forks `sextant watch` if heartbeat missing
 2. **Heartbeat**: writes `.watcher_heartbeat` every 30s (periodic) and on each flush (activity)
 3. **Last file**: writes `.watcher_last_file` on each flush
-4. **Status**: statusline script reads heartbeat mtime. `< 120s` = alive, `> 120s` = dead
+4. **Status**: statusline script reads heartbeat mtime. `< 90s` = alive, `> 90s` = dead
 5. **Shutdown**: clears heartbeat on SIGINT/SIGTERM
 6. **Manual control**: `watch-start`, `watch-stop` CLI commands, `/watch` slash command in Claude Code
 
