@@ -114,7 +114,7 @@ There are three output channels. They go to different places:
 **There is no channel that both the user and Claude see simultaneously.**
 
 - Do NOT write user-facing UI to stderr in hooks — nobody sees it
-- The user's only visual indicator is the `statusLine` configured in `~/.claude/settings.json`, which runs `~/.claude/statusline-command.sh`. Note: sextant does not install this script — it must be set up manually.
+- The user's only visual indicator is the `statusLine` configured in `~/.claude/settings.json`, which runs `~/.claude/statusline-command.sh`. The script is shipped in `scripts/statusline-command.sh` (cross-platform, macOS + Linux).
 - Claude's input comes via two XML tags on stdout: `<codebase-intelligence>` (static summary) and `<codebase-retrieval>` (query-aware results)
 
 The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12s ← config.py`

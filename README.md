@@ -47,6 +47,26 @@ sextant init              # creates .planning/intel/, wires hooks, registers MCP
 sextant scan --force      # indexes files, builds dependency graph
 ```
 
+### Status line (optional but recommended)
+
+To see sextant status at the bottom of Claude Code, install the status line script:
+
+```bash
+cp /path/to/sextant/scripts/statusline-command.sh ~/.claude/statusline-command.sh
+```
+
+Then add to your global `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "command": "~/.claude/statusline-command.sh"
+  }
+}
+```
+
+Works on both macOS and Linux. Requires `jq` and optionally `sqlite3` for export counts.
+
 That's it. On the next Claude Code session:
 
 1. The **SessionStart hook** injects the codebase summary and starts the file watcher
