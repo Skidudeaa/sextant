@@ -1,156 +1,160 @@
-# Developer Notes
+# Developer Guide
 
-For maintaining and operating the system.
+For contributors and anyone working on sextant internals.
+See `README.md` for user docs, `CLAUDE.md` for the AI agent guide.
 
-## The visibility model (read this first)
+## Development Setup
 
-This is the single most confusing thing about the system. There are three output channels and they go to different places:
+```bash
+git clone https://github.com/Skidudeaa/sextant.git && cd sextant
+npm install && npm link && npm test
+```
 
-| Channel | Where it goes | What sees it |
-|---------|--------------|-------------|
-| Hook **stdout** | Injected as Claude context (`<system-reminder>`) | Claude only |
-| Hook **stderr** | Nowhere visible | Nobody (don't use for UI) |
-| **statusLine** config | Persistent line at bottom of Claude Code | User only |
+No build step. CommonJS throughout, no transpilation.
 
-**There is no channel that both the user and Claude see simultaneously.**
+## Testing
 
-The SessionStart hook writes a banner to stderr. Nobody sees it. It exists for manual debugging only. The actual user-facing indicator is the `statusLine` in `~/.claude/settings.json`, which runs a shell script that reads state files from `.planning/intel/`.
+| Command | What it runs |
+|---------|-------------|
+| `npm run test:unit` | 356 unit tests via `node:test` (~900ms) |
+| `npm run test:eval` | 19-query eval harness (MRR, nDCG, usefulness) |
+| `npm test` | Full suite: unit + 5 bash integration scripts + eval |
 
-If you're adding user-facing output, put it in the statusline script. If you're adding Claude-facing context, put it in hook stdout. If you write to stderr, you're writing to /dev/null with extra steps.
+Async test bodies must use `async` directly on `it()` -- wrapping in inner async IIFEs silently swallows failures.
 
-## Layout
+## Project Layout
 
 ```
-bin/intel.js              CLI entrypoint + hooks + banner/statusline renderers
+bin/intel.js              CLI dispatcher (~108 lines)
+commands/                 one file per command, exports { run }
 lib/
-  intel.js                orchestration (init/scan/update/health/auto-migrate)
-  retrieve.js             search + scoring + graph rerank + export-graph lookup
-  scoring.js              symbol detection, noise penalty, enhanced signals
-  resolver.js             import → file path resolution
-  graph.js                SQLite graph (files, imports, exports, reexports)
-  summary.js              bounded summary generation + health alerts
-  rg.js                   ripgrep backend (source-first two-phase, searchInFiles)
-  scope-finder.js         function/class scope context for hits
-  zoekt.js                Zoekt backend (optional)
-  utils.js                shared utilities (isEntryPoint, isIndexable, etc.)
-  terminal-viz.js         ANSI colors, bars, sparklines, box drawing
-  extractors/
-    javascript.js         JS/TS extractor (regex imports, AST exports via babel)
-    js_ast_exports.js     AST export extraction (@babel/parser)
-    python_ast.py         Python AST extractor
-    python.js             Node wrapper for python_ast.py
-    index.js              extractor registry
+  intel.js                orchestrator (highest fan-in)
+  graph.js                SQLite dependency graph (sql.js)
+  retrieve.js             three-layer ranked search (rg + exports + reexports)
+  scoring.js              hit-level scoring signals
+  scoring-constants.js    shared numeric weights (both retrieval paths)
+  graph-retrieve.js       fast hook-path retrieval (<50ms, no subprocesses)
+  classifier.js           heuristic prompt classification (<1ms)
+  merge-results.js        graph + zoekt result fusion
+  format-retrieval.js     compact markdown formatter
+  summary.js              bounded summary generation (~2200 chars)
+  resolver.js             import specifier -> file path resolution
+  rg.js                   ripgrep backend (source-first two-phase)
+  zoekt.js                Zoekt HTTP backend (optional)
+  cli.js                  shared CLI utilities
+  extractors/             JS/TS (regex imports, AST exports), Python (AST)
+mcp/server.js             JSON-RPC 2.0 MCP server (4 tools)
 watch.js                  chokidar file watcher + heartbeat + dashboard
+test/                     node:test unit tests
 scripts/
-  eval-retrieve.js        retrieval evaluation harness (19 cases)
+  eval-retrieve.js        retrieval eval harness (19 cases)
   eval-dataset.json       eval test cases
   setup.sh                one-command project deployment
-  test-refresh.sh         refresh hook regression tests
-~/.claude/
-  statusline-command.sh   status line script (reads intel state files)
-  commands/watch.md       /watch slash command definition
 ```
 
-## State files and what reads them
+## Visibility Model (CRITICAL)
 
-```
-.planning/intel/
-  graph.db                  ← graph.js (SQLite: files, imports, exports, reexports)
-  index.json                ← intel.js (file metadata, INDEX_VERSION 2)
-  summary.md                ← summary.js writes, hooks read, statusline reads
-  history.json              ← history.js (health trend snapshots)
-  .watcher_heartbeat        ← watch.js writes every 30s, statusline reads mtime
-  .watcher_last_file        ← watch.js writes on flush, statusline reads content
-  .last_injected_hash.*     ← refresh hook writes SHA-256, statusline reads mtime
-```
+| Channel | Destination | Audience |
+|---------|------------|----------|
+| Hook **stdout** | `<system-reminder>` context | Claude only |
+| Hook **stderr** | Nowhere | Nobody |
+| **statusLine** in settings.json | Bottom of Claude Code | User only |
 
-## Hooks
+**No channel reaches both the user and Claude simultaneously.**
+User-facing output goes in the statusline script. Claude-facing context goes on hook stdout. stderr is `/dev/null` with extra steps.
 
-Wired into project `.claude/settings.json` by `init`:
+## Hook Lifecycle
 
-- **SessionStart**: reads summary.md → stdout (Claude context). Also auto-starts watcher if heartbeat is missing/stale.
-- **UserPromptSubmit**: reads summary.md → compares SHA-256 hash to last injection → stdout only if changed.
+Two hooks wired into project `.claude/settings.json` by `sextant init`:
 
-Both emit under `<codebase-intelligence>` XML tag on stdout. Both write to stderr too (banner/status line) but **nobody sees stderr** — it's there for `2>&1` debugging.
+**SessionStart** (`hook-sessionstart.js`): emits `summary.md` as `<codebase-intelligence>`. Auto-starts watcher if heartbeat missing/stale (>90s).
 
-## Watcher lifecycle
+**UserPromptSubmit** (`hook-refresh.js`): classifies prompt (<1ms) then either runs graph+Zoekt retrieval in parallel (35-70ms, 180ms shared deadline) and emits `<codebase-retrieval>`, or falls back to static summary. Results deduped via SHA-256.
 
-1. **Auto-start**: SessionStart hook forks `sextant watch` if heartbeat missing
-2. **Heartbeat**: writes `.watcher_heartbeat` every 30s (periodic) and on each flush (activity)
-3. **Last file**: writes `.watcher_last_file` on each flush
-4. **Status**: statusline script reads heartbeat mtime. `< 90s` = alive, `> 90s` = dead
+## Watcher Lifecycle
+
+1. **Auto-start**: SessionStart hook forks `sextant watch` when heartbeat missing/stale
+2. **Heartbeat**: writes `.watcher_heartbeat` every 30s (periodic) + on each flush
+3. **Flush**: re-extracts changed files, updates graph.db, writes `.watcher_last_file`
+4. **Stale detection**: heartbeat mtime > 90s = watcher considered dead
 5. **Shutdown**: clears heartbeat on SIGINT/SIGTERM
-6. **Manual control**: `watch-start`, `watch-stop` CLI commands, `/watch` slash command in Claude Code
 
-**Gotcha**: watcher only monitors files matching configured globs. Root-level files and `bin/` are NOT in default globs.
+## Scoring Pipeline
 
-## Health semantics
+All weights live in `lib/scoring-constants.js`. Both `retrieve.js` and `graph-retrieve.js` import from there.
 
-- Resolution >= 90%: graph boosts enabled
-- Resolution < 90%: graph boosts gated (degrade, don't guess)
-- Large index age: watcher not running or globs don't cover changed files
-
-## Index auto-migration
-
-`INDEX_VERSION` tracks format changes. On load, `migrateIndexIfNeeded()`:
-- Normalizes absolute-path keys to relative
-- Clears stale string imports, zeroes mtime to force re-extraction
-- `initUnlocked()` re-extracts affected files immediately
-- No manual rescan needed
-
-## Scoring signals
-
-| Signal | Weight | Where |
-|--------|--------|-------|
+| Signal | Weight | Module |
+|--------|--------|--------|
 | `exact_symbol` | +40% | scoring.js |
 | `def_site_priority` | +25% | retrieve.js |
-| `export-graph lookup` | inject | retrieve.js — queries exports table, injects missing files |
-| `re-export chain` | inject | retrieve.js — follows barrel files via reexports table |
 | `hotspot` | +15% | retrieve.js |
 | `symbol_contains_query` | +12% | scoring.js |
 | `export_match` | +10% | scoring.js |
-| `entrypoint` | +10% | retrieve.js (path-excluded: fixtures/tests/examples) |
-| `doc` | -40% | retrieve.js |
+| `entry_point` | +10% | retrieve.js |
+| `python_public` | +8% | scoring.js |
+| `export_line` | +5% | scoring.js |
+| `docstring_match` | +5% | scoring.js |
+| `def_line` | +3% | scoring.js |
+| `fan_in` | up to +15% | retrieve.js (log1p scaled, capped) |
 | `test` | -25% | retrieve.js |
+| `doc` | -40% | retrieve.js |
 | `vendor` | -50% | retrieve.js |
-| `fanin_suppressed` | -50% of graph boost | retrieve.js — when def match exists elsewhere |
+| `noise_mid` | -8% | scoring.js (noise ratio > 0.5) |
+| `noise_high` | -15% | scoring.js (noise ratio > 0.7) |
+| `fan_in_suppression` | halves fan-in boost | retrieve.js (when def match exists elsewhere) |
 
-## rg two-phase collection
+Graph-retrieve base scores (absolute points before fan-in): exported_symbol=100, reexport_chain=80, path_match=60.
 
-Phase 1: source files only (`.js`, `.py`, `.go`, `.rs`, etc.) — prevents changelogs from eating the budget.
-Phase 2: remaining capacity filled with docs/config.
-Raw limit: 5x `maxHits`.
+Merge layer: graph hits get 1.4x authority boost, files in both graph+zoekt get 1.2x fusion bonus.
 
-## Eval harness
+## State Files
 
-```bash
-node scripts/eval-retrieve.js             # terminal
-node scripts/eval-retrieve.js --verbose   # hit details + signals
-node scripts/eval-retrieve.js --json      # machine-readable
-```
+| File | Writer | Reader | Purpose |
+|------|--------|--------|---------|
+| `graph.db` | intel.js, watch.js | graph.js, graph-retrieve.js | SQLite dependency graph (single source of truth) |
+| `summary.md` | summary.js | hook-sessionstart.js, hook-refresh.js | Static summary injected to Claude |
+| `history.json` | history.js | summary.js | Health trend snapshots for sparklines |
+| `.watcher_heartbeat` | watch.js (every 30s) | statusline, hook-sessionstart.js | Watcher alive signal (mtime-based) |
+| `.watcher_last_file` | watch.js (on flush) | statusline | Last file the watcher processed |
+| `.last_injected_hash.summary.*` | hook-sessionstart.js, hook-refresh.js | same | Per-session SHA-256 dedupe for static summary |
+| `.last_injected_hash.retrieval.*` | hook-refresh.js | same | Per-session SHA-256 dedupe for retrieval results |
 
-19 cases, 7 categories. Measures P@k, MRR, nDCG, usefulness, graph lift.
+All state lives in `.planning/intel/` per repo (never committed).
 
-Current: MRR 0.963, nDCG 0.979, 19/19 pass.
+## Health Semantics
+
+- **Resolution >= 90%**: graph boosts enabled | **< 90%**: graph boosts gated off
+- **Index age > 300s**: `ALERT:` emitted in summary
+- **Heartbeat > 90s**: watcher considered dead, auto-restarted by SessionStart
 
 ## Debugging
 
 ```bash
-sextant doctor                          # full diagnosis
-sextant health                          # raw metrics JSON
-sextant summary                         # what Claude receives
-node scripts/eval-retrieve.js --verbose        # scoring debug per query
-ls -la .planning/intel/.watcher_heartbeat      # watcher alive?
-cat .planning/intel/.watcher_last_file         # last file processed
-ls -la .planning/intel/.last_injected_hash.*   # when was context last sent?
+sextant doctor                            # full diagnosis
+sextant health --pretty                   # formatted metrics
+sextant summary                           # what Claude receives
+node scripts/eval-retrieve.js --verbose   # scoring debug per query
+ls -la .planning/intel/.watcher_heartbeat # watcher alive?
 ```
 
-## What not to add
+## Adding a New Command
 
-- Embeddings or vector search
-- LLM calls in the pipeline
-- Semantic claims (LSP-like)
-- Summaries > 2200 chars
-- UI that writes to stderr in hooks (nobody sees it)
+1. Create `commands/foo.js` exporting `async function run(ctx)` as `{ run }`
+2. `ctx` has `{ argv, roots, root }` -- import `flag`/`hasFlag` from `lib/cli.js`
+3. Add `foo: "../commands/foo"` to `commandMap` in `bin/intel.js`
+4. Commands that skip roots parsing (hooks, etc.) get an early-exit block instead
 
-Use eval metrics to justify changes.
+## Design Principles
+
+See `DESIGN_PHILOSOPHY.md`. In brief:
+
+1. **Orientation > intelligence** -- small factual map over large speculative one
+2. **Drift must be loud** -- resolution %, index age, ranking all degrade visibly
+3. **Evidence != structure** -- rg/Zoekt = evidence, graph = structure, reranking combines them
+4. **Degrade, don't guess** -- unresolved imports recorded and surfaced, never fabricated
+5. **Session boundaries matter** -- before the first prompt is the critical moment
+6. **Reusability > cleverness** -- one global tool, per-repo state, explicit commands
+
+## Anti-Goals
+
+Do not add: embeddings/vector search, LLM calls in the pipeline, semantic claims (LSP-like), summaries > 2200 chars, UI that writes to stderr in hooks. Use eval metrics (MRR, nDCG, usefulness) to justify scoring or retrieval changes.

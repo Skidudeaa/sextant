@@ -51,6 +51,15 @@ Fixes: exact_symbol +25%→+40%, definition-site priority +25%, fan-in suppressi
 
 Fixes: two-phase rg (source files first), doc penalty (-40%), CommonJS pattern recognition, Python entry points, Python def/class in definition detection.
 
+### v3 → v4: Scoring consolidation + hook-path suppression
+
+| Metric | v3 | v4 | Delta |
+|--------|-----|-----|-------|
+| MRR | 0.935 | 0.956 | +0.021 |
+| nDCG | 0.969 | 0.949 | -0.020 |
+
+Fixes: scoring constants extracted to shared `scoring-constants.js` module, graph-retrieve.js fan-in normalized from absolute points to relative %, definition-site suppression added to hook path. MRR improved; nDCG trade-off from tighter suppression of non-definition files.
+
 ---
 
 ## Cross-Project Validation
@@ -72,13 +81,15 @@ Tested cold-start against three real projects:
 | Express "createApplication" | #1 definition | **#1 definition** |
 | Express "logerror" | #1 definition | **#1 definition** |
 
-### Known limitation
+### React "useState" — FIXED
 
-React "useState" (716 source files match) — definition file doesn't reach the scorer within raw limits. Would require export-graph-based symbol lookup.
+React "useState" (716 source files match) — previously failed because definition file couldn't reach the scorer within rg raw limits. Fixed by export-graph symbol lookup (milestone 5): queries the exports table directly, bypassing rg hit order.
 
 ---
 
 ## Harness Metrics
+
+Current (v4): **19/19 pass, MRR 0.956, nDCG 0.949, Mean P@k 0.635, Mean Useful 0.917, Graph Lift nDCG +0.011**
 
 - **P@k**: fraction of top-k results that are relevant
 - **MRR**: reciprocal rank of primary relevant file (capped at rank 10)
@@ -94,6 +105,7 @@ React "useState" (716 source files match) — definition file doesn't reach the 
 
 ## Next Steps
 
-1. **Export-graph symbol lookup** — use the existing exports table to find which file exports a queried symbol, boosting it regardless of rg hit order. Would fix the "useState" class of failures.
-2. **Entry point refinement** — current heuristic (`index.js`, `app.py`) triggers on fixtures/examples. Consider gating on fan-in or path depth.
-3. **Template string imports** — regex extractor silently misses `require(\`./\${name}\`)`. Would need AST-based JS extraction or heuristic fallback.
+1. ~~**Export-graph symbol lookup**~~ — DONE. Queries exports table for each query term, injects files rg missed.
+2. ~~**Entry point refinement**~~ — DONE. Path exclusion for fixtures/tests/examples + entry point demoted from sort key to +10% scoring signal.
+3. ~~**Re-export chain tracing**~~ — DONE. BFS through `reexports` table up to 5 hops, follows barrel-file chains to original definition.
+4. **Template string imports** — regex extractor silently misses `require(\`./\${name}\`)`. Would need AST-based JS extraction or heuristic fallback.
