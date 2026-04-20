@@ -3,7 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const intel = require("../lib/intel");
 const { deriveSessionKey } = require("../lib/session");
-const { stripUnsafeXmlTags, renderStatusLine, readStdinJson } = require("../lib/cli");
+const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, refreshSummaryAge } = require("../lib/cli");
 const { shouldRetrieve } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
 const { formatRetrieval } = require("../lib/format-retrieval");
@@ -44,8 +44,12 @@ function injectStaticSummary(root, data) {
 
   if (!fs.existsSync(summaryPath)) return;
 
-  const summary = tryReadFile(summaryPath);
-  if (!summary) return;
+  const rawSummary = tryReadFile(summaryPath);
+  if (!rawSummary) return;
+
+  // WHY: summary.md's "index age Xs" is baked in at write time; refresh against
+  // the current graph.db mtime so we don't lie to Claude about freshness.
+  const summary = refreshSummaryAge(rawSummary, root);
 
   const sessionKey = deriveSessionKey(data);
   const cachePath = path.join(

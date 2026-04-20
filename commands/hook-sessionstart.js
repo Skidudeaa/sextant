@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const intel = require("../lib/intel");
-const { stripUnsafeXmlTags, getWatcherStatus, renderBanner, readStdinJson } = require("../lib/cli");
+const { stripUnsafeXmlTags, getWatcherStatus, renderBanner, readStdinJson, refreshSummaryAge } = require("../lib/cli");
 
 async function run() {
   const root = process.cwd();
@@ -10,8 +10,13 @@ async function run() {
   if (src && !["startup", "resume"].includes(src)) process.exit(0);
 
   await intel.init(root);
-  const summary = intel.readSummary(root);
-  if (!summary || !summary.trim()) process.exit(0);
+  const rawSummary = intel.readSummary(root);
+  if (!rawSummary || !rawSummary.trim()) process.exit(0);
+
+  // WHY: summary.md bakes "index age Xs" at write time. Without this refresh,
+  // re-injection still reads "0s" even when graph.db is days old — a trust
+  // violation that tells Claude data is fresh when it isn't.
+  const summary = refreshSummaryAge(rawSummary, root);
 
   // stdout → Claude context
   const safeSummary = stripUnsafeXmlTags(summary.trim());

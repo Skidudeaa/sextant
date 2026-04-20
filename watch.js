@@ -28,6 +28,60 @@ function clearHeartbeat(root) {
   } catch {}
 }
 
+// WHY: Heartbeat-based dedup is racy — during a new watcher's 100ms init window
+// it hasn't written heartbeat yet, so a concurrent SessionStart sees stale heartbeat
+// and spawns another. This caused 17+ zombie watchers (7 GB RSS) to accumulate over
+// weeks. An atomic PID lockfile at the watcher's own startup prevents duplicates at
+// the source: second spawner loses the `wx` race and exits cleanly.
+function pidLockPath(root) {
+  return path.join(root, ".planning", "intel", ".watcher.pid");
+}
+
+function isPidAlive(pid) {
+  if (!pid || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0); // signal 0 = liveness probe, doesn't actually send
+    return true;
+  } catch (e) {
+    // ESRCH = no such process; EPERM = exists but we can't signal it (still alive)
+    return e.code === "EPERM";
+  }
+}
+
+// Returns true on successful claim, false if another live watcher holds the lock.
+function claimPidLock(root) {
+  const lockPath = pidLockPath(root);
+  try {
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  } catch {}
+  while (true) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      fs.writeSync(fd, String(process.pid));
+      fs.closeSync(fd);
+      return true;
+    } catch (e) {
+      if (e.code !== "EEXIST") return false;
+      // Lockfile exists — check if holder is alive
+      let holderPid = null;
+      try {
+        holderPid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+      } catch {}
+      if (isPidAlive(holderPid) && holderPid !== process.pid) return false;
+      // Stale lock — remove and retry
+      try { fs.unlinkSync(lockPath); } catch {}
+    }
+  }
+}
+
+function releasePidLock(root) {
+  const lockPath = pidLockPath(root);
+  try {
+    const holderPid = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+    if (holderPid === process.pid) fs.unlinkSync(lockPath);
+  } catch {}
+}
+
 function debounce(fn, ms) {
   let t = null;
   return (...args) => {
@@ -137,8 +191,18 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
   const dashboardStates = [];
   const heartbeatIntervals = [];
   const healthCache = new Map(); // root -> { data, ts }
+  const lockedRoots = [];
 
   for (const root of roots) {
+    // WHY: Claim the PID lockfile before any expensive init. If another watcher
+    // already owns this root, exit cleanly rather than accumulating duplicates.
+    if (!claimPidLock(root)) {
+      process.stderr.write(`[intel] ${root}: another watcher holds the lock — exiting\n`);
+      for (const r of lockedRoots) releasePidLock(r);
+      process.exit(0);
+    }
+    lockedRoots.push(root);
+
     const cfg = loadRepoConfig(root);
     const globs = cfg.globs;
     const ignored = cfg.ignore;
@@ -290,6 +354,7 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
     }
     for (const iv of heartbeatIntervals) clearInterval(iv);
     for (const r of roots) clearHeartbeat(r);
+    for (const r of lockedRoots) releasePidLock(r);
     process.exit(0);
   };
 
@@ -299,7 +364,15 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
   await new Promise(() => {});
 }
 
-module.exports = { watchRoots, writeHeartbeat, clearHeartbeat };
+module.exports = {
+  watchRoots,
+  writeHeartbeat,
+  clearHeartbeat,
+  claimPidLock,
+  releasePidLock,
+  isPidAlive,
+  pidLockPath,
+};
 
 // Standalone runner (optional)
 if (require.main === module) {

@@ -3,7 +3,9 @@ const path = require("path");
 
 async function run() {
   const root = process.cwd();
-  const hbPath = path.join(root, ".planning", "intel", ".watcher_heartbeat");
+  const dir = path.join(root, ".planning", "intel");
+  const hbPath = path.join(dir, ".watcher_heartbeat");
+  const lockPath = path.join(dir, ".watcher.pid");
   // Find and kill the watcher process
   try {
     const { execSync } = require("child_process");
@@ -14,6 +16,9 @@ async function run() {
       }
     }
     if (fs.existsSync(hbPath)) fs.unlinkSync(hbPath);
+    // WHY: SIGTERM handler in watch.js releases the lock, but if the watcher was
+    // killed hard (SIGKILL) or crashed the lockfile can linger. Remove defensively.
+    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
     console.log("watcher stopped");
   } catch {
     console.log("no watcher running");
