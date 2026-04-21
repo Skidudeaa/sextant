@@ -76,6 +76,52 @@ describe("extractSymbolDef", () => {
   it("CommonJS exports.X assignment", () => {
     assert.equal(extractSymbolDef("exports.resolveImport = function resolveImport(root) {"), "resolveImport");
   });
+
+  // WHY: these tests lock in the JS/TS value-const pattern so future regex
+  // edits don't silently regress it.  The motivating case is queries like
+  // "resolutionPct" where the defining site is `const resolutionPct =
+  // computeValue(...)` rather than a function declaration.
+  describe("JS/TS value const/let/var", () => {
+    it("recognizes const value assignments", () => {
+      assert.equal(
+        extractSymbolDef("const resolutionPct = localTotal > 0 ? Math.round(n) : 100;"),
+        "resolutionPct"
+      );
+    });
+
+    it("recognizes let and var assignments", () => {
+      assert.equal(extractSymbolDef("let counter = 0"), "counter");
+      assert.equal(extractSymbolDef("var legacyVal = something()"), "legacyVal");
+    });
+
+    it("recognizes TypeScript-typed const", () => {
+      assert.equal(extractSymbolDef("const max: number = 42"), "max");
+      assert.equal(extractSymbolDef("const cfg: Config = loadConfig();"), "cfg");
+    });
+
+    it("recognizes export const", () => {
+      assert.equal(extractSymbolDef("export const HIT_COUNT_WEIGHT = 0.075;"), "HIT_COUNT_WEIGHT");
+    });
+
+    it("REJECTS require() RHS so imports aren't mis-flagged as defs", () => {
+      assert.equal(extractSymbolDef("const scoring = require('./scoring');"), null);
+      assert.equal(extractSymbolDef("const path = require(\"path\");"), null);
+    });
+
+    it("REJECTS import() RHS", () => {
+      assert.equal(extractSymbolDef("const lazy = import('./lazy')"), null);
+    });
+
+    it("REJECTS destructuring (no single defined symbol on the line)", () => {
+      assert.equal(extractSymbolDef("const { a, b } = obj"), null);
+      assert.equal(extractSymbolDef("const [x, y] = arr"), null);
+    });
+
+    it("does not interfere with existing arrow-function pattern", () => {
+      // Arrow functions must still extract as "rerankFiles", not lose the match.
+      assert.equal(extractSymbolDef("const rerankFiles = (files) => files"), "rerankFiles");
+    });
+  });
 });
 
 describe("computeEnhancedSignals", () => {
