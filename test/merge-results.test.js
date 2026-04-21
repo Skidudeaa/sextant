@@ -209,3 +209,56 @@ describe("mergeResults — empty results", () => {
     assert.deepEqual(result.files, []);
   });
 });
+
+// ─── Term-coverage bonus on multi-term queries ─────────────────────
+
+describe("mergeResults — term coverage bonus", () => {
+  const { termCoverageBonus, MULTI_TERM_LINE_BONUS } = require("../lib/merge-results");
+
+  it("termCoverageBonus returns 0 for single-term queries", () => {
+    assert.equal(termCoverageBonus("function foo()", ["foo"]), 0);
+  });
+
+  it("termCoverageBonus returns 0 when zero or one term matches on the line", () => {
+    assert.equal(termCoverageBonus("const x = 1;", ["foo", "bar"]), 0);
+    assert.equal(termCoverageBonus("const foo = 1;", ["foo", "bar"]), 0);
+  });
+
+  it("termCoverageBonus awards (matched-1) * BONUS for multi-term line", () => {
+    // Line matches both query terms → bonus = (2-1) * 15 = 15
+    assert.equal(
+      termCoverageBonus("function extractImports()", ["extractImports", "function"]),
+      MULTI_TERM_LINE_BONUS
+    );
+    // Line matches 3 of 3 terms → bonus = (3-1) * 15 = 30
+    assert.equal(
+      termCoverageBonus("async function extractImports()", ["async", "function", "extractImports"]),
+      2 * MULTI_TERM_LINE_BONUS
+    );
+  });
+
+  it("multi-term line beats single-term line for same file", () => {
+    // Simulates two zoekt hits for the same file: one line has both terms,
+    // the other only one.  mergeResults keeps the best representative per
+    // file — the def line must win.
+    const zoektHits = [
+      { path: "a.js", lineNumber: 10, line: "foo();", score: 500 },
+      { path: "a.js", lineNumber: 20, line: "function foo() {}", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["foo", "function"] });
+    // Representative line should be the def (line 20) because it matches both
+    // terms and got +15 bonus — not line 10 which matches only "foo".
+    assert.equal(result.files[0].zoektHit.lineNumber, 20);
+  });
+
+  it("applies no bonus when queryTerms is missing or empty", () => {
+    const zoektHits = [
+      { path: "a.js", lineNumber: 10, line: "function foo bar", score: 500 },
+      { path: "a.js", lineNumber: 20, line: "plain foo", score: 501 },
+    ];
+    // Without queryTerms, plain sort by raw score → line 20 wins (higher
+    // raw score).  The def-style line 10 does NOT get bumped.
+    const result = mergeResults({ files: [] }, zoektHits);
+    assert.equal(result.files[0].zoektHit.lineNumber, 20);
+  });
+});

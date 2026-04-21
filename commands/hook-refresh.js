@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const intel = require("../lib/intel");
 const { deriveSessionKey } = require("../lib/session");
 const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, refreshSummaryAge } = require("../lib/cli");
-const { shouldRetrieve } = require("../lib/classifier");
+const { shouldRetrieve, hasIdentifierShape } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
 const { formatRetrieval } = require("../lib/format-retrieval");
 
@@ -142,11 +142,24 @@ async function run() {
     }
   })();
 
+  // WHY: Zoekt's default syntax treats space-separated tokens as a conjunction
+  // at the document level.  For a query like "extractImports function", it
+  // returns only files that contain BOTH terms — which is usually a single
+  // hub file (e.g. intel.js, which has dozens of `function` keywords AND
+  // imports extractImports once) and excludes the actual definition files
+  // (extractor.js, extractors/javascript.js) whose only `function` occurrence
+  // is the def line itself.  Filter to identifier-shaped terms for the zoekt
+  // query when any exist — those are the signal; plain words like "function"
+  // are grammatical filler that drown the real symbols.  Graph retrieval
+  // still uses all terms (cheap, covers the "concept" case).
+  const identifierTerms = classification.terms.filter(hasIdentifierShape);
+  const zoektQuery = (identifierTerms.length > 0 ? identifierTerms : classification.terms).join(" ");
+
   const zoektPromise = (async () => {
     try {
       const zoektResult = await require("../lib/zoekt").searchFast(
         root,
-        classification.terms.join(" ")
+        zoektQuery
       );
       zoektHits = (zoektResult && zoektResult.hits) || [];
     } catch {
@@ -159,7 +172,7 @@ async function run() {
   // 4. Merge
   let merged;
   try {
-    merged = mergeResults(graphResults, zoektHits);
+    merged = mergeResults(graphResults, zoektHits, { queryTerms: classification.terms });
   } catch {
     merged = { files: [] };
   }
