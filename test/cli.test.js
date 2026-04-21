@@ -200,12 +200,13 @@ describe("refreshSummaryAge", () => {
   });
 
   it("inserts a stale ALERT when newly-computed age exceeds 24h and none is present", () => {
-    // WHY: refresh must not silently drop the ALERT summary.js would have
-    // written at generation time for stale data.
+    // WHY: refresh owns the stale alert end-to-end — summary.js no longer
+    // emits it at write time because it doesn't know the watcher state.
     const generated = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
     const input = buildSummary({ generatedAt: generated, age: "10s" });
     const out = refreshSummaryAge(input);
-    assert.match(out, /^ALERT: INDEX STALE -- last update 48\.0h ago \(watcher dead\?\)$/m);
+    // No root passed → watcher treated as not running.
+    assert.match(out, /^ALERT: INDEX STALE -- last update 48\.0h ago \(watcher not running — run: sextant watch-start\)$/m);
     // Must remain above the `## Codebase intelligence` block
     const alertIdx = out.indexOf("ALERT: INDEX STALE");
     const headerIdx = out.indexOf("## Codebase intelligence");
@@ -218,6 +219,15 @@ describe("refreshSummaryAge", () => {
     const out = refreshSummaryAge(input);
     const alertCount = (out.match(/^ALERT: INDEX STALE/gm) || []).length;
     assert.equal(alertCount, 1);
+  });
+
+  it("strips a previously-baked stale ALERT when data is now fresh", () => {
+    // Summary written when stale (alert baked in), watcher then flushed and
+    // updated Generated: to something recent.  The alert must go away.
+    const generated = new Date(Date.now() - 60_000).toISOString();
+    const input = buildSummary({ generatedAt: generated, age: "10s", withAlert: true });
+    const out = refreshSummaryAge(input);
+    assert.doesNotMatch(out, /ALERT: INDEX STALE/);
   });
 
   it("places stale ALERT below an existing HEALTH FAIL ALERT, above the header", () => {
