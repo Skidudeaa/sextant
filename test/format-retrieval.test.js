@@ -175,7 +175,7 @@ describe("formatRetrieval — empty results", () => {
 // ─── Tool reminder ──────────────────────────────────────────────────
 
 describe("formatRetrieval — tool reminder", () => {
-  it("includes sextant search tool reminder at the end", () => {
+  it("includes sextant_search MCP tool reminder at the end", () => {
     const merged = {
       files: [
         {
@@ -190,10 +190,10 @@ describe("formatRetrieval — tool reminder", () => {
     };
 
     const output = formatRetrieval(merged);
-    assert.ok(output.endsWith("Use `sextant search` for deeper code search."));
+    assert.ok(output.endsWith("Use the `sextant_search` MCP tool for deeper code search."));
   });
 
-  it("tool reminder is present even with single file", () => {
+  it("tool reminder references the actual MCP tool name", () => {
     const merged = {
       files: [
         {
@@ -208,6 +208,8 @@ describe("formatRetrieval — tool reminder", () => {
     };
 
     const output = formatRetrieval(merged);
-    assert.ok(output.includes("sextant search"));
+    // Guard against regressing to the old ghost reference `sextant search` (no underscore).
+    assert.ok(output.includes("sextant_search"));
+    assert.ok(!/\bsextant search\b/.test(output));
   });
 });
