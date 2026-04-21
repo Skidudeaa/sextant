@@ -135,7 +135,7 @@ The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12
 
 ### Injection into Claude Code
 
-Two hooks (must be manually added to the project's `.claude/settings.json` — `sextant init` does not configure them):
+Two hooks are automatically wired into `.claude/settings.json` by `sextant init` (merging into any existing settings, preserving other MCP servers and hook entries):
 - **SessionStart**: `sextant hook sessionstart` — injects static summary + auto-starts watcher (unchanged)
 - **UserPromptSubmit**: `sextant hook refresh` — query-aware retrieval pipeline:
   1. Classifies prompt via `shouldRetrieve()` (<1ms)
