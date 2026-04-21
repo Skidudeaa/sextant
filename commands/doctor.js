@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const intel = require("../lib/intel");
 const { loadRepoConfig } = require("../lib/config");
+const { getWatcherStatus } = require("../lib/cli");
 
 async function run(ctx) {
   const r = ctx.roots[0];
@@ -42,10 +43,25 @@ async function run(ctx) {
   lines.push(`  ${viz.c("resolution".padEnd(18), viz.colors.dim)}${viz.bar(pct, 20)}  ${resolved}/${total}  ${resStatus}`);
   lines.push(viz.metric("indexed files", indexed));
 
-  // Index age with color
+  // Index age with color.  The age warning reflects watcher state: if the
+  // heartbeat file is fresh, the watcher is alive and just idle (no file
+  // changes since last flush), which is not a failure mode.  Only warn
+  // "stale" when the watcher is actually dead.
+  const watcher = getWatcherStatus(rootAbs);
   const ageDisplay = viz.ageStatus(ageSec, { warn: 300, danger: 3600 });
-  const ageNote = ageSec > 300 ? viz.status("warn", "stale (watcher not running?)") : "";
+  let ageNote = "";
+  if (ageSec > 300) {
+    if (watcher.running) {
+      ageNote = viz.c("idle (no file changes)", viz.colors.dim);
+    } else {
+      ageNote = viz.status("warn", "stale (watcher dead — run: sextant watch-start)");
+    }
+  }
   lines.push(`  ${viz.c("index age".padEnd(18), viz.colors.dim)}${ageDisplay}  ${ageNote}`);
+  const watcherDisplay = watcher.running
+    ? viz.status("ok", `running (heartbeat ${watcher.ageSec}s ago)`)
+    : viz.status("warn", "not running");
+  lines.push(`  ${viz.c("watcher".padEnd(18), viz.colors.dim)}${watcherDisplay}`);
 
   // Historical trends
   const history = require("../lib/history");
@@ -155,8 +171,8 @@ async function run(ctx) {
     lines.push(`  ${viz.status("info", "Run: sextant init")}`);
   } else if (indexed === 0) {
     lines.push(`  ${viz.status("info", "Run: sextant scan")}`);
-  } else if (ageSec > 300) {
-    lines.push(`  ${viz.status("warn", "Start watcher: sextant watch --summary-every 5")}`);
+  } else if (!watcher.running) {
+    lines.push(`  ${viz.status("warn", "Start watcher: sextant watch-start")}`);
   } else if (pct < 90) {
     lines.push(`  ${viz.status("warn", "Check resolver / adjust globs in .codebase-intel.json")}`);
   } else {
