@@ -189,7 +189,7 @@ node scripts/eval-retrieve.js --verbose   # hit lines + scoring signals
 node scripts/eval-retrieve.js --json      # machine-readable
 ```
 
-Current metrics: **MRR 0.958, nDCG 0.951, 19/19 pass.**
+Current metrics: **MRR 0.952, nDCG 0.925, 19/19 pass.**
 
 Cross-project validation (Express 142 files, Flask 83 files, React 4,337 files): all critical queries resolved correctly including React `useState` (via export-graph) and `createElement` (via re-export chain).
 

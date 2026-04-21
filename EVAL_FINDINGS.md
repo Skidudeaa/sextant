@@ -89,7 +89,20 @@ React "useState" (716 source files match) — previously failed because definiti
 
 ## Harness Metrics
 
-Current (v4): **19/19 pass, MRR 0.956, nDCG 0.949, Mean P@k 0.635, Mean Useful 0.917, Graph Lift nDCG +0.011**
+Current (v5): **19/19 pass, MRR 0.952, nDCG 0.925, Mean P@k 0.610, Mean Useful 0.907, Graph Lift nDCG −0.013**
+
+### v4 → v5: Hit-count contribution to file-level ranking
+
+| Metric | v4 | v5 | Delta |
+|--------|-----|-----|-------|
+| MRR | 0.925* | 0.952 | **+0.027** |
+| nDCG | 0.926* | 0.925 | -0.001 |
+
+\* baseline re-measured after docs/ directory expanded with plans and ideas; the v4 numbers above reflect the scoring pipeline at commit `bdf9a7c` without the subsequent doc additions.
+
+Fix: `rerankFiles()` now adds a log-scaled `hitCountContribution = bestHitScore × log1p(hitCount) × 0.075` to the primary sort key. Without it, "variable-name" queries (e.g. `resolutionPct`, `extractImports`) rank purely by graph boost when every raw hit score is uniform — inflating hub files with a single mention over files that actually contain the identifier many times. The cross-file query `extractImports` went from MRR 0.5 to 1.0 by picking up the correct dispatcher (3 hits) over a sibling implementation (2 hits).
+
+Trade-off: `multi-003 resolutionPct` nDCG dropped 0.38 → 0.24 because `intel.js` moved from rank 1 to rank 4 (it has only one mention of the variable). The eval considers `summary.js` and `intel.js` the canonical relevant files — this is a case where the eval's relevance labels conflict with raw occurrence density. MRR for the same query improved slightly (0.143 → 0.167).
 
 - **P@k**: fraction of top-k results that are relevant
 - **MRR**: reciprocal rank of primary relevant file (capped at rank 10)
