@@ -25,7 +25,25 @@ Usage:
   sextant zoekt <index|serve|search>`);
     process.exit(1);
   }
-  await intel.updateFile(r, rel);
+  const result = await intel.updateFile(r, rel);
+  // WHY: silent success hid "file not indexable" and "file not found" from
+  // the user — they had no way to tell whether the command did anything.
+  if (result?.deleted) {
+    console.log("removed from index: " + result.path + " (file no longer exists)");
+  } else if (result?.skipped) {
+    const reason = result.reason || "skipped";
+    if (reason === "unchanged") {
+      console.log("unchanged: " + result.path + " (mtime/size match, no re-extract)");
+    } else if (reason === "not-found") {
+      console.error("file not found: " + result.path);
+      process.exit(1);
+    } else {
+      console.error("skipped: " + result.path + " (" + reason + ")");
+      process.exit(1);
+    }
+  } else {
+    console.log("indexed: " + result.path);
+  }
 }
 
 module.exports = { run };

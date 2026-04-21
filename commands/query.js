@@ -27,6 +27,23 @@ Usage:
     process.exit(1);
   }
 
+  if (!["imports", "dependents", "exports"].includes(sub)) {
+    console.error(`Unknown query subcommand: "${sub}". Valid subcommands: imports, dependents, exports`);
+    process.exit(1);
+  }
+
+  // WHY: previously returned empty JSON arrays silently for unknown files,
+  // indistinguishable from real-but-isolated files.  Check first.
+  const graph = require("../lib/graph");
+  const path = require("path");
+  const db = await graph.loadDb(path.resolve(r));
+  const meta = graph.getFileMeta(db, rel);
+  if (!meta) {
+    console.error(`file not in index: ${rel}`);
+    console.error(`hint: run \`sextant scan\` or check that the path is relative to the project root`);
+    process.exit(1);
+  }
+
   if (sub === "imports") {
     const out = await intel.queryImports(r, rel);
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
@@ -36,9 +53,6 @@ Usage:
   } else if (sub === "exports") {
     const out = await intel.queryExports(r, rel);
     process.stdout.write(JSON.stringify(out, null, 2) + "\n");
-  } else {
-    console.error(`Unknown query subcommand: "${sub}". Valid subcommands: imports, dependents, exports`);
-    process.exit(1);
   }
 }
 
