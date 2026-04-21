@@ -433,6 +433,33 @@ describe("shouldRetrieve — edge cases", () => {
     const r = shouldRetrieve("please fix and update the code");
     assert.equal(r.retrieve, false);
   });
+
+  // WHY: these lock in the false-positive fixes for conversational prompts
+  // that used to trip the tech-question bonus alone.  "how", "today", "hello"
+  // are all filler/skip terms now, so these prompts drain to zero
+  // code-relevant evidence.
+  it("'how are you today' → skip (conversational)", () => {
+    assert.equal(shouldRetrieve("how are you today").retrieve, false);
+  });
+
+  it("'thanks for your help' → skip", () => {
+    assert.equal(shouldRetrieve("thanks for your help").retrieve, false);
+  });
+
+  it("'hello' → skip", () => {
+    assert.equal(shouldRetrieve("hello").retrieve, false);
+  });
+
+  // And verify genuine tech questions with concrete code targets still fire.
+  it("'how does rerankFiles work' → retrieve (identifier + tech-question)", () => {
+    const r = shouldRetrieve("how does rerankFiles work");
+    assert.equal(r.retrieve, true);
+    assert.ok(r.confidence >= 0.7);
+  });
+
+  it("'where is loadDb defined' → retrieve (def-query + identifier)", () => {
+    assert.equal(shouldRetrieve("where is loadDb defined").retrieve, true);
+  });
 });
 
 // ─── shouldRetrieve — confidence levels ─────────────────────────────
