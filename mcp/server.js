@@ -186,6 +186,32 @@ async function handleExplain(params) {
 
   const db = await graph.loadDb(_root);
   const meta = graph.getFileMeta(db, rel);
+
+  // WHY: without this branch, querying a file that isn't in the graph
+  // silently returned { fanIn: 0, fanOut: 0, exports: [], imports: [] },
+  // indistinguishable from a real-but-isolated file.  Claude would treat
+  // the empty result as authoritative.  Make the "not indexed" case
+  // explicit so the caller can decide whether to re-scan or correct the
+  // path.
+  if (!meta) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              file: rel,
+              notIndexed: true,
+              hint: "File not found in dependency graph. Check the path (must be relative to project root) or run: sextant scan --force",
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
   const fanInMap = graph.fanInByPaths(db, [rel]);
   const fanOutMap = graph.fanOutByPaths(db, [rel]);
   const exports = graph.queryExports(db, rel);
@@ -220,6 +246,19 @@ async function handleExplain(params) {
 async function handleHealth() {
   await ensureInit();
   const h = await intel.health(_root);
+  const { getWatcherStatus } = require("../lib/cli");
+  const watcher = getWatcherStatus(_root);
+
+  // WHY: index freshness depends on watcher liveness, not just index age.
+  // A 6-hour-old index with a live watcher is fine (no file changes in 6h);
+  // the same age with a dead watcher means real drift.  Report both so the
+  // caller can interpret correctly.
+  const warnings = [];
+  if (h.topMisses?.length > 0) warnings.push(`${h.topMisses.length} unresolved specifiers`);
+  if (!watcher.running) warnings.push("watcher not running — run: sextant watch-start");
+  if (h.resolutionPct != null && h.resolutionPct < 90) {
+    warnings.push(`import resolution ${h.resolutionPct}% (graph boosts are gated below 90%)`);
+  }
 
   return {
     content: [
@@ -233,9 +272,11 @@ async function handleHealth() {
             localResolved: h.localResolved,
             localTotal: h.localTotal,
             indexAgeSec: h.indexAgeSec,
-            warnings: h.topMisses?.length > 0
-              ? [`${h.topMisses.length} unresolved specifiers`]
-              : [],
+            watcher: {
+              running: watcher.running,
+              heartbeatAgeSec: watcher.ageSec ?? null,
+            },
+            warnings,
           },
           null,
           2

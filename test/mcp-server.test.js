@@ -244,6 +244,52 @@ describe("MCP server — tools/call handlers", () => {
     }
   });
 
+  it("sextant_health reports watcher state", async () => {
+    // No watcher runs in the test fixture — health should explicitly report
+    // running:false and surface a warning.  Callers (Claude) use this to
+    // decide whether to trust the index freshness.
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_health",
+        arguments: {},
+      });
+      const data = JSON.parse(result.content[0].text);
+
+      assert.ok(data.watcher, "health includes a watcher field");
+      assert.equal(data.watcher.running, false, "no watcher in test fixture");
+      assert.ok(
+        data.warnings.some((w) => /watcher not running/.test(w)),
+        "warnings include actionable 'watcher not running' hint"
+      );
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("sextant_explain returns notIndexed for unknown files", async () => {
+    // Before: a nonexistent path silently returned fanIn:0, fanOut:0, empty
+    // arrays — indistinguishable from a real isolated file.  Now: an explicit
+    // notIndexed flag so callers can distinguish "file is isolated" from
+    // "file isn't tracked at all".
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_explain",
+        arguments: { file: "does/not/exist.js" },
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.notIndexed, true);
+      assert.ok(typeof data.hint === "string" && data.hint.length > 0);
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
   it("unknown tool returns isError", async () => {
     const result = await dispatch("tools/call", {
       name: "nonexistent_tool",
