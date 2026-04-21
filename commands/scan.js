@@ -25,19 +25,26 @@ async function run(ctx) {
     let lastRender = 0;
     let skippedCount = 0;
     let indexedCount = 0;
-    const onProgress = ({ phase, total, processed, file, skipped }) => {
+    const onProgress = ({ phase, total, processed, file, skipped, ghostCount }) => {
       // Track skipped vs indexed
       if (phase === "indexing") {
         if (skipped) skippedCount++;
         else indexedCount++;
       }
 
+      // WHY: ghost files are db entries whose source file no longer exists
+      // (deleted without a rescan). `scan` intentionally doesn't prune; the
+      // hint tells the user how to clean up.
+      const ghostHint = (!pruneMissing && ghostCount > 0)
+        ? `  (${ghostCount} stale — run: sextant rescan)`
+        : "";
+
       if (!isTTY) {
         // Non-TTY: just print dots or simple status
         if (phase === "start") process.stdout.write(`Scanning ${r}...`);
         else if (phase === "done") {
           const skipNote = skippedCount > 0 ? `, ${skippedCount} unchanged` : "";
-          process.stdout.write(` done (${indexedCount} indexed${skipNote})\n`);
+          process.stdout.write(` done (${indexedCount} indexed${skipNote})${ghostHint}\n`);
         }
         return;
       }
@@ -69,7 +76,10 @@ async function run(ctx) {
       } else if (phase === "done") {
         const finalBar = viz.bar(100, barWidth, { showPercent: false, thresholds: { warn: 0, danger: 0 } });
         const skipNote = skippedCount > 0 ? viz.dim(` (${skippedCount} unchanged)`) : "";
-        process.stdout.write(`\r\x1b[K  ${finalBar} ${viz.c(`${indexedCount} files indexed`, viz.colors.green)}${skipNote}\n\n`);
+        const ghostNote = (!pruneMissing && ghostCount > 0)
+          ? "\n  " + viz.c(`⚠ ${ghostCount} stale entries in index`, viz.colors.yellow) + viz.dim(" — run: sextant rescan")
+          : "";
+        process.stdout.write(`\r\x1b[K  ${finalBar} ${viz.c(`${indexedCount} files indexed`, viz.colors.green)}${skipNote}${ghostNote}\n\n`);
       }
     };
 
