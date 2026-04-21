@@ -176,7 +176,7 @@ See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (ori
 
 ## Eval Results
 
-19/19 queries pass. MRR 0.958, nDCG 0.951. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files).
+19/19 queries pass. MRR 0.954, nDCG 0.925. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files).
 
 See [EVAL_FINDINGS.md](EVAL_FINDINGS.md) for methodology, scoring evolution, and bugs found by eval.
 
