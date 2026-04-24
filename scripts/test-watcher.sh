@@ -42,17 +42,29 @@ w.writeHeartbeat('$tmp');
 [ ! -f "$tmp/.planning/intel/.watcher_last_file" ] || fail "last_file should not be written when no file provided"
 echo "  writeHeartbeat without lastFile skips last_file: OK"
 
-# Test 4: Heartbeat content is valid ISO timestamp
+# Test 4: Heartbeat content has valid ISO timestamp on first line + JSON payload
+# (Format changed: line 1 is ISO for liveness, line 2+ is JSON activity payload.)
 node -e "
 const w = require('$ROOT/watch');
-w.writeHeartbeat('$tmp', 'x.js');
+w.writeHeartbeat('$tmp', 'x.js', { lastEventMs: Date.now(), lastFlushMs: Date.now(), totalUpdates: 1 });
 "
-content="$(cat "$tmp/.planning/intel/.watcher_heartbeat")"
 node -e "
-const d = new Date('$(echo "$content" | tr -d '\n')');
-if (isNaN(d.getTime())) process.exit(1);
-" || fail "heartbeat not valid ISO date"
-echo "  heartbeat content is valid ISO date: OK"
+const fs = require('fs');
+const path = require('path');
+const hbPath = path.join('$tmp', '.planning', 'intel', '.watcher_heartbeat');
+const body = fs.readFileSync(hbPath, 'utf8');
+const lines = body.split('\n');
+const d = new Date(lines[0]);
+if (isNaN(d.getTime())) { console.error('first line not ISO:', lines[0]); process.exit(1); }
+const jsonLine = lines.find(l => l.trim().startsWith('{'));
+if (!jsonLine) { console.error('no JSON payload line'); process.exit(1); }
+const payload = JSON.parse(jsonLine);
+if (!payload.heartbeat || typeof payload.pid !== 'number') {
+  console.error('payload missing heartbeat/pid:', payload);
+  process.exit(1);
+}
+" || fail "heartbeat not valid (first line ISO + JSON payload)"
+echo "  heartbeat content is valid ISO date + JSON payload: OK"
 
 # Test 5: Heartbeat mtime is recent (within last 5 seconds)
 node -e "

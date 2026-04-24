@@ -9,10 +9,30 @@ const { shouldReindex, triggerReindex } = require("./lib/zoekt-reindex");
 // WHY: Heartbeat file lets hooks detect whether the watcher is running.
 // Written on start and after each flush.  Hooks read the mtime to
 // determine watcher status (alive if < 90s old, stale otherwise).
-function writeHeartbeat(root, lastFile) {
+//
+// WHY structured JSON body: mtime alone can't distinguish "watcher alive
+// and idle with no file changes" from "watcher alive but chokidar stopped
+// delivering events hours ago" — both look the same to a 30s interval
+// ticking setInterval. Embedding `lastEventMs` and `lastFlushMs` lets the
+// status layer separate healthy-idle from potentially-stuck. First line is
+// kept as the ISO timestamp so any legacy reader that only cares about
+// liveness (and reads the first line as a date) still works; the JSON body
+// on the remaining lines is optional extra context.
+function writeHeartbeat(root, lastFile, activity) {
   try {
     const dir = path.join(root, ".planning", "intel");
-    fs.writeFileSync(path.join(dir, ".watcher_heartbeat"), new Date().toISOString() + "\n");
+    const nowIso = new Date().toISOString();
+    const payload = {
+      heartbeat: nowIso,
+      pid: process.pid,
+      lastEventMs: activity?.lastEventMs ?? null,
+      lastFlushMs: activity?.lastFlushMs ?? null,
+      totalUpdates: activity?.totalUpdates ?? null,
+    };
+    fs.writeFileSync(
+      path.join(dir, ".watcher_heartbeat"),
+      nowIso + "\n" + JSON.stringify(payload) + "\n"
+    );
     // WHY: Persist last processed file so the status line can show what
     // the watcher is actually doing — not git log, not guesses.
     if (lastFile) {
@@ -100,10 +120,25 @@ function createDashboardState(root) {
     totalUpdates: 0,
     lastUpdateTime: null,
     lastUpdateFile: null,
+    // WHY separate from lastUpdateTime: lastUpdateTime is when the update
+    // finished flushing through the queue; lastEventTime is when chokidar
+    // first saw the change. The gap between them is the queue lag. If
+    // lastEventTime advances but lastUpdateTime doesn't, flushes are stuck.
+    lastEventTime: null,
+    lastFlushTime: null,
     recentUpdates: [],       // timestamps of recent updates (for sparkline)
     errors: 0,
     resolutionPct: null,
     indexedFiles: null,
+  };
+}
+
+// Extract activity signal snapshot for the heartbeat payload.
+function dashboardActivityFor(dashState) {
+  return {
+    lastEventMs: dashState.lastEventTime,
+    lastFlushMs: dashState.lastFlushTime,
+    totalUpdates: dashState.totalUpdates,
   };
 }
 
@@ -212,11 +247,10 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
     );
 
     await intel.init(root);
-    writeHeartbeat(root);
-
-    // Initialize dashboard state
+    // Initialize dashboard state first so writeHeartbeat can read activity
     const dashState = createDashboardState(root);
     dashboardStates.push(dashState);
+    writeHeartbeat(root, null, dashboardActivityFor(dashState));
     
     // Get initial health
     try {
@@ -227,7 +261,13 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
 
     // WHY: Periodic heartbeat keeps the status line showing "live" even when
     // no files are changing.  Without this, an idle watcher looks dead after 120s.
-    const heartbeatInterval = setInterval(() => writeHeartbeat(root), 30000);
+    // Passes current activity so readers can tell "healthy idle" (recent
+    // lastEventMs, no pending flushes) from "stuck" (lastEventMs unchanged
+    // despite file activity).
+    const heartbeatInterval = setInterval(
+      () => writeHeartbeat(root, null, dashboardActivityFor(dashState)),
+      30000
+    );
     heartbeatIntervals.push(heartbeatInterval);
 
     const pending = new Set();
@@ -259,7 +299,8 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
       }
       
       // Refresh health metrics + heartbeat after each flush
-      writeHeartbeat(root, dashState.lastUpdateFile);
+      dashState.lastFlushTime = Date.now();
+      writeHeartbeat(root, dashState.lastUpdateFile, dashboardActivityFor(dashState));
       // WHY: Health check iterates all files/imports in the index (~6ms at 10k files).
       // Dashboard renders once per second, so computing health more often is wasted work
       // that also blocks the queue.
@@ -295,6 +336,13 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
     });
 
     const onChange = (rel) => {
+      // WHY record event timing separately from flushes: a healthy watcher
+      // with no file changes has no flushes, but a silently-stuck watcher
+      // (chokidar deaf to events on NFS/overlayfs, ENOSPC on inotify) also
+      // has no flushes. Tracking lastEventMs distinguishes the two: idle
+      // repos have no events AND no flushes (expected); stuck watchers have
+      // files actually changing on disk but no onChange firing.
+      dashState.lastEventTime = Date.now();
       pending.add(rel);
       flush();
     };
