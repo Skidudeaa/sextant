@@ -512,3 +512,62 @@ describe("shouldRetrieve — confidence levels", () => {
     }
   });
 });
+
+// ─── shouldRetrieve — single-word and short code queries ────────────
+//
+// WHY: These lock in the fix for the false-negative class where plain
+// lowercase module-name queries (e.g. "retrieval", "scoring") and 2-3
+// word concept questions (e.g. "how retrieval works") used to silently
+// skip retrieval because the -3 short-prompt penalty fired even when a
+// plausible code term had survived noise filtering.
+
+describe("shouldRetrieve — single-word code tokens", () => {
+  it("single plausible module name → retrieve", () => {
+    for (const q of ["retrieval", "scoring", "resolver", "watcher", "classifier"]) {
+      const r = shouldRetrieve(q);
+      assert.equal(r.retrieve, true, `expected "${q}" to retrieve`);
+      assert.deepEqual(r.terms, [q]);
+    }
+  });
+
+  it("single affirmative/noise word still skips", () => {
+    for (const q of ["yes", "ok", "thanks", "sure", "hi"]) {
+      const r = shouldRetrieve(q);
+      assert.equal(r.retrieve, false, `expected "${q}" to skip`);
+    }
+  });
+
+  it("single 2-char word skips (too short to be a meaningful code term)", () => {
+    const r = shouldRetrieve("ab");
+    assert.equal(r.retrieve, false);
+  });
+});
+
+describe("shouldRetrieve — short concept questions", () => {
+  it("'how retrieval works' → retrieve with 'retrieval'", () => {
+    const r = shouldRetrieve("how retrieval works");
+    assert.equal(r.retrieve, true);
+    assert.ok(r.terms.includes("retrieval"));
+  });
+
+  it("'query classification' → retrieve with both nouns", () => {
+    const r = shouldRetrieve("query classification");
+    assert.equal(r.retrieve, true);
+    assert.ok(r.terms.includes("query"));
+    assert.ok(r.terms.includes("classification"));
+  });
+
+  it("'scoring logic' → retrieve with both nouns", () => {
+    const r = shouldRetrieve("scoring logic");
+    assert.equal(r.retrieve, true);
+    assert.ok(r.terms.includes("scoring"));
+    assert.ok(r.terms.includes("logic"));
+  });
+
+  it("conversational short phrases still skip", () => {
+    for (const q of ["not sure", "one moment", "hold on", "never mind"]) {
+      const r = shouldRetrieve(q);
+      assert.equal(r.retrieve, false, `expected "${q}" to skip`);
+    }
+  });
+});
