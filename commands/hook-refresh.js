@@ -93,12 +93,15 @@ async function run() {
   const root = process.cwd();
   const data = await readStdinJson();
 
-  // WHY: Fire-and-forget — the status line goes to stderr which nobody sees
-  // (per the visibility model). We don't await it because intel.health() takes
-  // ~140ms and would dominate the hook's latency budget. The process won't exit
-  // until the event loop drains, so the write usually completes. If it doesn't,
-  // the cost is one missed stderr line that nobody was going to see anyway.
-  writeStatusLine(root);
+  // WHY: Kicked off concurrently (not awaited here) so intel.health's ~140ms
+  // doesn't serialize with the main pipeline. We await it at the end of run()
+  // so the process doesn't exit before settings.json writes land — earlier
+  // versions fired-and-forgot, and because ensureClaudeSettingsUnlocked wrote
+  // .claude/settings.json without tmp+rename, a hook that returned fast could
+  // truncate the file. Settings writes are now atomic AND conditional, so this
+  // is belt-and-suspenders — keep the await anyway so any disk work the
+  // status-line path triggers is fully flushed before Node exits.
+  const statusLinePromise = writeStatusLine(root);
 
   const prompt = data.prompt || data.message || "";
 
@@ -115,6 +118,7 @@ async function run() {
   if (!classification.retrieve) {
     // Non-code prompt — inject static summary if changed
     injectStaticSummary(root, data);
+    await statusLinePromise;
     return;
   }
 
@@ -189,6 +193,7 @@ async function run() {
   if (!output || !output.trim()) {
     // No results from either source — fall back to static summary
     injectStaticSummary(root, data);
+    await statusLinePromise;
     return;
   }
 
@@ -206,6 +211,7 @@ async function run() {
   const last = tryReadFile(cachePath);
 
   if (last === h) {
+    await statusLinePromise;
     return;
   }
 
@@ -215,6 +221,7 @@ async function run() {
 
   const safe = stripUnsafeXmlTags(output);
   process.stdout.write(`<codebase-retrieval>\n${safe}\n</codebase-retrieval>`);
+  await statusLinePromise;
 }
 
 module.exports = { run };

@@ -1,13 +1,36 @@
 const intel = require("../lib/intel");
 const { loadRepoConfig } = require("../lib/config");
-const { hasFlag } = require("../lib/cli");
+const { hasFlag, getWatcherStatus } = require("../lib/cli");
 const zoekt = require("../lib/zoekt");
 
 async function run(ctx) {
   const pruneMissing = ctx.argv[0] === "rescan";
   const forceReindex = hasFlag(process.argv, "--force");
+  const allowConcurrent = hasFlag(process.argv, "--allow-concurrent");
   const viz = require("../lib/terminal-viz");
   const isTTY = process.stdout.isTTY;
+
+  // WHY concurrent-run guard: a live watcher and a scan both loadDb → mutate
+  // → persistDb. Even with the new cross-process write lock on graph.db, the
+  // two processes can interleave (watcher handles file event mid-scan), and
+  // sql.js gives each process its own in-memory copy — so a watcher flush
+  // landing mid-scan can clobber scan's progress with stale state. Refusing
+  // loudly is safer than racing; users who know what they're doing can pass
+  // --allow-concurrent.
+  if (!allowConcurrent) {
+    for (const r of ctx.roots) {
+      const ws = getWatcherStatus(r);
+      if (ws.running) {
+        const msg =
+          `[sextant] watcher is running for ${r} (pid ${ws.pid ?? "?"}).\n` +
+          `Two writers can race on graph.db. Stop it first:\n` +
+          `  sextant watch-stop\n` +
+          `Or override (at your own risk) with --allow-concurrent.\n`;
+        process.stderr.write(msg);
+        process.exit(2);
+      }
+    }
+  }
 
   // Collect positional glob arguments (after cmd, before --flags)
   const cliGlobs = [];
