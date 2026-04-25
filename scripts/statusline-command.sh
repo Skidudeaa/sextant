@@ -100,6 +100,25 @@ if [ -f "$last_file_path" ]; then
     [ -n "$lf" ] && last_file_label="\e[90m← $(basename "$lf")\e[m"
 fi
 
+# ── Last query-aware retrieval ─────────────────────────
+# WHY: Distinguishes the static-summary inject path from the actual graph+
+# zoekt retrieval pipeline.  File: line 1 = file count, line 2 = unix ts.
+# Only written by hook-refresh.js when retrieval fires with results.
+retrieval_label=""
+retrieval_path="$intel_dir/.last_retrieval"
+if [ -f "$retrieval_path" ]; then
+    r_count=$(sed -n '1p' "$retrieval_path" 2>/dev/null)
+    r_ts=$(sed -n '2p' "$retrieval_path" 2>/dev/null)
+    if [ -n "$r_count" ] && [ -n "$r_ts" ]; then
+        r_age=$(( now - r_ts ))
+        if [ "$r_age" -lt 60 ]; then
+            retrieval_label="\e[36m🔍 ${r_count} \e[90m· $(fmt_age $r_age)\e[m"
+        elif [ "$r_age" -lt 600 ]; then
+            retrieval_label="\e[90m🔍 ${r_count} · $(fmt_age $r_age)\e[m"
+        fi
+    fi
+fi
+
 # ── Assemble status line ──────────────────────────────
 printf " ${dot}"
 [ -n "$res" ] && printf " %s%%" "$res"
@@ -109,5 +128,6 @@ printf " ${dot}"
 [ -n "$reexports" ] && [ "$reexports" != "0" ] && printf " \e[90m·\e[m %srx" "$reexports"
 printf " \e[90m·\e[m %b" "$watcher"
 [ -n "$inject_label" ] && printf " \e[90m·\e[m %b" "$inject_label"
+[ -n "$retrieval_label" ] && printf " \e[90m·\e[m %b" "$retrieval_label"
 [ -n "$last_file_label" ] && printf " %b" "$last_file_label"
 exit 0

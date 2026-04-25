@@ -219,6 +219,17 @@ async function run() {
     fs.writeFileSync(cachePath, h);
   } catch {}
 
+  // WHY: User-visible signal that retrieval actually fired with results.
+  // Written only on real injection (not on dedupe, not on static-summary
+  // fallback) so the statusline can distinguish "retrieval matched N files"
+  // from "no code-relevant prompt" or "no results".  Two-line plaintext
+  // so the bash statusline can read it without jq.
+  try {
+    const fileCount = (merged && Array.isArray(merged.files)) ? merged.files.length : 0;
+    const markerPath = path.join(root, ".planning", "intel", ".last_retrieval");
+    fs.writeFileSync(markerPath, `${fileCount}\n${Math.floor(Date.now() / 1000)}\n`);
+  } catch {}
+
   const safe = stripUnsafeXmlTags(output);
   process.stdout.write(`<codebase-retrieval>\n${safe}\n</codebase-retrieval>`);
   await statusLinePromise;
