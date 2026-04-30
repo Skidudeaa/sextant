@@ -78,18 +78,33 @@ That's it. On the next Claude Code session:
 The status line at the bottom of Claude Code is your only visual indicator:
 
 ```
-root@host ~/project (main) ◆ 97%(117/121) · 64 files · 312exp · ⟳ 3s · -> 8s <- resolver.js
+root@host ~/project (main) ◆ 97% · 64 files · ⟳ 3s · → 8s ← resolver.js
+```
+
+When something needs action, an action slot appears with the literal command to run:
+
+```
+root@host ~/project (main) ◆ 60% · 12 files · ⏸ off  ⚠ run: sextant watch-start
 ```
 
 | Part | Meaning |
 |------|---------|
 | `◆` | Health indicator (green/yellow/red) |
-| `97%(117/121)` | Import resolution rate |
+| `97%` | Import resolution rate |
 | `64 files` | Indexed file count |
-| `312exp` | Exports tracked by AST extraction |
 | `⟳ 3s` / `⏸ off` | Watcher status + heartbeat age |
-| `-> 8s` | When context was last sent to Claude |
-| `<- resolver.js` | Last file the watcher processed |
+| `→ 8s` | When context was last sent to Claude |
+| `← resolver.js` | Last file the watcher processed |
+| `⚠ run: <cmd>` | Action hint (only when something needs attention) |
+
+### Operational ergonomics — telling you what to type
+
+Sextant runs in the background, so when something goes wrong you might not remember whether to scan, rescan, init, or restart the watcher. Two surfaces solve this without taking any action on your behalf:
+
+- **Status line action slot** — appears only when an actionable condition is detected (watcher off/stale, resolution below 90%) and carries the literal command to copy. Highest-priority action shown alone; fix it, the next one appears next render.
+- **`sextant doctor` Actions block** — top-of-output checklist that exhaustively lists every applicable item (state-dir missing, graph.db missing/empty, watcher dead or stale, resolution degraded, settings.json missing) with a `→ sextant <cmd>` line under each.
+
+Detection and recommendation live in code; execution stays in your hands. Sextant never auto-runs a scan or restarts a watcher.
 
 ### Visibility model
 
