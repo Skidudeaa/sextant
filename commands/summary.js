@@ -1,5 +1,5 @@
 const intel = require("../lib/intel");
-const { refreshSummaryAge } = require("../lib/cli");
+const { applyFreshnessGate } = require("../lib/cli");
 
 async function run(ctx) {
   const r = ctx.roots[0];
@@ -8,12 +8,12 @@ async function run(ctx) {
     process.stdout.write("No summary\n");
     return;
   }
-  // WHY: summary.md bakes "index age Xs" at write time and — until the
-  // running watcher picks up a newer sextant binary — may still carry a
-  // stale "INDEX STALE (watcher dead?)" alert.  Route the CLI output through
-  // the same refresh logic the hook uses so both surfaces tell the same
-  // truth about current state.
-  process.stdout.write(refreshSummaryAge(raw, r));
+  // WHY: route through applyFreshnessGate so the CLI output matches what
+  // the hook injects -- on stale repo state, both produce a minimal body
+  // (no hotspots, no fan-in numbers) and trigger the same async rescan.
+  // All three surfaces (this command, sextant inject, the hooks) must
+  // agree on what's currently true; using the same gate guarantees that.
+  process.stdout.write(await applyFreshnessGate(raw, r));
 }
 
 module.exports = { run };

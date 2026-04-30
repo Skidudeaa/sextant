@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const intel = require("../lib/intel");
-const { stripUnsafeXmlTags, getWatcherStatus, renderBanner, readStdinJson, refreshSummaryAge } = require("../lib/cli");
+const { stripUnsafeXmlTags, getWatcherStatus, renderBanner, readStdinJson, applyFreshnessGate } = require("../lib/cli");
 
 async function run() {
   const root = process.cwd();
@@ -13,10 +13,14 @@ async function run() {
   const rawSummary = intel.readSummary(root);
   if (!rawSummary || !rawSummary.trim()) process.exit(0);
 
-  // WHY: summary.md bakes "index age Xs" at write time. Without this refresh,
-  // re-injection still reads "0s" even when graph.db is days old — a trust
-  // violation that tells Claude data is fresh when it isn't.
-  const summary = refreshSummaryAge(rawSummary, root);
+  // WHY: gate the injection on real repo state, not elapsed time.  When
+  // graph.db's structural claims are out of sync with HEAD / status / code
+  // versions, applyFreshnessGate returns a minimal body (root + git +
+  // signals + recent commits + "rescan requested|pending" marker) instead
+  // of the full summary -- so we never ship hotspots/fan-in numbers that
+  // could mislead Claude.  It also kicks off an atomic single-flight async
+  // rescan in that case.  See lib/cli.js applyFreshnessGate for invariants.
+  const summary = await applyFreshnessGate(rawSummary, root);
 
   // stdout → Claude context
   const safeSummary = stripUnsafeXmlTags(summary.trim());

@@ -101,6 +101,19 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
     - `sextant_health` — index resolution, file count, age
     - Registered per-project via `.mcp.json` by `sextant init`
 
+12. **Freshness gate** (`lib/freshness.js`, `lib/cli.js applyFreshnessGate`) — silent-absence model for stale state
+    - At every injection point (SessionStart hook, UserPromptSubmit hook, `sextant summary`, `sextant inject`), compares stored scan-state to current state
+    - Signals: git HEAD, `git status --porcelain` hash (filtered to exclude `.planning/`), scanner version (`SCANNER_VERSION`), graph-schema version (`SCHEMA_VERSION`)
+    - When stale: emits a minimal body with only filesystem/git-derived fields (root, branch+HEAD, signals, recent commits, "rescan requested|pending|unavailable" marker) — no hotspots, no fan-in, no entry points, no graph-derived numbers
+    - Triggers atomic single-flight async rescan via `.planning/intel/.rescan_pending` marker (5-minute orphan-recovery window); spawned scan uses `--allow-concurrent --force` and is safe under the mtime-gated cache
+    - Scan-state recorded inside `persistGraphUnlocked` and the bulk-scan finalize, so on-disk state is atomic with `generated_at`
+
+13. **Telemetry** (`lib/telemetry.js`) — append-only JSONL at `.planning/intel/telemetry.jsonl`
+    - Records `freshness.stale_hit { reason, rescanState }` and `freshness.blackout_turn { reason }` per stale read
+    - Bounded growth: rotates to `.old` past `TELEMETRY_MAX_BYTES` (1 MiB)
+    - Never throws; failures are silently absorbed (telemetry must never break the hook)
+    - Dataset feeds the future Option-5 adaptive sync/async decision (per-repo p95 scan duration, timeout rate)
+
 ### Visibility Model (CRITICAL — read this)
 
 There are three output channels. They go to different places:
@@ -148,9 +161,11 @@ The legacy `tools/codebase_intel/refresh.js` standalone script has been removed.
 ### Per-Repo State
 
 All state lives in `.planning/intel/` (never committed):
-- `graph.db` — SQLite database: dependency graph + file metadata + resolution stats (single source of truth)
+- `graph.db` — SQLite database: dependency graph + file metadata + resolution stats (single source of truth). `meta` table also carries `generated_at`, `scanned_head`, `scanned_status_hash`, `scanner_version`, `schema_version` (the freshness gate's anchors).
 - `summary.md` — the injected summary
 - `history.json` — health snapshots for sparkline trends
+- `telemetry.jsonl` (+ `.old`) — append-only freshness-gate events; rotates past 1 MiB
+- `.rescan_pending` — atomic single-flight marker for the freshness gate's async rescan; orphaned markers expire after 5 minutes
 - `.watcher_heartbeat` — watcher alive signal (mtime checked by statusline)
 - `.watcher_last_file` — last file the watcher processed
 - `.last_injected_hash.summary.*` — per-session dedupe hashes for static summary injection
@@ -178,6 +193,9 @@ All state lives in `.planning/intel/` (never committed):
 - **Shared deadline**: zoekt.searchFast() uses a 180ms total budget, not stacked independent timeouts. Graph and Zoekt run in parallel.
 - **Separate cache namespaces**: retrieval and summary dedupe hashes use distinct files (`.last_injected_hash.retrieval.*` vs `.last_injected_hash.summary.*`) to prevent alternating code/non-code prompts from invalidating each other's dedupe.
 - **Sextant MCP server**: replaces standalone Python Zoekt MCP with graph-ranked search. Registered per-project via `.mcp.json`. Four tools: search, related, explain, health.
+- **Silent absence over false confidence**: when the freshness gate detects stale state, the injected `<codebase-intelligence>` body is rebuilt from scratch with only filesystem/git-derived fields (no graph-derived numbers). Stale structural claims never enter the prompt; the LLM has nothing to misquote. The old "ALERT: INDEX STALE -- ship anyway" model is gone — it cried wolf on idle repos and still leaked stale numbers when the repo HAD changed.
+- **Freshness ≠ age**: a 5-day-old graph of an unchanged repo is fresh; a 1-minute-old graph after `git checkout` is stale. The gate compares git HEAD + status fingerprint + version stamps, not wall-clock elapsed time. The fingerprint excludes `.planning/` so sextant's own writes don't pollute the signal.
+- **Atomic single-flight rescan**: stale detection enqueues at most one async rescan per repo at a time, gated by an `O_CREAT|O_EXCL` marker file with a 5-minute orphan-recovery window. The spawned `sextant scan` runs with `--allow-concurrent --force`; the watcher's RAM cache gets invalidated correctly via the mtime-gated `loadDb()`, so concurrent execution is safe.
 
 ## Eval Harness
 

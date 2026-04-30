@@ -199,53 +199,47 @@ describe("refreshSummaryAge", () => {
     assert.match(out, /index age 0s/);
   });
 
-  it("inserts a stale ALERT when newly-computed age exceeds 24h and none is present", () => {
-    // WHY: refresh owns the stale alert end-to-end — summary.js no longer
-    // emits it at write time because it doesn't know the watcher state.
+  // WHY no-ALERT contract: refreshSummaryAge used to inject a time-based
+  // "INDEX STALE" alert at 24h.  That logic moved to applyFreshnessGate
+  // (lib/cli.js), which gates on real repo state (HEAD, status, versions)
+  // instead of wall-clock age -- so a 5-day-old graph of an unchanged repo
+  // is no longer stale and no longer cries wolf.  refreshSummaryAge now
+  // only rewrites the elapsed-time field and strips legacy ALERT lines.
+  it("does not inject any stale ALERT, even at 48h age", () => {
     const generated = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
     const input = buildSummary({ generatedAt: generated, age: "10s" });
     const out = refreshSummaryAge(input);
-    // No root passed → watcher treated as not running.
-    assert.match(out, /^ALERT: INDEX STALE -- last update 48\.0h ago \(watcher not running — run: sextant watch-start\)$/m);
-    // Must remain above the `## Codebase intelligence` block
-    const alertIdx = out.indexOf("ALERT: INDEX STALE");
-    const headerIdx = out.indexOf("## Codebase intelligence");
-    assert.ok(alertIdx !== -1 && headerIdx !== -1 && alertIdx < headerIdx);
+    assert.doesNotMatch(out, /ALERT: INDEX STALE/);
   });
 
-  it("does not duplicate an existing stale ALERT", () => {
-    const generated = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
-    const input = buildSummary({ generatedAt: generated, age: "10s", withAlert: true });
-    const out = refreshSummaryAge(input);
-    const alertCount = (out.match(/^ALERT: INDEX STALE/gm) || []).length;
-    assert.equal(alertCount, 1);
-  });
-
-  it("strips a previously-baked stale ALERT when data is now fresh", () => {
-    // Summary written when stale (alert baked in), watcher then flushed and
-    // updated Generated: to something recent.  The alert must go away.
+  it("strips a previously-baked stale ALERT, regardless of age", () => {
+    // Old code may have written ALERT: INDEX STALE to disk.  The new code
+    // owns that signal at inject time via applyFreshnessGate; legacy
+    // baked-in alerts must always be cleaned up so the two layers don't
+    // double-report (or worse, contradict each other).
     const generated = new Date(Date.now() - 60_000).toISOString();
     const input = buildSummary({ generatedAt: generated, age: "10s", withAlert: true });
     const out = refreshSummaryAge(input);
     assert.doesNotMatch(out, /ALERT: INDEX STALE/);
   });
 
-  it("places stale ALERT below an existing HEALTH FAIL ALERT, above the header", () => {
+  it("strips a previously-baked stale ALERT even when age is large", () => {
     const generated = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
-    const input = buildSummary({ generatedAt: generated, age: "10s", withHealthFail: true });
-    const out = refreshSummaryAge(input);
-    const healthIdx = out.indexOf("CODEBASE INTEL HEALTH FAIL");
-    const staleIdx = out.indexOf("ALERT: INDEX STALE");
-    const headerIdx = out.indexOf("## Codebase intelligence");
-    assert.ok(healthIdx >= 0 && staleIdx >= 0 && headerIdx >= 0);
-    assert.ok(healthIdx < staleIdx, "HEALTH FAIL should come first");
-    assert.ok(staleIdx < headerIdx, "stale ALERT should come before header");
-  });
-
-  it("does not insert a stale ALERT when age is under 24h", () => {
-    const generated = new Date(Date.now() - 60_000).toISOString();
-    const input = buildSummary({ generatedAt: generated, age: "10s" });
+    const input = buildSummary({ generatedAt: generated, age: "10s", withAlert: true });
     const out = refreshSummaryAge(input);
     assert.doesNotMatch(out, /ALERT: INDEX STALE/);
+  });
+
+  it("preserves unrelated ALERTs (e.g. HEALTH FAIL) while stripping legacy stale ALERT", () => {
+    const generated = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    const input = buildSummary({
+      generatedAt: generated,
+      age: "10s",
+      withAlert: true,
+      withHealthFail: true,
+    });
+    const out = refreshSummaryAge(input);
+    assert.doesNotMatch(out, /ALERT: INDEX STALE/);
+    assert.match(out, /CODEBASE INTEL HEALTH FAIL/);
   });
 });

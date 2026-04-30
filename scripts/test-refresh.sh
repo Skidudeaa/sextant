@@ -24,6 +24,26 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/.planning/intel"
 echo "alpha" > "$tmp/.planning/intel/summary.md"
 
+# WHY: the freshness gate (lib/freshness.js) reads scan-state from graph.db
+# meta and falls back to a stale "no_scan_record" body when none is present
+# -- and the stale body's "rescan requested|pending" marker varies across
+# calls.  That breaks dedupe in this isolated test even though production
+# (where `sextant init` + `sextant scan` always populate graph.db meta)
+# would never hit it.  Set up a minimal git repo + recorded scan-state so
+# the gate returns fresh on identical-input calls and dedupe can be tested
+# in isolation as intended.
+git init -q "$tmp" 2>/dev/null
+(cd "$tmp" && git config user.email "t@e.com" && git config user.name "t" && git config commit.gpgsign false && git commit --allow-empty -q -m init)
+node -e "
+const graph = require('$ROOT/lib/graph');
+const freshness = require('$ROOT/lib/freshness');
+(async () => {
+  const db = await graph.loadDb('$tmp');
+  freshness.recordScanState(db, '$tmp');
+  await graph.persistDb('$tmp');
+})().catch(e => { console.error(e); process.exit(1); });
+"
+
 # Test 1: emits only when changed for same session
 out1="$(run_refresh "$tmp" '{"session_id":"s1"}')"
 printf '%s' "$out1" | grep -q "<codebase-intelligence>" || fail "expected initial emit"

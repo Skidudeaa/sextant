@@ -3,7 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const intel = require("../lib/intel");
 const { deriveSessionKey } = require("../lib/session");
-const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, refreshSummaryAge } = require("../lib/cli");
+const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, applyFreshnessGate } = require("../lib/cli");
 const { shouldRetrieve, hasIdentifierShape } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
 const { formatRetrieval } = require("../lib/format-retrieval");
@@ -37,9 +37,15 @@ function tryReadFile(p) {
 
 /**
  * Inject the static summary.md if it has changed since last injection.
- * This preserves the existing v1 behavior for non-code prompts.
+ * Routed through applyFreshnessGate so stale-state graph.db data never
+ * reaches Claude as structural claims; on stale, the function returns a
+ * minimal body and triggers an async rescan in the background.
+ *
+ * Async because applyFreshnessGate calls graph.loadDb() (cached, but the
+ * call is async).  All three callers in this file already run inside the
+ * async run() flow.
  */
-function injectStaticSummary(root, data) {
+async function injectStaticSummary(root, data) {
   const summaryPath = path.join(root, ".planning", "intel", "summary.md");
 
   if (!fs.existsSync(summaryPath)) return;
@@ -47,9 +53,12 @@ function injectStaticSummary(root, data) {
   const rawSummary = tryReadFile(summaryPath);
   if (!rawSummary) return;
 
-  // WHY: summary.md's "index age Xs" is baked in at write time; refresh against
-  // the current graph.db mtime so we don't lie to Claude about freshness.
-  const summary = refreshSummaryAge(rawSummary, root);
+  // WHY: applyFreshnessGate inspects HEAD + git status hash + scanner /
+  // schema versions.  If any have moved since the last persist, it
+  // discards rawSummary and returns a minimal body with only safe fields
+  // (root, git head, signals, recent commits, "rescan requested|pending"
+  // marker).  See lib/cli.js for the full contract.
+  const summary = await applyFreshnessGate(rawSummary, root);
 
   const sessionKey = deriveSessionKey(data);
   const cachePath = path.join(
@@ -111,13 +120,13 @@ async function run() {
     classification = shouldRetrieve(prompt);
   } catch {
     // Classifier failed — fall back to static summary
-    injectStaticSummary(root, data);
+    await injectStaticSummary(root, data);
     return;
   }
 
   if (!classification.retrieve) {
     // Non-code prompt — inject static summary if changed
-    injectStaticSummary(root, data);
+    await injectStaticSummary(root, data);
     await statusLinePromise;
     return;
   }
@@ -192,7 +201,7 @@ async function run() {
 
   if (!output || !output.trim()) {
     // No results from either source — fall back to static summary
-    injectStaticSummary(root, data);
+    await injectStaticSummary(root, data);
     await statusLinePromise;
     return;
   }
