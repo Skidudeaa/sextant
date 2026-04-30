@@ -46,19 +46,20 @@ else
 fi
 
 # ── Parse summary for display data ────────────────────
+# WHY we no longer extract res_frac (the 155/155): redundant with the
+# percentage on the happy path, and the user found "100%(155/155) · 80 files"
+# confusing because the relationship between the three numbers isn't
+# obvious at a glance.  Resolution % alone is the at-a-glance health
+# signal; the absolute fraction is available via `sextant doctor`.
+#
+# WHY we no longer query graph.db for `exports`/`reexports` counts: those
+# are interesting to a sextant developer but not actionable for the user
+# -- they were noise in the line that mattered.  `sextant telemetry` and
+# `sextant doctor` carry the diagnostic detail; the statusline carries
+# only what the user needs to decide whether to act.
 res=$(grep -oE 'resolution [0-9]+' "$intel_summary" 2>/dev/null | grep -oE '[0-9]+' | head -1)
-res_frac=$(grep -oE 'resolution [0-9]+% \([0-9/]+' "$intel_summary" 2>/dev/null | grep -oE '[0-9]+/[0-9]+' | head -1)
 files=$(grep -oE 'Indexed files.*[0-9]+' "$intel_summary" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 [ -z "$files" ] && [ -z "$res" ] && exit 0
-
-# ── Graph stats from graph.db ─────────────────────────
-graph_db="$intel_dir/graph.db"
-exports=""
-reexports=""
-if command -v sqlite3 &>/dev/null && [ -f "$graph_db" ]; then
-    exports=$(sqlite3 "$graph_db" "SELECT COUNT(*) FROM exports;" 2>/dev/null)
-    reexports=$(sqlite3 "$graph_db" "SELECT COUNT(*) FROM reexports;" 2>/dev/null || echo "0")
-fi
 
 # ── Health dot ────────────────────────────────────────
 if [ -n "$res" ]; then
@@ -71,15 +72,18 @@ fi
 
 # ── Watcher status ────────────────────────────────────
 hb="$intel_dir/.watcher_heartbeat"
+watcher_state="ok"   # ok | stale | off
 if [ -f "$hb" ]; then
     hb_age=$(( now - $(get_mtime "$hb") ))
     if [ "$hb_age" -lt 90 ]; then
         watcher="\e[32m⟳ $(fmt_age $hb_age)\e[m"
     else
         watcher="\e[33m⏸ stale\e[m"
+        watcher_state="stale"
     fi
 else
     watcher="\e[33m⏸ off\e[m"
+    watcher_state="off"
 fi
 
 # ── Last injection to Claude ──────────────────────────
@@ -119,15 +123,35 @@ if [ -f "$retrieval_path" ]; then
     fi
 fi
 
+# ── Action hint (the only "you need to do X" surface for the user) ──
+# WHY this exists: the freshness gate, watcher heartbeat, and resolution
+# health all detect actionable conditions, but Claude sees them via the
+# <codebase-intelligence> injection and the user only sees this status
+# line.  Without an action slot here, the user has no signal that
+# something is off until something visibly breaks -- and even then, no
+# hint about *which* command fixes it.  This block computes a single
+# highest-priority action and surfaces the literal command to copy.
+#
+# Priority (highest to lowest):
+#   1. Watcher off / heartbeat stale     -> sextant watch-start
+#   2. Resolution < 90% (extractor drift / unresolvable imports en masse)
+#                                         -> sextant scan --force
+# Multiple-issue case: show the most severe; when it's resolved, the
+# next-most severe surfaces.  We do NOT auto-execute -- the user copies.
+action_hint=""
+if [ "$watcher_state" = "off" ] || [ "$watcher_state" = "stale" ]; then
+    action_hint="\e[33m⚠ run: sextant watch-start\e[m"
+elif [ -n "$res" ] && [ "$res" -lt 90 ]; then
+    action_hint="\e[33m⚠ run: sextant scan --force\e[m"
+fi
+
 # ── Assemble status line ──────────────────────────────
 printf " ${dot}"
 [ -n "$res" ] && printf " %s%%" "$res"
-[ -n "$res_frac" ] && printf "\e[90m(%s)\e[m" "$res_frac"
 [ -n "$files" ] && printf " %s files" "$files"
-[ -n "$exports" ] && [ "$exports" != "0" ] && printf " \e[90m·\e[m %sexp" "$exports"
-[ -n "$reexports" ] && [ "$reexports" != "0" ] && printf " \e[90m·\e[m %srx" "$reexports"
 printf " \e[90m·\e[m %b" "$watcher"
 [ -n "$inject_label" ] && printf " \e[90m·\e[m %b" "$inject_label"
 [ -n "$retrieval_label" ] && printf " \e[90m·\e[m %b" "$retrieval_label"
 [ -n "$last_file_label" ] && printf " %b" "$last_file_label"
+[ -n "$action_hint" ] && printf "  %b" "$action_hint"
 exit 0

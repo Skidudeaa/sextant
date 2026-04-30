@@ -15,13 +15,61 @@ async function run(ctx) {
   lines.push(viz.c("# sextant doctor", viz.colors.bold, viz.colors.cyan));
   lines.push("");
 
-  // State files
-  lines.push(viz.header("State"));
   const sd = path.join(rootAbs, ".planning", "intel");
   const graphDb = path.join(sd, "graph.db");
   const summaryMd = path.join(sd, "summary.md");
   const claudeSettings = path.join(rootAbs, ".claude", "settings.json");
 
+  // Compute actions FIRST so they appear at the top of the output -- this
+  // is the "what should I do?" surface the user wants when they don't
+  // remember the exact command for the current state.  Each action item
+  // ships its literal command; the user copies, sextant doesn't auto-run.
+  // Conditions are checked in dependency order so we don't suggest, e.g.,
+  // a scan before init has run.
+  const watcher = getWatcherStatus(rootAbs);
+  const heartbeatPath = path.join(sd, ".watcher_heartbeat");
+  const pct = h.metrics?.resolutionPct ?? h.resolutionPct ?? 0;
+  const resolved = h.metrics?.localResolved ?? h.localResolved ?? 0;
+  const total = h.metrics?.localTotal ?? h.localTotal ?? 0;
+  const ageSec = h.metrics?.indexAgeSec ?? h.indexAgeSec ?? 0;
+  const indexed = h.metrics?.indexedFiles ?? h.indexedFiles ?? h.index?.files ?? 0;
+
+  const actions = [];
+  if (!fs.existsSync(sd)) {
+    actions.push({ msg: "State dir missing — sextant not initialized in this repo", cmd: "sextant init" });
+  } else if (!fs.existsSync(graphDb)) {
+    actions.push({ msg: "graph.db missing — index has never been built", cmd: "sextant scan --force" });
+  } else if (indexed === 0) {
+    actions.push({ msg: "graph.db exists but is empty", cmd: "sextant scan --force" });
+  }
+  if (!watcher.running) {
+    if (fs.existsSync(heartbeatPath)) {
+      actions.push({ msg: "Watcher heartbeat stale — process likely died", cmd: "sextant watch-stop && sextant watch-start" });
+    } else {
+      actions.push({ msg: "Watcher not running", cmd: "sextant watch-start" });
+    }
+  }
+  if (pct > 0 && pct < 90) {
+    actions.push({ msg: `Resolution degraded (${pct}%) — graph boosts gated below 90%`, cmd: "sextant scan --force" });
+  }
+  if (!fs.existsSync(claudeSettings)) {
+    actions.push({ msg: "Claude Code settings.json missing — hooks not wired", cmd: "sextant init" });
+  }
+
+  // Top-of-output Actions block.  No-op when everything is healthy so
+  // the user can scan the rest of the report without waste.
+  lines.push(viz.header("Actions"));
+  if (actions.length === 0) {
+    lines.push(`  ${viz.status("ok", "no actions needed — system healthy")}`);
+  } else {
+    for (const a of actions) {
+      lines.push(`  ${viz.c("[ACT]", viz.colors.yellow)} ${a.msg}`);
+      lines.push(`        ${viz.c("→", viz.colors.dim)} ${viz.c(a.cmd, viz.colors.cyan)}`);
+    }
+  }
+
+  // State files
+  lines.push(viz.header("State"));
   lines.push(viz.metric("state dir", fs.existsSync(sd) ? viz.status("ok", sd) : viz.status("error", sd)));
   lines.push(viz.metric("graph.db", fs.existsSync(graphDb) ? viz.status("ok", "exists") : viz.status("error", "missing")));
   lines.push(viz.metric("summary.md", fs.existsSync(summaryMd) ? viz.status("ok", "exists") : viz.status("error", "missing")));
@@ -29,11 +77,6 @@ async function run(ctx) {
 
   // Health metrics
   lines.push(viz.header("Health"));
-  const pct = h.metrics?.resolutionPct ?? h.resolutionPct ?? 0;
-  const resolved = h.metrics?.localResolved ?? h.localResolved ?? 0;
-  const total = h.metrics?.localTotal ?? h.localTotal ?? 0;
-  const ageSec = h.metrics?.indexAgeSec ?? h.indexAgeSec ?? 0;
-  const indexed = h.metrics?.indexedFiles ?? h.indexedFiles ?? h.index?.files ?? 0;
 
   // Resolution with bar chart
   let resStatus = viz.status("ok", "healthy");
@@ -46,8 +89,8 @@ async function run(ctx) {
   // Index age with color.  The age warning reflects watcher state: if the
   // heartbeat file is fresh, the watcher is alive and just idle (no file
   // changes since last flush), which is not a failure mode.  Only warn
-  // "stale" when the watcher is actually dead.
-  const watcher = getWatcherStatus(rootAbs);
+  // "stale" when the watcher is actually dead.  (watcher already computed
+  // for the Actions block at the top -- reuse.)
   const ageDisplay = viz.ageStatus(ageSec, { warn: 300, danger: 3600 });
   let ageNote = "";
   if (ageSec > 300) {
@@ -165,19 +208,9 @@ async function run(ctx) {
     }
   }
 
-  // Hints
-  lines.push(viz.header("Hints"));
-  if (!fs.existsSync(sd)) {
-    lines.push(`  ${viz.status("info", "Run: sextant init")}`);
-  } else if (indexed === 0) {
-    lines.push(`  ${viz.status("info", "Run: sextant scan")}`);
-  } else if (!watcher.running) {
-    lines.push(`  ${viz.status("warn", "Start watcher: sextant watch-start")}`);
-  } else if (pct < 90) {
-    lines.push(`  ${viz.status("warn", "Check resolver / adjust globs in .codebase-intel.json")}`);
-  } else {
-    lines.push(`  ${viz.status("ok", "System looks healthy")}`);
-  }
+  // The bottom "Hints" block was removed -- it duplicated the
+  // top-of-output Actions block and only ever surfaced a single hint
+  // via if/elif.  Actions covers the same ground exhaustively now.
   lines.push("");
 
   process.stdout.write(lines.join("\n") + "\n");

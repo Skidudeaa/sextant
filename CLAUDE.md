@@ -135,11 +135,15 @@ There are three output channels. They go to different places:
 - The user's only visual indicator is the `statusLine` configured in `~/.claude/settings.json`, which runs `~/.claude/statusline-command.sh`. The script is shipped in `scripts/statusline-command.sh` (cross-platform, macOS + Linux).
 - Claude's input comes via two XML tags on stdout: `<codebase-intelligence>` (static summary) and `<codebase-retrieval>` (query-aware results)
 
-The statusline shows: `◆ 100%(35/35) · 27 files · 130exp · ⟳ 3s · → 12s ← config.py`
-- `◆` green/yellow/red = health
+The statusline shows (healthy): `◆ 100% · 80 files · ⟳ 3s · → 12s ← config.py`
+- `◆` green/yellow/red = health (resolution % alone; the absolute fraction lives in `sextant doctor`, not the at-a-glance line)
 - `⟳`/`⏸` = watcher running/off
 - `→ Xs` = when context was last sent to Claude
 - `← file` = last file watcher processed
+- `🔍 N · Xm` = last query-aware retrieval (file count + age)
+
+When something needs action: `◆ 60% · 5 files · ⏸ off  ⚠ run: sextant watch-start`
+- `⚠ run: <cmd>` slot only appears when an actionable condition is detected; carries the literal command to copy. Priority: watcher off/stale → resolution <90%. The statusline shows only the highest-priority action; `sextant doctor`'s top-of-output Actions block lists all applicable actions exhaustively.
 
 ### CLI Commands (`commands/`)
 
