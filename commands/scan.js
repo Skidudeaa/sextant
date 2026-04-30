@@ -2,6 +2,7 @@ const intel = require("../lib/intel");
 const { loadRepoConfig } = require("../lib/config");
 const { hasFlag, getWatcherStatus } = require("../lib/cli");
 const zoekt = require("../lib/zoekt");
+const telemetry = require("../lib/telemetry");
 
 async function run(ctx) {
   const pruneMissing = ctx.argv[0] === "rescan";
@@ -40,7 +41,24 @@ async function run(ctx) {
     cliGlobs.push(a);
   }
 
+  // WHY trigger detection: the freshness gate (lib/freshness.js) spawns
+  // `sextant scan --allow-concurrent --force` with SEXTANT_RESCAN_TRIGGER
+  // set when its async rescan path fires.  Every other invocation is
+  // either user-initiated or fired by an internal tool (e.g. session
+  // bootstrap).  Recording the trigger on scan.completed lets the audit
+  // pipeline split scan-duration percentiles and success rates by source
+  // -- gate-triggered rescans are the ones whose latency Option 5 will
+  // need to reason about.
+  const trigger =
+    process.env.SEXTANT_RESCAN_TRIGGER === "freshness_gate"
+      ? "freshness_gate"
+      : "manual";
+
   for (const r of ctx.roots) {
+    const scanStartMs = Date.now();
+    let scanSuccess = false;
+    let scanError = null;
+
     const cfg = loadRepoConfig(r);
     const globs = cliGlobs.length ? cliGlobs : cfg.globs;
 
@@ -106,18 +124,49 @@ async function run(ctx) {
       }
     };
 
-    await intel.scan(r, globs, { ignore: cfg.ignore, pruneMissing, onProgress, force: forceReindex });
-
-    // WHY: Trigger Zoekt reindex after scan so search is ready soon.
-    // Uses triggerReindex (non-blocking background spawn) instead of buildIndex
-    // (synchronous spawnSync) to avoid blocking the scan for 10-60s on large repos.
     try {
-      const { triggerReindex } = require("../lib/zoekt-reindex");
-      if (zoekt.isInstalled()) {
-        triggerReindex(r);
+      await intel.scan(r, globs, { ignore: cfg.ignore, pruneMissing, onProgress, force: forceReindex });
+
+      // WHY: Trigger Zoekt reindex after scan so search is ready soon.
+      // Uses triggerReindex (non-blocking background spawn) instead of buildIndex
+      // (synchronous spawnSync) to avoid blocking the scan for 10-60s on large repos.
+      try {
+        const { triggerReindex } = require("../lib/zoekt-reindex");
+        if (zoekt.isInstalled()) {
+          triggerReindex(r);
+        }
+      } catch (err) {
+        process.stderr.write(`[sextant] zoekt reindex: ${err.message}\n`);
       }
+      scanSuccess = true;
     } catch (err) {
-      process.stderr.write(`[sextant] zoekt reindex: ${err.message}\n`);
+      scanError = err?.message || String(err);
+      throw err;
+    } finally {
+      // WHY clear the rescan marker here (not in intel.js's bulk scan
+      // path): if intel.scan throws before reaching its persist+clear
+      // sequence, the marker would otherwise sit untouched until the
+      // 5-minute orphan TTL expires, blocking every subsequent stale
+      // read from triggering a fresh rescan.  Clearing in finally covers
+      // both success and failure with no special-casing.
+      const freshness = require("../lib/freshness");
+      freshness.clearRescanMarker(r);
+
+      // WHY in finally: scan.completed is the load-bearing telemetry event
+      // for Option 5's adaptive sync/async chooser -- it must record on
+      // both success AND failure so the audit pipeline can compute success
+      // rate, not just mean-of-successful-durations.  durationMs is the
+      // metric we'll percentile to decide whether sync rescan is safe per
+      // repo.  trigger separates gate-fired rescans from user-initiated
+      // ones (only the former matters for the sync decision).
+      telemetry.recordEvent(r, "scan.completed", {
+        durationMs: Date.now() - scanStartMs,
+        success: scanSuccess,
+        trigger,
+        pruneMissing,
+        forceReindex,
+        ...(scanError ? { error: scanError } : {}),
+      });
     }
   }
 }

@@ -16,6 +16,7 @@ Usage:
   sextant health [--root <path>] [--pretty]
   sextant doctor [--root <path>]
   sextant query <imports|dependents|exports> --file <relPath> [--root <path>]
+  sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old]
   sextant hook sessionstart
   sextant hook refresh
   sextant inject
@@ -36,6 +37,7 @@ const commandMap = {
   health: "../commands/health",
   doctor: "../commands/doctor",
   query: "../commands/query",
+  telemetry: "../commands/telemetry",
   retrieve: "../commands/retrieve",
   zoekt: "../commands/zoekt",
 };

@@ -108,11 +108,16 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
     - Triggers atomic single-flight async rescan via `.planning/intel/.rescan_pending` marker (5-minute orphan-recovery window); spawned scan uses `--allow-concurrent --force` and is safe under the mtime-gated cache
     - Scan-state recorded inside `persistGraphUnlocked` and the bulk-scan finalize, so on-disk state is atomic with `generated_at`
 
-13. **Telemetry** (`lib/telemetry.js`) — append-only JSONL at `.planning/intel/telemetry.jsonl`
-    - Records `freshness.stale_hit { reason, rescanState }` and `freshness.blackout_turn { reason }` per stale read
+13. **Telemetry** (`lib/telemetry.js`, `commands/telemetry.js`) — append-only JSONL at `.planning/intel/telemetry.jsonl`
+    - Recorded events:
+      - `freshness.fresh_hit {}` — every fresh read (denominator for stale_rate)
+      - `freshness.stale_hit { reason, rescanState }` — every stale read
+      - `freshness.blackout_turn { reason }` — every minimal-body emission
+      - `scan.completed { durationMs, success, trigger, pruneMissing, forceReindex, error? }` — every scan exit (success or failure); `trigger` is `freshness_gate` or `manual` based on the `SEXTANT_RESCAN_TRIGGER` env var
     - Bounded growth: rotates to `.old` past `TELEMETRY_MAX_BYTES` (1 MiB)
     - Never throws; failures are silently absorbed (telemetry must never break the hook)
-    - Dataset feeds the future Option-5 adaptive sync/async decision (per-repo p95 scan duration, timeout rate)
+    - Audit surface: `sextant telemetry [--json | --tail N] [--include-old]` — prints stale rate, stale-reason breakdown, scan duration percentiles (p50/p95/p99) split by trigger, success rate, event counts by name, observation window
+    - Dataset feeds the future Option-5 adaptive sync/async decision (per-repo p95 scan duration drives whether sync rescan is safe)
 
 ### Visibility Model (CRITICAL — read this)
 

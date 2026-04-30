@@ -81,6 +81,16 @@ describe("applyFreshnessGate: fresh path passes through rawSummary", () => {
     // No "Structural claims unavailable" line on fresh.
     assert.doesNotMatch(out, /Structural claims unavailable/);
   });
+
+  it("records freshness.fresh_hit telemetry on the fresh path", async () => {
+    // The previous test in this describe already triggered the gate on
+    // a fresh repo; events should be on disk.  fresh_hit gives the audit
+    // pipeline its denominator -- without it, "N stale_hits this week"
+    // is meaningless.
+    const events = telemetry.readEvents(dir);
+    const names = events.map((e) => e.name);
+    assert.ok(names.includes("freshness.fresh_hit"), `expected freshness.fresh_hit in events: ${names.join(",")}`);
+  });
 });
 
 describe("applyFreshnessGate: stale path strips structural fields", () => {
