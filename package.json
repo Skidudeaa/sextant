@@ -13,7 +13,8 @@
     "test": "node --test test/*.test.js test/extractors/*.test.js && bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh && node scripts/eval-retrieve.js",
     "test:unit": "node --test test/*.test.js test/extractors/*.test.js",
     "test:integration": "bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh",
-    "test:eval": "node scripts/eval-retrieve.js"
+    "test:eval": "node scripts/eval-retrieve.js",
+    "test:eval:hook": "node scripts/eval-hook.js"
   },
   "dependencies": {
     "@babel/parser": "^7.29.2",

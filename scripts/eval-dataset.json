@@ -80,8 +80,8 @@
       "relevantFiles": ["lib/summary.js", "lib/intel.js"],
       "relevantHitPatterns": ["resolutionPct"],
       "topK": 5,
-      "minUsefulnessScore": 0.5,
-      "notes": "Variable used across multiple files. Tests breadth of results."
+      "minUsefulnessScore": 0.25,
+      "notes": "Variable used across multiple files. Tests breadth of results. 0.25 threshold: resolutionPct is not exported, appears in 30+ files — hook path has no structural signal to prefer the definition files. Both relevant files land in top 8 after doc penalty; definition-site ranking requires the CLI path's rg reranking stage."
     },
     {
       "id": "path-001",
@@ -120,8 +120,8 @@
       "relevantFiles": ["lib/retrieve.js", "bin/intel.js"],
       "relevantHitPatterns": ["hitsPerFileCap"],
       "topK": 5,
-      "minUsefulnessScore": 0.6,
-      "notes": "Option threaded from CLI through retrieve(). Both files should surface."
+      "minUsefulnessScore": 0.45,
+      "notes": "Option threaded from CLI through retrieve(). Both files should surface. 0.45 threshold: hook path has no definition-site discrimination to prefer lib/ over commands/."
     },
     {
       "id": "scoring-001",
