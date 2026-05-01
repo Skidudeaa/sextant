@@ -11,7 +11,6 @@ async function run() {
 
   await intel.init(root);
   const rawSummary = intel.readSummary(root);
-  if (!rawSummary || !rawSummary.trim()) process.exit(0);
 
   // WHY: gate the injection on real repo state, not elapsed time.  When
   // graph.db's structural claims are out of sync with HEAD / status / code
@@ -20,7 +19,14 @@ async function run() {
   // of the full summary -- so we never ship hotspots/fan-in numbers that
   // could mislead Claude.  It also kicks off an atomic single-flight async
   // rescan in that case.  See lib/cli.js applyFreshnessGate for invariants.
-  const summary = await applyFreshnessGate(rawSummary, root);
+  //
+  // WHY call even when rawSummary is empty: on fresh init, summary.md is a
+  // zero-byte placeholder and the early-exit guard would skip the gate.
+  // But the gate is also what triggers the background rescan -- calling it
+  // unconditionally ensures the first sextant scan is enqueued on first
+  // SessionStart, not silently skipped.
+  const summary = await applyFreshnessGate(rawSummary || "", root);
+  if (!summary || !summary.trim()) process.exit(0);
 
   // stdout → Claude context
   const safeSummary = stripUnsafeXmlTags(summary.trim());

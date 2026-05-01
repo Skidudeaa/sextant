@@ -11,7 +11,14 @@
 # Cross-platform: works on both Linux (stat -c) and macOS (stat -f).
 
 input=$(cat)
-cwd=$(echo "$input" | jq -r '.cwd')
+# WHY: jq is not installed by default on Alpine/minimal Docker. Fall back to
+# sed-based extraction so the statusline works without it. Cwd values in
+# practice are simple paths (no escapes/unicode) so the sed pattern is safe.
+if command -v jq >/dev/null 2>&1; then
+    cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
+else
+    cwd=$(printf '%s' "$input" | sed -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+fi
 
 user=$(whoami)
 host=$(hostname -s)
