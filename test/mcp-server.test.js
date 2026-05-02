@@ -70,8 +70,8 @@ async function setupTestRoot() {
 // ---------------------------------------------------------------------------
 
 describe("MCP server — tool definitions", () => {
-  it("exposes exactly 4 tools", () => {
-    assert.equal(TOOLS.length, 4);
+  it("exposes exactly 5 tools", () => {
+    assert.equal(TOOLS.length, 5);
   });
 
   it("every tool has name, description, and inputSchema", () => {
@@ -140,12 +140,13 @@ describe("MCP server — tools/list", () => {
   it("returns the tool list", async () => {
     const result = await dispatch("tools/list", {});
     assert.ok(Array.isArray(result.tools));
-    assert.equal(result.tools.length, 4);
+    assert.equal(result.tools.length, 5);
     const names = result.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
       "sextant_explain",
       "sextant_health",
       "sextant_related",
+      "sextant_scope",
       "sextant_search",
     ]);
   });
@@ -244,10 +245,9 @@ describe("MCP server — tools/call handlers", () => {
     }
   });
 
-  it("sextant_health includes vendored fields with zero count on a clean fixture", async () => {
-    // WHY: vendoredExcluded/vendoredPaths must always be present (additive
-    // contract for downstream consumers). A clean fixture with no vendored
-    // subtrees should report 0 / [] — not absent fields.
+  it("sextant_health stays focused on freshness — no vendored fields", async () => {
+    // WHY: vendored telemetry moved to sextant_scope. Health response must
+    // not regress and start including those fields again.
     const origCwd = process.cwd;
     process.cwd = () => root;
     try {
@@ -257,10 +257,8 @@ describe("MCP server — tools/call handlers", () => {
         arguments: {},
       });
       const data = JSON.parse(result.content[0].text);
-      assert.equal(typeof data.vendoredExcluded, "number");
-      assert.equal(data.vendoredExcluded, 0);
-      assert.ok(Array.isArray(data.vendoredPaths));
-      assert.equal(data.vendoredPaths.length, 0);
+      assert.equal(data.vendoredExcluded, undefined, "moved to sextant_scope");
+      assert.equal(data.vendoredPaths, undefined, "moved to sextant_scope");
     } finally {
       process.cwd = origCwd;
     }
@@ -372,7 +370,7 @@ describe("MCP server — tools/call handlers", () => {
   });
 });
 
-describe("MCP server — sextant_health vendored telemetry", () => {
+describe("MCP server — sextant_scope vendored telemetry", () => {
   // WHY: separate fixture with synthetic vendored subtrees. Reuses the
   // same shape as test/swift-vendored-integration.test.js but isolated
   // here so the existing tools/call fixture stays minimal.
@@ -411,21 +409,51 @@ describe("MCP server — sextant_health vendored telemetry", () => {
     if (vendoredRoot) fs.rmSync(vendoredRoot, { recursive: true, force: true });
   });
 
-  it("surfaces vendoredExcluded count and matched paths", async () => {
+  it("returns zero on a clean fixture", async () => {
+    const cleanRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-mcp-clean-"));
+    try {
+      fs.mkdirSync(path.join(cleanRoot, ".planning", "intel"), { recursive: true });
+      fs.mkdirSync(path.join(cleanRoot, "lib"), { recursive: true });
+      fs.writeFileSync(path.join(cleanRoot, "lib", "x.js"), "module.exports = {};\n");
+      const db = await graph.loadDb(cleanRoot);
+      graph.upsertFile(db, { relPath: "lib/x.js", type: "js", sizeBytes: 20, mtimeMs: 1000 });
+      await graph.persistDb(cleanRoot);
+
+      const origCwd = process.cwd;
+      process.cwd = () => cleanRoot;
+      try {
+        await dispatch("initialize", {});
+        const result = await dispatch("tools/call", {
+          name: "sextant_scope",
+          arguments: {},
+        });
+        const data = JSON.parse(result.content[0].text);
+        assert.equal(data.detectionEnabled, true);
+        assert.equal(data.vendoredCount, 0);
+        assert.deepEqual(data.vendored, []);
+      } finally {
+        process.cwd = origCwd;
+      }
+    } finally {
+      fs.rmSync(cleanRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces all three detection-signal reasons", async () => {
     const origCwd = process.cwd;
     process.cwd = () => vendoredRoot;
     try {
       await dispatch("initialize", {});
       const result = await dispatch("tools/call", {
-        name: "sextant_health",
+        name: "sextant_scope",
         arguments: {},
       });
       const data = JSON.parse(result.content[0].text);
-      assert.equal(data.vendoredExcluded, 3, "all three signals fire");
-      assert.deepEqual(
-        data.vendoredPaths.slice().sort(),
-        ["Pods", "mbadolato-iTerm2-Color-Schemes-abc1234", "sub-repo"]
-      );
+      assert.equal(data.vendoredCount, 3, "all three signals fire");
+      const byPath = Object.fromEntries(data.vendored.map((v) => [v.path, v.reason]));
+      assert.equal(byPath["Pods"], "vendor-dirname");
+      assert.equal(byPath["mbadolato-iTerm2-Color-Schemes-abc1234"], "tarball-name");
+      assert.equal(byPath["sub-repo"], "nested-git-repo");
     } finally {
       process.cwd = origCwd;
     }
@@ -441,19 +469,20 @@ describe("MCP server — sextant_health vendored telemetry", () => {
     try {
       await dispatch("initialize", {});
       const result = await dispatch("tools/call", {
-        name: "sextant_health",
+        name: "sextant_scope",
         arguments: {},
       });
       const data = JSON.parse(result.content[0].text);
-      assert.equal(data.vendoredExcluded, 0, "auto-detection disabled");
-      assert.equal(data.vendoredPaths.length, 0);
+      assert.equal(data.detectionEnabled, false, "config flag echoed back to caller");
+      assert.equal(data.vendoredCount, 0);
+      assert.deepEqual(data.vendored, []);
     } finally {
       process.cwd = origCwd;
       fs.rmSync(path.join(vendoredRoot, ".codebase-intel.json"), { force: true });
     }
   });
 
-  it("merges explicit vendored: [...] entries on top of auto-detection", async () => {
+  it("merges explicit vendored: [...] entries with reason 'user-config'", async () => {
     fs.writeFileSync(
       path.join(vendoredRoot, ".codebase-intel.json"),
       JSON.stringify({ vendored: ["explicit-one", "Pods"] })  // 'Pods' dedupes against auto-detection
@@ -463,14 +492,16 @@ describe("MCP server — sextant_health vendored telemetry", () => {
     try {
       await dispatch("initialize", {});
       const result = await dispatch("tools/call", {
-        name: "sextant_health",
+        name: "sextant_scope",
         arguments: {},
       });
       const data = JSON.parse(result.content[0].text);
-      // 3 auto-detected + 1 explicit-only ('Pods' deduped)
-      assert.equal(data.vendoredExcluded, 4);
-      assert.ok(data.vendoredPaths.includes("explicit-one"));
-      assert.ok(data.vendoredPaths.includes("Pods"));
+      // 3 auto-detected + 1 explicit-only ('Pods' deduped on the auto side)
+      assert.equal(data.vendoredCount, 4);
+      const byPath = Object.fromEntries(data.vendored.map((v) => [v.path, v.reason]));
+      assert.equal(byPath["explicit-one"], "user-config");
+      // 'Pods' should still report the stronger auto-detection reason, not 'user-config'
+      assert.equal(byPath["Pods"], "vendor-dirname");
     } finally {
       process.cwd = origCwd;
       fs.rmSync(path.join(vendoredRoot, ".codebase-intel.json"), { force: true });

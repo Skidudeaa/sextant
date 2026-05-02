@@ -74,6 +74,19 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "sextant_scope",
+    description:
+      "Inspect what got cut from the index. Returns the vendored subtrees that were " +
+      "auto-detected or user-configured at the project root, with a reason for each " +
+      "(nested-git-repo, vendor-dirname, tarball-name, user-config). Use when verifying " +
+      "that a sub-tree is intentionally excluded vs missing from the graph by mistake, " +
+      "or when reasoning about file counts that look smaller than the working tree suggests.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // --- Tool handlers ------------------------------------------------------
@@ -261,24 +274,6 @@ async function handleHealth() {
     warnings.push(`import resolution ${h.resolutionPct}% (graph boosts are gated below 90%)`);
   }
 
-  // WHY: surface what got cut from the index. The summary header already
-  // shows "Vendored excluded: N (...)" but the MCP-only consumer (Claude
-  // talking to sextant programmatically) never sees the summary. Without
-  // this, an agent can't tell that the project tree had a vendored subtree
-  // intentionally excluded, and may mistakenly request scans of the
-  // excluded paths or treat the file count as suspiciously low.
-  // loadRepoConfig already merges auto-detected + user-configured entries
-  // and honors `vendoredDetection: false`, so we just read the result.
-  let vendoredPaths = [];
-  try {
-    const cfg = loadRepoConfig(_root);
-    if (Array.isArray(cfg.vendoredSignals)) {
-      vendoredPaths = cfg.vendoredSignals.map((s) => s.path);
-    }
-  } catch {
-    /* fail-soft: vendored telemetry is observability, never block health */
-  }
-
   return {
     content: [
       {
@@ -295,9 +290,48 @@ async function handleHealth() {
               running: watcher.running,
               heartbeatAgeSec: watcher.ageSec ?? null,
             },
-            vendoredExcluded: vendoredPaths.length,
-            vendoredPaths: vendoredPaths.slice(0, 10),
             warnings,
+          },
+          null,
+          2
+        ),
+      },
+    ],
+  };
+}
+
+// WHY: separate tool keeps sextant_health focused on freshness/resolution
+// while exposing the richer signal-with-reason shape that callers want
+// when reasoning about vendored exclusions. The summary header already
+// shows "Vendored excluded: N (...)" but MCP-only consumers (agents
+// driving sextant programmatically) never see the summary. Without this
+// surface, an agent can't tell whether a sub-tree is intentionally
+// excluded vs missing from the graph by mistake.
+async function handleScope() {
+  await ensureInit();
+
+  let detectionEnabled = true;
+  let signals = [];
+  try {
+    const cfg = loadRepoConfig(_root);
+    detectionEnabled = cfg.vendoredDetection !== false;
+    if (Array.isArray(cfg.vendoredSignals)) {
+      signals = cfg.vendoredSignals;
+    }
+  } catch {
+    /* fail-soft: scope is observability, never throw */
+  }
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(
+          {
+            root: _root,
+            detectionEnabled,
+            vendoredCount: signals.length,
+            vendored: signals.map((s) => ({ path: s.path, reason: s.reason })),
           },
           null,
           2
@@ -314,6 +348,7 @@ const toolHandlers = {
   sextant_related: handleRelated,
   sextant_explain: handleExplain,
   sextant_health: handleHealth,
+  sextant_scope: handleScope,
 };
 
 // --- JSON-RPC 2.0 protocol layer ---------------------------------------

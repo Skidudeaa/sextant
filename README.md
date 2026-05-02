@@ -152,7 +152,7 @@ There is no channel that both the user and Claude see simultaneously.
 - **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
 - **Query-aware hooks** -- classifies each prompt, retrieves code-relevant context in <200ms
 - **AST export extraction** -- JS/TS via @babel/parser with regex fallback on parse failure
-- **MCP server** -- 4 tools (search, related, explain, health) registered per-project via `.mcp.json`
+- **MCP server** -- 5 tools (search, related, explain, health, scope) registered per-project via `.mcp.json`
 - **Definition over hub** -- definition-site scoring beats high fan-in hub files
 - **Source-first search** -- source files searched before docs/config to prevent changelog saturation
 - **Re-export chain tracing** -- follows barrel-file re-exports up to 5 hops to find original definitions

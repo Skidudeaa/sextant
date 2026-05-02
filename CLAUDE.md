@@ -101,6 +101,7 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
     - `sextant_related` — calls `graph.neighbors()`
     - `sextant_explain` — fan-in, exports, imports for a file
     - `sextant_health` — index resolution, file count, age
+    - `sextant_scope` — vendored exclusions with detection reason (auto-detected nested-git-repo / vendor-dirname / tarball-name, plus user-config)
     - Registered per-project via `.mcp.json` by `sextant init`
 
 12. **Freshness gate** (`lib/freshness.js`, `lib/cli.js applyFreshnessGate`) — silent-absence model for stale state
@@ -205,7 +206,7 @@ All state lives in `.planning/intel/` (never committed):
 - **Graph-only fast path**: graph-retrieve.js runs in <50ms with no subprocesses — purely in-memory SQLite queries. Used in hooks alongside Zoekt HTTP for the 200ms budget.
 - **Shared deadline**: zoekt.searchFast() uses a 180ms total budget, not stacked independent timeouts. Graph and Zoekt run in parallel.
 - **Separate cache namespaces**: retrieval and summary dedupe hashes use distinct files (`.last_injected_hash.retrieval.*` vs `.last_injected_hash.summary.*`) to prevent alternating code/non-code prompts from invalidating each other's dedupe.
-- **Sextant MCP server**: replaces standalone Python Zoekt MCP with graph-ranked search. Registered per-project via `.mcp.json`. Four tools: search, related, explain, health.
+- **Sextant MCP server**: replaces standalone Python Zoekt MCP with graph-ranked search. Registered per-project via `.mcp.json`. Five tools: search, related, explain, health, scope.
 - **Silent absence over false confidence**: when the freshness gate detects stale state, the injected `<codebase-intelligence>` body is rebuilt from scratch with only filesystem/git-derived fields (no graph-derived numbers). Stale structural claims never enter the prompt; the LLM has nothing to misquote. The old "ALERT: INDEX STALE -- ship anyway" model is gone — it cried wolf on idle repos and still leaked stale numbers when the repo HAD changed.
 - **Freshness ≠ age**: a 5-day-old graph of an unchanged repo is fresh; a 1-minute-old graph after `git checkout` is stale. The gate compares git HEAD + status fingerprint + version stamps, not wall-clock elapsed time. The fingerprint excludes `.planning/` so sextant's own writes don't pollute the signal.
 - **Atomic single-flight rescan**: stale detection enqueues at most one async rescan per repo at a time, gated by an `O_CREAT|O_EXCL` marker file with a 5-minute orphan-recovery window. The spawned `sextant scan` runs with `--allow-concurrent --force`; the watcher's RAM cache gets invalidated correctly via the mtime-gated `loadDb()`, so concurrent execution is safe.
