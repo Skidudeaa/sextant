@@ -120,8 +120,8 @@
       "relevantFiles": ["lib/retrieve.js", "bin/intel.js"],
       "relevantHitPatterns": ["hitsPerFileCap"],
       "topK": 5,
-      "minUsefulnessScore": 0.45,
-      "notes": "Option threaded from CLI through retrieve(). Both files should surface. 0.45 threshold: hook path has no definition-site discrimination to prefer lib/ over commands/."
+      "minUsefulnessScore": 0.6,
+      "notes": "Option threaded from CLI through retrieve(). Both files should surface. The hook path now reaches def-site parity with the CLI path on this case via merge-results def-site detection (added 2026-05-01)."
     },
     {
       "id": "scoring-001",

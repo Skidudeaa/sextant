@@ -262,3 +262,55 @@ describe("mergeResults — term coverage bonus", () => {
     assert.equal(result.files[0].zoektHit.lineNumber, 20);
   });
 });
+
+// ─── Def-site line-level scoring (parity with retrieve.js CLI path) ─────
+
+describe("mergeResults — def-site line-level scoring", () => {
+  it("def-site line outranks usage line in the same file", () => {
+    const zoektHits = [
+      { path: "lib/a.js", lineNumber: 5,  line: "function resolveImport(spec) {", score: 500 },
+      { path: "lib/a.js", lineNumber: 60, line: "    resolveImport(other);",       score: 501 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["resolveImport"] });
+    // Def line (rank by adjusted score) wins as representative — without the
+    // boost, the usage line at score 501 would win over score 500.
+    assert.equal(result.files[0].zoektHit.lineNumber, 5);
+  });
+
+  it("file with def-site line outranks file with only usage lines (zoekt-only)", () => {
+    const zoektHits = [
+      { path: "lib/usage.js",  lineNumber: 10, line: "    resolveImport(spec);",        score: 510 },
+      { path: "lib/define.js", lineNumber: 20, line: "function resolveImport(spec) {",  score: 500 },
+    ];
+    // Without the def-site boost, usage.js (raw 510) outranks define.js (raw 500).
+    // With the boost, define.js gets +65% and dominates: 500 * 1.65 = 825 > 510.
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["resolveImport"] });
+    assert.equal(result.files[0].path, "lib/define.js");
+  });
+
+  it("def-site boost ignores files where symbol is only a substring of the def name", () => {
+    // "extractImports" query against "function extractImportsAST(...)" should
+    // NOT trigger the +25% def_site_priority (which requires exact match), but
+    // SHOULD trigger the smaller +12% symbol_contains_query boost.
+    const zoektHits = [
+      { path: "lib/exact.js",     lineNumber: 1, line: "function extractImports(code) {",    score: 500 },
+      { path: "lib/substring.js", lineNumber: 1, line: "function extractImportsAST(code) {", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["extractImports"] });
+    // Exact match must rank first.
+    assert.equal(result.files[0].path, "lib/exact.js");
+    assert.ok(
+      result.files[0].fusedScore > result.files[1].fusedScore,
+      `exact (${result.files[0].fusedScore}) must outscore substring (${result.files[1].fusedScore})`
+    );
+  });
+
+  it("no def-site boost when queryTerms is empty (back-compat)", () => {
+    const zoektHits = [
+      { path: "lib/a.js", lineNumber: 5, line: "function resolveImport(spec) {", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits);
+    // Without queryTerms, no line-level adjustment — score stays at the raw 500.
+    assert.equal(result.files[0].fusedScore, 500);
+  });
+});
