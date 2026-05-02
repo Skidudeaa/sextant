@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "language": "swift",
+  "description": "Synthetic Swift eval corpus — exercises every Swift scoring path: overloads (SB-1 at the eval level), enclosing-type +10% signal, extension-target +15% signal, conformance edges, span-based identity, classifier initialism path. Mirrors fixtures/mixed-eval/'s shape. Acceptance per docs/swift-v1-handoff.md: ≥10/12 cases pass, MRR ≥ 0.85, negative case returns 0. Queries are designed to match literal substrings of code lines (rg invokes with -F).",
+  "rootDir": "fixtures/swift-eval",
+  "cases": [
+    {
+      "id": "swift-sym-001",
+      "category": "symbol",
+      "query": "Patient",
+      "relevantFiles": ["Sources/PatientService/Patient.swift"],
+      "acceptableFiles": ["Sources/PatientService/PatientStore.swift"],
+      "relevantHitPatterns": ["struct Patient"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Basic struct def lookup. Patient.swift must rank #1; PatientStore.swift is acceptable because it references Patient heavily."
+    },
+    {
+      "id": "swift-sym-002",
+      "category": "symbol",
+      "query": "AuthSession",
+      "relevantFiles": ["Sources/Auth/AuthSession.swift"],
+      "relevantHitPatterns": ["actor AuthSession"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "PascalCase + initialism. Verifies the classifier's initialism regex (lib/classifier.js) accepts mixed AuthSession-style identifiers."
+    },
+    {
+      "id": "swift-sym-003-disambig",
+      "category": "symbol",
+      "query": "update(patient:",
+      "relevantFiles": ["Sources/PatientService/PatientStore.swift"],
+      "relevantHitPatterns": ["update\\(patient:"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Multi-overload disambiguation by signature label. PatientStore.swift defines update(id:), update(patient:), and update(notes:for:); the literal `update(patient:` query must reach the patient overload line specifically."
+    },
+    {
+      "id": "swift-proto-001",
+      "category": "protocol",
+      "query": "protocol View",
+      "relevantFiles": ["Sources/UI/View.swift"],
+      "relevantHitPatterns": ["protocol View"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Protocol def beats extensions on the same file. The `protocol View` line must rank above the `extension View` lines."
+    },
+    {
+      "id": "swift-proto-002",
+      "category": "protocol",
+      "query": "protocol Service",
+      "relevantFiles": ["Sources/Networking/Service.swift"],
+      "relevantHitPatterns": ["protocol Service"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Protocol with associated types + async throws requirement. Exercises associatedtype path through the extractor."
+    },
+    {
+      "id": "swift-ext-001",
+      "category": "extension",
+      "query": "View+Toolbar",
+      "relevantFiles": ["Sources/UI/View.swift"],
+      "acceptableFiles": ["Sources/UI/Toolbar.swift"],
+      "relevantHitPatterns": ["View\\+Toolbar"],
+      "topK": 5,
+      "minUsefulnessScore": 0.4,
+      "notes": "The `+` token activates looksLikeExtensionQuery() (lib/scoring.js). View.swift contains a doc-comment anchor `/// SwiftUI-style View+Toolbar composition helpers.` immediately above the extension block. The +15% extension-target boost should fire on the extension def line within the same file."
+    },
+    {
+      "id": "swift-ext-002",
+      "category": "extension",
+      "query": "extension View",
+      "relevantFiles": ["Sources/UI/View.swift", "Sources/UI/Toolbar.swift"],
+      "relevantHitPatterns": ["extension View"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Literal `extension` keyword path. Both View.swift's same-file extension and Toolbar.swift's separate-file extension must surface in top 5."
+    },
+    {
+      "id": "swift-enclosing-001",
+      "category": "enclosing-type",
+      "query": "numberOfPatients PatientStore",
+      "relevantFiles": ["Sources/PatientService/PatientStore.swift"],
+      "relevantHitPatterns": ["numberOfPatients"],
+      "topK": 5,
+      "minUsefulnessScore": 0.4,
+      "notes": "Multi-token query where one term (PatientStore) equals the enclosing type name. PatientStore.swift contains an in-class anchor comment `// numberOfPatients PatientStore — derived count`. The +10% SWIFT_ENCLOSING_TYPE_BOOST should fire on the anchor line because its `before` context exposes the `class PatientStore` declaration."
+    },
+    {
+      "id": "swift-init-001",
+      "category": "init",
+      "query": "init(token:",
+      "relevantFiles": ["Sources/Auth/AuthSession.swift"],
+      "relevantHitPatterns": ["init\\(token:"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Init overload disambiguation via signature_hint. AuthSession defines init(user:) and init(token:refresh:). Query targets the second overload specifically."
+    },
+    {
+      "id": "swift-enum-001",
+      "category": "enum",
+      "query": "case error",
+      "relevantFiles": ["Sources/Logging/LogLevel.swift"],
+      "relevantHitPatterns": ["case error"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Enum case with associated value. LogLevel.swift's `case error(String)` is a swift_declarations row with kind=case, parent_name=LogLevel."
+    },
+    {
+      "id": "swift-property-001",
+      "category": "property",
+      "query": "@Published var patients",
+      "relevantFiles": ["Sources/PatientService/PatientStore.swift"],
+      "relevantHitPatterns": ["@Published var patients"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Property declaration with attribute. The `@Published var patients: [Patient]` line is the canonical hit."
+    },
+    {
+      "id": "swift-negative-001",
+      "category": "negative",
+      "query": "absent_swift_xyz_qwerty987",
+      "relevantFiles": [],
+      "relevantHitPatterns": [],
+      "topK": 5,
+      "minUsefulnessScore": 0.0,
+      "notes": "Garbage query across the Swift corpus. Must return zero results."
+    },
+    {
+      "id": "swift-overload-001",
+      "category": "overload",
+      "query": "func update",
+      "relevantFiles": ["Sources/PatientService/PatientStore.swift"],
+      "relevantHitPatterns": ["func update"],
+      "topK": 3,
+      "minUsefulnessScore": 0.5,
+      "notes": "SB-1 invariant at the eval level. PatientStore.swift defines three update overloads — update(id:), update(patient:), update(notes:for:) — and retrieval must surface the file with multiple `func update` hits in close proximity. DB-level SB-1 verification (separate from this case): `sqlite3 fixtures/swift-eval/.planning/intel/graph.db \"SELECT name, signature_hint, start_byte FROM swift_declarations WHERE name='update' AND parent_name='PatientStore' ORDER BY start_byte;\"` must return exactly 3 rows with distinct signature_hint values (id:, patient:, notes:for:)."
+    }
+  ]
+}
