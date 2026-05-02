@@ -273,19 +273,26 @@ modified:   test/graph-swift.test.js                       (+69, 6 new cases)
 
 ## Things not done that you might think are done
 
-- **Not pushed to `origin/main`.** Local commit only. `git push` when ready.
-- **No CHANGELOG entry.** Convention in this repo seems sparse on changelog
-  updates per-feature; matched what was here.
-- **README not updated.** The vendor-detection knobs in
-  `.codebase-intel.json` are documented in CLAUDE.md but not the README.
-  Add to `README.md` "Configuration" section if there is one.
-- **MCP server's `sextant_health` tool not extended.** It still surfaces
-  raw resolution+file-count, doesn't mention vendored exclusions. Could
-  add the count to the JSON-RPC response if a downstream consumer wants
-  it.
-- **Eval harness count drift.** `CLAUDE.md` says "19 queries" but
-  the harness is at 20 (predates this work — see `7c5bab5`). Not fixed
-  here.
+Closure pass landed in a follow-up commit on top of `cc8661b`:
+
+- ~~**Not pushed to `origin/main`.**~~ — pushed `0d774bd` + `cc8661b`.
+- ~~**README not updated.**~~ — added `vendored` and `vendoredDetection`
+  rows to the Configuration table; eval-results paragraph and
+  `npm run test:eval` comment now reflect the live 20/20 numbers.
+- ~~**MCP server's `sextant_health` tool not extended.**~~ — extended
+  with `vendoredExcluded: number` and `vendoredPaths: string[]` (capped
+  at 10). Reads `loadRepoConfig().vendoredSignals` so it honors
+  `vendoredDetection: false` and merges explicit `vendored: [...]`
+  identically to the scanner. Test coverage in
+  `test/mcp-server.test.js` (3 new cases).
+- ~~**Eval harness count drift.**~~ — CLAUDE.md updated: `19 queries` →
+  `20 queries`; metrics line `MRR 0.954, nDCG 0.920, 19/19` →
+  `MRR 0.925, nDCG 0.930, 20/20`; rg-only-perfect-nDCG count
+  `17/19` → `13/19`; worst-case example `multi-003 (resolutionPct,
+  −0.164)` → `cross-003 (extractImports, −0.060)`. Mean delta sign
+  also flipped from `−0.006` to `+0.005` (still ≈ neutral).
+- **No CHANGELOG entry.** Convention in this repo is sparse on changelog
+  updates per-feature; matched what was here. Still skipped.
 
 ## Open questions for the user
 

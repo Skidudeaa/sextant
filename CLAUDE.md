@@ -212,7 +212,7 @@ All state lives in `.planning/intel/` (never committed):
 
 ## Eval Harness
 
-Self-referential evaluation: 19 queries across 7 categories (symbol, multiword, path, cross-file, scoring, scope, negative). Measures P@k, MRR, nDCG, usefulness, graph lift.
+Self-referential evaluation: 20 queries across 7 categories (symbol, multiword, path, cross-file, scoring, scope, negative). Measures P@k, MRR, nDCG, usefulness, graph lift.
 
 ```bash
 node scripts/eval-retrieve.js             # terminal output
@@ -220,9 +220,9 @@ node scripts/eval-retrieve.js --verbose   # hit lines + scoring signals
 node scripts/eval-retrieve.js --json      # machine-readable
 ```
 
-Current self-eval metrics on HEAD: **MRR 0.954, nDCG 0.920, 19/19 pass.**
+Current self-eval metrics on HEAD: **MRR 0.925, nDCG 0.930, 20/20 pass.**
 
-Graph-boost lift on the self-eval corpus is currently ≈ neutral (mean nDCG delta −0.006 vs rg-only). rg already achieves perfect nDCG on 17/19 queries, so the graph layer has no headroom to add; on multi-003 (`resolutionPct`) graph boosts promote a different def-site than the ground truth prefers, netting −0.164 on that one case. The machinery's intended value is on corpora where rg misses definitions entirely — larger repos with barrel re-exports (React `useState`, `createElement`) and common-name floods. Those external validations were done by hand during development but are NOT committed as reproducible fixtures; don't cite them as measured evidence without re-running against the actual repos.
+Graph-boost lift on the self-eval corpus is currently ≈ neutral (mean nDCG delta +0.005 vs rg-only). rg already achieves perfect nDCG on 13/19 non-negative queries, so the graph layer has limited headroom to add; the worst graph-side case is cross-003 (`extractImports`) where graph boosts net −0.060 by promoting a different def-site than the ground truth prefers. The machinery's intended value is on corpora where rg misses definitions entirely — larger repos with barrel re-exports (React `useState`, `createElement`) and common-name floods. Those external validations were done by hand during development but are NOT committed as reproducible fixtures; don't cite them as measured evidence without re-running against the actual repos.
 
 Any scoring change should re-run `npm run test:eval` and confirm the `graphLiftNDCG` hasn't regressed further — and should include a new eval fixture that exercises the intended win case if claiming a graph-side win.
 

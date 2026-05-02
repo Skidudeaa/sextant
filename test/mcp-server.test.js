@@ -244,6 +244,28 @@ describe("MCP server — tools/call handlers", () => {
     }
   });
 
+  it("sextant_health includes vendored fields with zero count on a clean fixture", async () => {
+    // WHY: vendoredExcluded/vendoredPaths must always be present (additive
+    // contract for downstream consumers). A clean fixture with no vendored
+    // subtrees should report 0 / [] — not absent fields.
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_health",
+        arguments: {},
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(typeof data.vendoredExcluded, "number");
+      assert.equal(data.vendoredExcluded, 0);
+      assert.ok(Array.isArray(data.vendoredPaths));
+      assert.equal(data.vendoredPaths.length, 0);
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
   it("sextant_health reports watcher state", async () => {
     // No watcher runs in the test fixture — health should explicitly report
     // running:false and surface a warning.  Callers (Claude) use this to
@@ -346,6 +368,112 @@ describe("MCP server — tools/call handlers", () => {
       assert.ok(result.content[0].text.includes("file parameter is required"));
     } finally {
       process.cwd = origCwd;
+    }
+  });
+});
+
+describe("MCP server — sextant_health vendored telemetry", () => {
+  // WHY: separate fixture with synthetic vendored subtrees. Reuses the
+  // same shape as test/swift-vendored-integration.test.js but isolated
+  // here so the existing tools/call fixture stays minimal.
+  let vendoredRoot;
+
+  before(async () => {
+    vendoredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-mcp-vendor-"));
+    fs.mkdirSync(path.join(vendoredRoot, ".planning", "intel"), { recursive: true });
+
+    // Real source file so health has something to count.
+    fs.mkdirSync(path.join(vendoredRoot, "lib"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vendoredRoot, "lib", "main.js"),
+      "module.exports = { run: () => 1 };\n"
+    );
+
+    // Three vendored subtrees, one per detection signal:
+    //   - Pods/         → conventional dirname
+    //   - mbadolato-iTerm2-Color-Schemes-abc1234 → tarball naming
+    //   - sub-repo/.git → nested git repo
+    fs.mkdirSync(path.join(vendoredRoot, "Pods"), { recursive: true });
+    fs.mkdirSync(
+      path.join(vendoredRoot, "mbadolato-iTerm2-Color-Schemes-abc1234"),
+      { recursive: true }
+    );
+    fs.mkdirSync(path.join(vendoredRoot, "sub-repo", ".git"), { recursive: true });
+    fs.writeFileSync(path.join(vendoredRoot, "sub-repo", ".git", "HEAD"), "ref: refs/heads/main\n");
+
+    // Seed graph.db with the one real file so intel.health() succeeds.
+    const db = await graph.loadDb(vendoredRoot);
+    graph.upsertFile(db, { relPath: "lib/main.js", type: "js", sizeBytes: 30, mtimeMs: 1000 });
+    await graph.persistDb(vendoredRoot);
+  });
+
+  after(() => {
+    if (vendoredRoot) fs.rmSync(vendoredRoot, { recursive: true, force: true });
+  });
+
+  it("surfaces vendoredExcluded count and matched paths", async () => {
+    const origCwd = process.cwd;
+    process.cwd = () => vendoredRoot;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_health",
+        arguments: {},
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.vendoredExcluded, 3, "all three signals fire");
+      assert.deepEqual(
+        data.vendoredPaths.slice().sort(),
+        ["Pods", "mbadolato-iTerm2-Color-Schemes-abc1234", "sub-repo"]
+      );
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("honors vendoredDetection:false in .codebase-intel.json", async () => {
+    fs.writeFileSync(
+      path.join(vendoredRoot, ".codebase-intel.json"),
+      JSON.stringify({ vendoredDetection: false })
+    );
+    const origCwd = process.cwd;
+    process.cwd = () => vendoredRoot;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_health",
+        arguments: {},
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.vendoredExcluded, 0, "auto-detection disabled");
+      assert.equal(data.vendoredPaths.length, 0);
+    } finally {
+      process.cwd = origCwd;
+      fs.rmSync(path.join(vendoredRoot, ".codebase-intel.json"), { force: true });
+    }
+  });
+
+  it("merges explicit vendored: [...] entries on top of auto-detection", async () => {
+    fs.writeFileSync(
+      path.join(vendoredRoot, ".codebase-intel.json"),
+      JSON.stringify({ vendored: ["explicit-one", "Pods"] })  // 'Pods' dedupes against auto-detection
+    );
+    const origCwd = process.cwd;
+    process.cwd = () => vendoredRoot;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_health",
+        arguments: {},
+      });
+      const data = JSON.parse(result.content[0].text);
+      // 3 auto-detected + 1 explicit-only ('Pods' deduped)
+      assert.equal(data.vendoredExcluded, 4);
+      assert.ok(data.vendoredPaths.includes("explicit-one"));
+      assert.ok(data.vendoredPaths.includes("Pods"));
+    } finally {
+      process.cwd = origCwd;
+      fs.rmSync(path.join(vendoredRoot, ".codebase-intel.json"), { force: true });
     }
   });
 });

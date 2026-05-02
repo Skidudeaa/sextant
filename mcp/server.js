@@ -12,6 +12,7 @@ const intel = require("../lib/intel");
 const graph = require("../lib/graph");
 const { retrieve } = require("../lib/retrieve");
 const { normalizeRelPath } = require("../lib/utils");
+const { loadRepoConfig } = require("../lib/config");
 
 // --- Tool definitions ---------------------------------------------------
 
@@ -260,6 +261,24 @@ async function handleHealth() {
     warnings.push(`import resolution ${h.resolutionPct}% (graph boosts are gated below 90%)`);
   }
 
+  // WHY: surface what got cut from the index. The summary header already
+  // shows "Vendored excluded: N (...)" but the MCP-only consumer (Claude
+  // talking to sextant programmatically) never sees the summary. Without
+  // this, an agent can't tell that the project tree had a vendored subtree
+  // intentionally excluded, and may mistakenly request scans of the
+  // excluded paths or treat the file count as suspiciously low.
+  // loadRepoConfig already merges auto-detected + user-configured entries
+  // and honors `vendoredDetection: false`, so we just read the result.
+  let vendoredPaths = [];
+  try {
+    const cfg = loadRepoConfig(_root);
+    if (Array.isArray(cfg.vendoredSignals)) {
+      vendoredPaths = cfg.vendoredSignals.map((s) => s.path);
+    }
+  } catch {
+    /* fail-soft: vendored telemetry is observability, never block health */
+  }
+
   return {
     content: [
       {
@@ -276,6 +295,8 @@ async function handleHealth() {
               running: watcher.running,
               heartbeatAgeSec: watcher.ageSec ?? null,
             },
+            vendoredExcluded: vendoredPaths.length,
+            vendoredPaths: vendoredPaths.slice(0, 10),
             warnings,
           },
           null,
