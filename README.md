@@ -122,6 +122,7 @@ There is no channel that both the user and Claude see simultaneously.
 
 - **Health-gated scoring** -- graph boosts disabled when import resolution drops below 90%
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
+- **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
 - **Query-aware hooks** -- classifies each prompt, retrieves code-relevant context in <200ms
 - **AST export extraction** -- JS/TS via @babel/parser with regex fallback on parse failure
 - **MCP server** -- 4 tools (search, related, explain, health) registered per-project via `.mcp.json`
@@ -174,6 +175,11 @@ Optional `.codebase-intel.json` at project root:
 |----------|------------------|-------------------|
 | JavaScript / TypeScript | Regex (96-100% accurate) | AST via `@babel/parser`, regex fallback |
 | Python | AST via stdlib `ast` (subprocess) | AST via stdlib `ast` (subprocess) |
+| Swift | tree-sitter (declarations + relations only — `import` statements not yet resolved as graph edges) | n/a — Swift has no `export` semantics |
+
+> Swift v1 is **repo-local source orientation**, not SDK / framework
+> introspection. See [docs/swift-v1-scope.md](docs/swift-v1-scope.md) for what
+> works, what doesn't, and how to recover from parser failure.
 
 ## Architecture
 

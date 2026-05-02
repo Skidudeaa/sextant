@@ -40,6 +40,7 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
    - JS/TS imports: regex-based (`javascript.js`)
    - JS/TS exports: AST-based via `@babel/parser` (`js_ast_exports.js`), falls back to regex on parse failure
    - Python: AST-based via `python_ast.py` (`python.js`)
+   - Swift declarations + relations: tree-sitter via `web-tree-sitter` (`swift.js`); span-based decl identity, heuristic edge confidence; WASM at `vendor/tree-sitter-swift.wasm`. Repo-local source orientation only — see `docs/swift-v1-scope.md`
    - Registry: `extractors/index.js` maps extensions to extractors
 
 2. **Resolver** (`lib/resolver.js`) maps import specifiers to file paths
@@ -170,7 +171,7 @@ The legacy `tools/codebase_intel/refresh.js` standalone script has been removed.
 ### Per-Repo State
 
 All state lives in `.planning/intel/` (never committed):
-- `graph.db` — SQLite database: dependency graph + file metadata + resolution stats (single source of truth). `meta` table also carries `generated_at`, `scanned_head`, `scanned_status_hash`, `scanner_version`, `schema_version` (the freshness gate's anchors).
+- `graph.db` — SQLite database: dependency graph + file metadata + resolution stats (single source of truth). Also holds `swift_declarations` and `swift_relations` tables for Swift-source orientation. `meta` table carries `generated_at`, `scanned_head`, `scanned_status_hash`, `scanner_version`, `schema_version` (the freshness gate's anchors).
 - `summary.md` — the injected summary
 - `history.json` — health snapshots for sparkline trends
 - `telemetry.jsonl` (+ `.old`) — append-only freshness-gate events; rotates past 1 MiB
@@ -260,5 +261,6 @@ Built in a single intensive session. Key milestones:
 - Semantic claims (LSP-like behavior)
 - Summaries > 2200 chars
 - UI that writes to stderr in hooks (nobody sees it)
+- Compiler-backed Swift semantics (USRs, cross-module refs, `.swiftinterface` ingestion) — orthogonal to repo-local orientation; would require a Swift toolchain dependency. See `docs/swift-v1-scope.md`.
 
 Use eval metrics to justify changes.
