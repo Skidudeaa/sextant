@@ -187,6 +187,16 @@
       "notes": "Internal function for JS/TS scope parsing. Tests that module-private functions are retrievable."
     },
     {
+      "id": "scope-003",
+      "category": "scope",
+      "query": "writeStatusLine",
+      "relevantFiles": ["commands/hook-refresh.js"],
+      "relevantHitPatterns": ["function writeStatusLine"],
+      "topK": 3,
+      "minUsefulnessScore": 0.6,
+      "notes": "Small async helper deep inside a hook-command file. Captured from 2026-04-30 dogfooding observations: prior to def-site lifting in merge-results (commit 5c15a32), the hook path missed this when the user asked about the statusline. Locks in the def-site signal flowing through to small intra-file helpers."
+    },
+    {
       "id": "negative-001",
       "category": "negative",
       "query": "xyzzy_nonexistent_token_abc123",
