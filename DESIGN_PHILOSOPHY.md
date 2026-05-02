@@ -99,6 +99,7 @@ This project is intentionally **not**:
 - a full language server
 - a vector database
 - an IDE replacement
+- a compiler-backed Swift toolchain (no USRs, no cross-module refs, no `.swiftinterface` ingestion — see `docs/swift-v1-scope.md`)
 
 Those problems are real.
 They are not *this* problem.

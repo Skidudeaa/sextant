@@ -129,7 +129,7 @@ There is no channel that both the user and Claude see simultaneously.
 - **Definition over hub** -- definition-site scoring beats high fan-in hub files
 - **Source-first search** -- source files searched before docs/config to prevent changelog saturation
 - **Re-export chain tracing** -- follows barrel-file re-exports up to 5 hops to find original definitions
-- **Cross-project validated** -- Express (142 files), Flask (83 files), React (4,337 files)
+- **Cross-project validated** -- Express (142 files), Flask (83 files), React (4,337 files), Vapor 4.121.4 (294 files; manual-trigger via `scripts/eval-swift-external.sh`)
 
 ## Commands
 
@@ -197,7 +197,7 @@ See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (ori
 
 ## Eval Results
 
-19/19 queries pass. MRR 0.954, nDCG 0.925. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files).
+19/19 self-eval queries pass on the sextant repo itself: MRR 0.954, nDCG 0.925. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files), Vapor 4.121.4 (294 files; baseline at `fixtures/vapor-baseline.json`). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.958, nDCG 0.977.
 
 See [EVAL_FINDINGS.md](EVAL_FINDINGS.md) for methodology, scoring evolution, and bugs found by eval.
 

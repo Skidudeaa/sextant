@@ -121,9 +121,50 @@ Trade-off: `multi-003 resolutionPct` nDCG dropped 0.38 → 0.24 because `intel.j
 
 ---
 
+## Swift v1 Eval Results
+
+### Synthetic — `fixtures/swift-eval/`
+
+13 cases across 7 categories: symbol, multi-overload disambiguation, protocol, extension (with `+` syntax and literal `extension` keyword), enclosing-type, init, enum, property, negative, overload-identity (SB-1).
+
+| Metric | Value |
+|---|---|
+| Pass rate | 13/13 |
+| MRR | 0.958 |
+| nDCG | 0.977 |
+| Mean Useful | 0.784 |
+| Graph Lift nDCG | 0.000 (neutral) |
+
+Both Swift-gated scoring signals exercised and visible in verbose output:
+- `swift_enclosing_type:+10%` fires on `swift-enclosing-001` (multi-token query where one term equals the enclosing type name; the +10% boost lands on a hit whose `before` context exposes the `class PatientStore` line).
+- `swift_extension_target:+15%` fires on `swift-ext-001` (`View+Toolbar` — `+` token activates `looksLikeExtensionQuery()`) and `swift-ext-002` (literal `extension` keyword).
+
+SB-1 invariant verified at the SQL level — `PatientStore.update` has 3 distinct rows in `swift_declarations` keyed by byte span, each with a distinct `signature_hint` (`id:`, `patient:`, `notes:for:`).
+
+### External — Vapor 4.121.4
+
+15-query battery covering Vapor's public surface: `Application`, `Middleware protocol`, `Request`, `Response`, `EventLoopFuture` extensions, `Service` ★, `URI` ★, `init` ★, `extension Application`, `Codable` conformance, `Routes`, `ContentEncoder protocol`, `WebSocket`, `AbortError protocol`, `Validatable protocol`. Three starred ★ queries are the pathological-lift cases the original Swift v1 plan named.
+
+| Metric | Value |
+|---|---|
+| Pass rate | 15/15 |
+| MRR | 0.591 |
+| nDCG | 0.604 |
+| Graph Lift nDCG | 0.000 (neutral) on all 3 starred queries |
+
+Run via `bash scripts/eval-swift-external.sh` (manual-trigger only, NOT in `npm test`). Diff mode gates on mean MRR delta ≥ -0.05 and per-case top-3 retention. Baseline at `fixtures/vapor-baseline.json`; regenerate via `bash scripts/eval-swift-external.sh regen-baseline` when bumping `VAPOR_SHA`.
+
+**Honest finding worth keeping visible**: graph lift on Vapor is currently neutral, contradicting the original plan's expectation that Vapor would be where graph-machinery value showed up. Tracked as Skidudeaa/sextant#2 with three exit paths (scoring change → measurable lift, second corpus where lift IS positive, or documented "this corpus shape doesn't benefit" finding).
+
+**Second finding**: test-tagged sources outside `Tests/` directories (`Sources/XCTVapor/`, `Sources/VaporTesting/`) aren't caught by `TEST_PENALTY`'s path heuristic and outrank canonical defs on common-name queries. Tracked as Skidudeaa/sextant#1.
+
+---
+
 ## Next Steps
 
 1. ~~**Export-graph symbol lookup**~~ — DONE. Queries exports table for each query term, injects files rg missed.
 2. ~~**Entry point refinement**~~ — DONE. Path exclusion for fixtures/tests/examples + entry point demoted from sort key to +10% scoring signal.
 3. ~~**Re-export chain tracing**~~ — DONE. BFS through `reexports` table up to 5 hops, follows barrel-file chains to original definition.
 4. **Template string imports** — regex extractor silently misses `require(\`./\${name}\`)`. Would need AST-based JS extraction or heuristic fallback.
+5. **Broaden `TEST_PENALTY` matcher** (#1) — catch SwiftPM-style test-helper targets that live outside `Tests/`.
+6. **Investigate Vapor graph-lift neutrality** (#2) — quantify which corpus shapes benefit from the structural lane.
