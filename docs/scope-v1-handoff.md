@@ -3,6 +3,13 @@
 > Written 2026-05-02 at session end, pairs with the dogfooding-feedback
 > case that motivated it. Read this before touching `lib/project-scope.js`,
 > `lib/utils.js:isEntryPoint`, or the `swift_entry_files` table.
+>
+> **Post-v1 closure pass (2026-05-02 evening)**: all three v2-table items
+> the user approved have shipped on top of v1. See "Post-v1 closure
+> summary" below for the new ground state. The original v1 narrative
+> (status, why, what v1 does, ship blockers, acceptable debt) is left
+> intact for archaeology; the v2 follow-up table and open questions
+> sections at the bottom are annotated with their resolutions.
 
 ## Status
 
@@ -112,6 +119,28 @@ Override knobs in `.codebase-intel.json`:
 Everything that needed to land for v1 landed. No deferred-but-required
 work.
 
+## Post-v1 closure summary
+
+Shipped on top of `0d774bd`+`cc8661b`, all on `main` and pushed:
+
+| Commit | What |
+|---|---|
+| `15dca57` | Closed handoff loose ends (push, README knobs, eval-count drift, MCP `sextant_health` extension — later refactored) |
+| `d75b44d` | `target/` (Cargo) added to `VENDORED_DIR_NAMES` — closes acceptable debt #4 |
+| `083a324` | Split `sextant_scope` from `sextant_health` — MCP server now has 5 tools; `sextant_scope` returns `{detectionEnabled, vendoredCount, vendored: [{path, reason}]}` with reason taxonomy `nested-git-repo / vendor-dirname / tarball-name / user-config` |
+| `a2a8c7c` | `.gitignore` honoring via the `ignore` npm package — closes acceptable debt #3 |
+
+Net result: of the 5 acceptable-debt items, **#3 and #4 are closed**;
+**#1, #2, #5** remain as v2 deferred work (see updated table below).
+The 3 open questions are all answered.
+
+Test bar after closure: 591 unit tests / 583 pass / 0 fail / 8 skip.
+Eval still 20/20, MRR 0.925, nDCG 0.930 (no regression). Live MCP
+`sextant_scope` on this repo: `{detectionEnabled:true,
+vendoredCount:1, vendored:[{path:"vendor", reason:"vendor-dirname"}]}`.
+
+Skill files / global CLAUDE.md untouched by this closure pass.
+
 ## Acceptable debt (deliberate v1 scope cuts)
 
 Read these before extending — they're known gaps, not bugs.
@@ -138,7 +167,20 @@ A vendored dir nested under another non-vendored dir (e.g.,
 going deeper risks false positives in nested project structures (Swift
 package targets, JS workspaces, etc.). User can list explicitly.
 
-### 3. No `.gitignore` honoring (yet)
+### 3. ~~No `.gitignore` honoring (yet)~~ — RESOLVED in `a2a8c7c`
+
+> Shipped 2026-05-02 evening as part of the post-v1 closure pass.
+> See `lib/config.js:loadRepoConfig` (filter built from root
+> `.gitignore` via the `ignore` npm package), wired through
+> `lib/intel.js:scan` and `watch.js`'s chokidar `ignored` array.
+> Default-on; `.codebase-intel.json:gitignoreHonoring: false` opts
+> out. Test coverage in `test/config-gitignore.test.js`.
+>
+> Scope still limited to **root `.gitignore` only** — nested
+> `.gitignore` files in subdirs are not honored (would need
+> multi-file chaining via `ignore`'s `add(ig)` API). Negations
+> (`!path`) follow strict gitignore semantics: only effective when
+> the parent directory is not excluded.
 
 The `ce-web-researcher` agent's prior-art digest (in this session's
 context) recommended layering in `.gitignore` honoring via the `ignore`
@@ -150,17 +192,21 @@ npm package as a v2. Quoting the digest:
 > time. No subprocess.
 
 This catches the long tail (`mcp-servers/` without `.git/` becomes
-caught by `.gitignore` if the user gitignored it). v1 ships without it
-because the strong-signal heuristics already cover the dominant case.
+caught by `.gitignore` if the user gitignored it). ~~v1 ships without it
+because the strong-signal heuristics already cover the dominant case.~~
+v1 shipped without it; v2 closure shipped it.
 
-### 4. `target/` (Cargo build dir) not in vendor list
+### 4. ~~`target/` (Cargo build dir) not in vendor list~~ — RESOLVED in `d75b44d`
+
+> Added 2026-05-02 evening. `lib/project-scope.js:VENDORED_DIR_NAMES`
+> now includes `target`. Existing test loop auto-covers it (no new
+> test case needed). Risk note from v1 still applies: a JS project
+> with a `target/` build dir gets newly excluded — but `**/build/**`
+> covers the JS-build common case so the marginal harm is small.
+> Override path: `.codebase-intel.json:vendoredDetection: false`.
 
 The research suggested adding it. v1 only added what was directly
-implicated by the dogfooding case + clearly-conventional names. Easy
-follow-up: add `target/` to `VENDORED_DIR_NAMES`. Risk: a JS project
-with a `target/` directory for build output would already be filtered
-by `**/build/**` or similar; `target` as a dirname is mildly more
-ambiguous.
+implicated by the dogfooding case + clearly-conventional names.
 
 ### 5. The dogfooding feedback was offsite
 
@@ -172,17 +218,20 @@ either (a) get the user to re-run sextant on that same project and
 verify the summary, or (b) accept the synthetic fixture as the
 regression bar.
 
-## v2 follow-up — proactive options
+## v2 follow-up — status after closure pass
 
-If the user re-tests on the original Swift project and reports new
-gaps:
+Original v1-handoff table preserved here with closure markers. **Two
+items remain as deferred work**; the rest shipped on 2026-05-02
+evening.
 
-| Gap | v2 fix | Effort |
+| Gap | v2 fix | Status |
 |---|---|---|
-| `mcp-servers/` (manifest-only, no `.git/`) still polluting | `.gitignore` honoring via `ignore` npm package | small |
-| Nested vendored at depth >1 | Recursive walk with cycle protection | medium (recursion depth bound + perf bound) |
-| Cargo's `target/` building dir included | Add to `VENDORED_DIR_NAMES` | trivial |
-| Manifest-disagreement signal for stricter polyglot detection | Read root + subdir manifests; flag when languages disagree AND root has only one primary manifest | medium (false-positive risk in polyglot monorepos) |
+| `mcp-servers/` (manifest-only, no `.git/`) still polluting | `.gitignore` honoring via `ignore` npm package | **DONE (`a2a8c7c`)** — root `.gitignore` only; nested deferred |
+| Nested vendored at depth >1 | Recursive walk with cycle protection | **DEFERRED** — no observed dogfooding case needs it; user can list explicitly via `vendored: [...]` |
+| Cargo's `target/` building dir included | Add to `VENDORED_DIR_NAMES` | **DONE (`d75b44d`)** |
+| Manifest-disagreement signal for stricter polyglot detection | Read root + subdir manifests; flag when languages disagree AND root has only one primary manifest | **DEFERRED** — false-positive risk in polyglot monorepos; users can list explicitly |
+| MCP `sextant_health` extended with vendored telemetry | Initially shipped flat in `15dca57`; refactored into a separate `sextant_scope` tool with reason taxonomy | **DONE (`083a324`)** |
+| Nested-`.gitignore` chaining (gitignore in subdirs) | Multi-file chaining via `ignore`'s `add(ig)` API | **DEFERRED** — root `.gitignore` ships now; revisit if real project needs it |
 
 ## Verification commands
 
@@ -294,14 +343,34 @@ Closure pass landed in a follow-up commit on top of `cc8661b`:
 - **No CHANGELOG entry.** Convention in this repo is sparse on changelog
   updates per-feature; matched what was here. Still skipped.
 
-## Open questions for the user
+## Open questions for the user — ANSWERED 2026-05-02 evening
 
-1. Do you want v2 `.gitignore` honoring proactively, or wait until the
-   Swift project gets re-tested?
-2. Should `target/` (Cargo) be added to `VENDORED_DIR_NAMES` now or
-   wait for Rust-project feedback?
-3. Is the MCP `sextant_health` extension worth shipping, or is the
-   summary header sufficient?
+1. ~~Do you want v2 `.gitignore` honoring proactively, or wait until the
+   Swift project gets re-tested?~~ → **Build it now.** Shipped in
+   `a2a8c7c`. Scope: root `.gitignore` only (nested `.gitignore`
+   chaining still deferred).
+2. ~~Should `target/` (Cargo) be added to `VENDORED_DIR_NAMES` now or
+   wait for Rust-project feedback?~~ → **Add now.** Shipped in
+   `d75b44d`.
+3. ~~Is the MCP `sextant_health` extension worth shipping, or is the
+   summary header sufficient?~~ → **Split into a separate
+   `sextant_scope` tool.** Initially shipped flat on `sextant_health`
+   in `15dca57`; refactored into `sextant_scope` with richer shape
+   (`{detectionEnabled, vendoredCount, vendored: [{path, reason}]}`)
+   in `083a324` so health stays focused on freshness/resolution.
+
+## New open questions (post-closure)
+
+1. The dogfooding feedback that motivated this whole arc was offsite —
+   has the user re-run sextant on the original Swift project to confirm
+   the fix? `mcp-servers/` (manifest-only, no nested `.git/`) should now
+   be caught if the user gitignored it; if not, the manifest-disagreement
+   signal becomes the next candidate.
+2. The MCP-health vendored fields shipped in `15dca57` and were removed
+   from health one commit later (`083a324`) when the split happened. A
+   downstream consumer that pulled between those two commits would see
+   a JSON-shape change. The window is < 30 minutes and there are no
+   known external consumers, but worth noting.
 
 ---
 
