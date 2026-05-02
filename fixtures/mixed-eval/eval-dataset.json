@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "language": "mixed",
+  "description": "Mixed-language eval corpus — Swift + TS + Python with intentional cross-language symbol collisions. SB-4 ship-blocker gate from /root/.claude/plans/we-are-about-to-wiggly-lemur.md.",
+  "rootDir": "fixtures/mixed-eval",
+  "cases": [
+    {
+      "id": "mixed-001",
+      "category": "cross-language",
+      "query": "PatientStore",
+      "relevantFiles": ["Sources/Swift/PatientStore.swift", "frontend/src/PatientStore.ts"],
+      "relevantHitPatterns": ["class PatientStore", "PatientStore"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Cross-language collision (no bias). BOTH definitions must surface in top 5. Verifies Swift signals don't unfairly promote OR demote the Swift file relative to the TS one."
+    },
+    {
+      "id": "mixed-002",
+      "category": "cross-language",
+      "query": "enum Logger",
+      "relevantFiles": ["Sources/Swift/Logger.swift"],
+      "acceptableFiles": ["services/python/logger.py"],
+      "relevantHitPatterns": ["enum Logger"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Swift-keyword bias via 'enum' (Python uses class). The Swift Logger must rank #1. (rg search uses regex, not AND semantics — multi-token bias must use words that actually co-occur with the symbol's def line.)"
+    },
+    {
+      "id": "mixed-003",
+      "category": "cross-language",
+      "query": "View protocol",
+      "relevantFiles": ["Sources/Swift/View.swift"],
+      "acceptableFiles": ["frontend/src/views/View.tsx"],
+      "relevantHitPatterns": ["protocol View"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Multi-token disambiguation. 'View' alone would surface React's View; adding 'protocol' must promote the Swift protocol definition."
+    },
+    {
+      "id": "mixed-004",
+      "category": "cross-language",
+      "query": "extension View",
+      "relevantFiles": ["Sources/Swift/View.swift"],
+      "relevantHitPatterns": ["extension View"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Multi-token query containing the literal 'extension' triggers the +15% extension-target boost. Must surface the Swift extension hits ahead of the React component."
+    },
+    {
+      "id": "mixed-005",
+      "category": "cross-language",
+      "query": "Auth",
+      "relevantFiles": ["Sources/Swift/Auth.swift", "frontend/src/auth.ts"],
+      "relevantHitPatterns": ["protocol Auth", "interface Auth"],
+      "topK": 5,
+      "minUsefulnessScore": 0.4,
+      "notes": "Both Swift and TS Auth definitions must surface in top 5. Single-token query with no bias — neither should dominate by more than 2 ranks. Lower threshold because both are correct answers."
+    },
+    {
+      "id": "mixed-006-swift-bias",
+      "category": "cross-language",
+      "query": "protocol Auth",
+      "relevantFiles": ["Sources/Swift/Auth.swift"],
+      "acceptableFiles": ["frontend/src/auth.ts"],
+      "relevantHitPatterns": ["protocol Auth"],
+      "topK": 3,
+      "minUsefulnessScore": 0.5,
+      "notes": "Swift-keyword bias via 'protocol' (TS uses interface). The Swift Auth protocol must rank #1; the TS file is acceptable but not primary."
+    },
+    {
+      "id": "mixed-007-negative",
+      "category": "negative",
+      "query": "absent_mixed_xyz_qwerty987",
+      "relevantFiles": [],
+      "relevantHitPatterns": [],
+      "topK": 5,
+      "minUsefulnessScore": 0.0,
+      "notes": "Garbage query across the mixed corpus. Must return zero results regardless of language."
+    }
+  ]
+}

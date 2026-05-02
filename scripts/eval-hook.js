@@ -422,7 +422,12 @@ async function main() {
   const jsonOutput = args.includes("--json");
   const verbose    = args.includes("--verbose") || args.includes("-v");
 
-  const root = path.resolve(__dirname, "..");
+  // WHY --root: lets the hook eval harness run against external corpora
+  // (fixtures/swift-eval, fixtures/mixed-eval) instead of the self-eval.
+  const rootFlag = args.indexOf("--root");
+  const root = rootFlag >= 0 && args[rootFlag + 1]
+    ? path.resolve(args[rootFlag + 1])
+    : path.resolve(__dirname, "..");
 
   const dataset = loadDataset(datasetPath);
   const validationWarnings = validateDataset(dataset, root);

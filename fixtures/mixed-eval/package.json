@@ -1,0 +1,7 @@
+{
+  "name": "mixed-eval-frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Synthetic mixed-language eval corpus — Swift + TS + Python with intentional cross-language symbol collisions.",
+  "main": "frontend/src/index.ts"
+}

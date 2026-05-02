@@ -533,7 +533,13 @@ async function main() {
   const jsonOutput = args.includes("--json");
   const verbose = args.includes("--verbose") || args.includes("-v");
 
-  const root = path.resolve(__dirname, "..");
+  // WHY --root: lets the eval harness run against external corpora
+  // (fixtures/swift-eval, fixtures/mixed-eval) instead of the self-eval.
+  // Default keeps the existing self-eval behavior.
+  const rootFlag = args.indexOf("--root");
+  const root = rootFlag >= 0 && args[rootFlag + 1]
+    ? path.resolve(args[rootFlag + 1])
+    : path.resolve(__dirname, "..");
 
   // Load and validate dataset
   const dataset = loadDataset(datasetPath);
