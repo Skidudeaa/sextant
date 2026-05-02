@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const intel = require("../lib/intel");
+const graph = require("../lib/graph");
 const { loadRepoConfig } = require("../lib/config");
 const { getWatcherStatus } = require("../lib/cli");
 
@@ -54,6 +55,23 @@ async function run(ctx) {
   }
   if (!fs.existsSync(claudeSettings)) {
     actions.push({ msg: "Claude Code settings.json missing — hooks not wired", cmd: "sextant init" });
+  }
+
+  // Read Swift health from graph.db (recorded by intel.js after each scan).
+  // The values are "as of last scan" — accurate for the user-facing question
+  // "is my Swift extractor working?" even when the graph is otherwise stale.
+  let swiftHealth = null;
+  if (fs.existsSync(graphDb)) {
+    try {
+      const db = await graph.loadDb(rootAbs);
+      swiftHealth = graph.getSwiftHealthCounters(db);
+    } catch {}
+  }
+  if (swiftHealth && (swiftHealth.parserState === "init_failed" || swiftHealth.parserState === "unavailable") && swiftHealth.filesSeen > 0) {
+    actions.push({
+      msg: `Swift parser ${swiftHealth.parserState} — Swift facts not indexed for ${swiftHealth.filesSeen} file(s)`,
+      cmd: "Reinstall sextant: npm install (verify vendor/tree-sitter-swift.wasm exists)",
+    });
   }
 
   // Top-of-output Actions block.  No-op when everything is healthy so
@@ -140,6 +158,40 @@ async function run(ctx) {
       const rangeMs = histSummary.lastTs - histSummary.firstTs;
       const rangeHours = (rangeMs / 3600000).toFixed(1);
       lines.push(`  ${viz.c("period".padEnd(18), viz.colors.dim)}${rangeHours}h of history`);
+    }
+  }
+
+  // Swift health (only show when Swift was exercised OR parser failed)
+  if (swiftHealth && (swiftHealth.filesSeen > 0 || swiftHealth.parserState === "init_failed" || swiftHealth.parserState === "unavailable")) {
+    lines.push(viz.header("Swift health"));
+    let parserStatus;
+    if (swiftHealth.parserState === "ok") {
+      parserStatus = viz.status("ok", "ok");
+    } else if (swiftHealth.parserState === "init_failed" || swiftHealth.parserState === "unavailable") {
+      parserStatus = viz.status("error", `${swiftHealth.parserState} (tree-sitter Swift WASM failed to load)`);
+    } else {
+      parserStatus = viz.status("warn", swiftHealth.parserState || "uninitialized");
+    }
+    lines.push(viz.metric("parser", parserStatus));
+
+    if (swiftHealth.filesSeen > 0) {
+      const okPct = Math.round((swiftHealth.filesParsedOk / swiftHealth.filesSeen) * 100);
+      lines.push(viz.metric("files seen", swiftHealth.filesSeen));
+      lines.push(viz.metric("files parsed ok", `${swiftHealth.filesParsedOk} (${okPct}%)`));
+      if (swiftHealth.filesParseErrors > 0) {
+        lines.push(viz.metric("files with errors", viz.status("warn", String(swiftHealth.filesParseErrors))));
+      }
+      if (swiftHealth.filesUnsupportedConstructs > 0) {
+        lines.push(viz.metric("files unsupported", `${swiftHealth.filesUnsupportedConstructs}  ${viz.dim("(.swiftinterface, macros, deferred)")}`));
+      }
+      lines.push(viz.metric("declarations indexed", swiftHealth.declarationsIndexed));
+      const relSummary = `${swiftHealth.relationsIndexedTotal}  ${viz.dim(`(${swiftHealth.relationsIndexedDirect} direct, ${swiftHealth.relationsIndexedHeuristic} heuristic)`)}`;
+      lines.push(viz.metric("relations indexed", relSummary));
+    }
+    if (swiftHealth.parserState === "init_failed" || swiftHealth.parserState === "unavailable") {
+      lines.push("");
+      lines.push(`  ${viz.c("ACTION:", viz.colors.yellow)} verify vendor/tree-sitter-swift.wasm exists; reinstall sextant if needed.`);
+      lines.push(`  ${viz.c("       ", viz.colors.yellow)} See vendor/README.md for the WASM update procedure.`);
     }
   }
 

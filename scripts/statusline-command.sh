@@ -66,6 +66,11 @@ fi
 # only what the user needs to decide whether to act.
 res=$(grep -oE 'resolution [0-9]+' "$intel_summary" 2>/dev/null | grep -oE '[0-9]+' | head -1)
 files=$(grep -oE 'Indexed files.*[0-9]+' "$intel_summary" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+# WHY: Swift parser ALERT is emitted by lib/summary.js when the WASM grammar
+# fails to load AND the repo has Swift files. Surfaces in the action_hint
+# slot below.  Pattern matches "ALERT: SWIFT PARSER INIT_FAILED" or
+# "ALERT: SWIFT PARSER UNAVAILABLE".
+swift_alert=$(grep -oE '^ALERT: SWIFT PARSER [A-Z_]+' "$intel_summary" 2>/dev/null | head -1)
 [ -z "$files" ] && [ -z "$res" ] && exit 0
 
 # ── Health dot ────────────────────────────────────────
@@ -143,6 +148,8 @@ fi
 #   1. Watcher off / heartbeat stale     -> sextant watch-start
 #   2. Resolution < 90% (extractor drift / unresolvable imports en masse)
 #                                         -> sextant scan --force
+#   3. Swift parser failed (WASM missing/incompatible)
+#                                         -> sextant doctor (full diagnostic)
 # Multiple-issue case: show the most severe; when it's resolved, the
 # next-most severe surfaces.  We do NOT auto-execute -- the user copies.
 action_hint=""
@@ -150,6 +157,8 @@ if [ "$watcher_state" = "off" ] || [ "$watcher_state" = "stale" ]; then
     action_hint="\e[33m⚠ run: sextant watch-start\e[m"
 elif [ -n "$res" ] && [ "$res" -lt 90 ]; then
     action_hint="\e[33m⚠ run: sextant scan --force\e[m"
+elif [ -n "$swift_alert" ]; then
+    action_hint="\e[33m⚠ swift parser unavailable: sextant doctor\e[m"
 fi
 
 # ── Assemble status line ──────────────────────────────

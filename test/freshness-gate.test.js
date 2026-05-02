@@ -151,8 +151,8 @@ describe("buildStaleBody invariants (direct unit test)", () => {
   });
   after(() => { if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
 
-  it("includes only safe (graph-free) fields and the marker line", () => {
-    const out = cli.buildStaleBody(
+  it("includes only safe (graph-free) fields and the marker line", async () => {
+    const out = await cli.buildStaleBody(
       dir,
       { fresh: false, reason: "schema_version_changed", evidence: {} },
       { state: "requested", pid: 1234 }
@@ -178,8 +178,8 @@ describe("buildStaleBody invariants (direct unit test)", () => {
     }
   });
 
-  it("uses 'rescan pending' when single-flight is already in flight", () => {
-    const out = cli.buildStaleBody(
+  it("uses 'rescan pending' when single-flight is already in flight", async () => {
+    const out = await cli.buildStaleBody(
       dir,
       { fresh: false, reason: "head_changed", evidence: {} },
       { state: "pending", since: Date.now() - 1000 }
@@ -188,8 +188,8 @@ describe("buildStaleBody invariants (direct unit test)", () => {
     assert.doesNotMatch(out, /rescan requested/);
   });
 
-  it("uses 'rescan unavailable' when enqueue was skipped (e.g. spawn failure)", () => {
-    const out = cli.buildStaleBody(
+  it("uses 'rescan unavailable' when enqueue was skipped (e.g. spawn failure)", async () => {
+    const out = await cli.buildStaleBody(
       dir,
       { fresh: false, reason: "head_changed", evidence: {} },
       { state: "skipped", reason: "spawn_failed" }
