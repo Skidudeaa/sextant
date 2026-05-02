@@ -125,7 +125,13 @@ async function run(ctx) {
     };
 
     try {
-      await intel.scan(r, globs, { ignore: cfg.ignore, pruneMissing, onProgress, force: forceReindex });
+      await intel.scan(r, globs, {
+        ignore: cfg.ignore,
+        gitignoreFilter: cfg.gitignoreFilter,
+        pruneMissing,
+        onProgress,
+        force: forceReindex,
+      });
 
       // WHY: Trigger Zoekt reindex after scan so search is ready soon.
       // Uses triggerReindex (non-blocking background spawn) instead of buildIndex

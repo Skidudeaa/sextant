@@ -197,7 +197,8 @@ Optional `.codebase-intel.json` at project root:
 | `globs` | `["**/*.{js,ts,py}"]` | File patterns to index |
 | `ignore` | `[]` | Patterns to exclude |
 | `vendored` | `[]` | Explicit subdirs to exclude from indexing (always honored, additive to auto-detection) |
-| `vendoredDetection` | `true` | Auto-detect vendored subtrees at depth=1 (nested `.git/`, conventional dirnames like `vendor/`/`Pods/`/`Carthage/`, GitHub-tarball naming). Set to `false` to disable. |
+| `vendoredDetection` | `true` | Auto-detect vendored subtrees at depth=1 (nested `.git/`, conventional dirnames like `vendor/`/`Pods/`/`Carthage/`/`target/`, GitHub-tarball naming). Set to `false` to disable. |
+| `gitignoreHonoring` | `true` | Honor the project's root `.gitignore` (semantics-correct via the `ignore` npm package, including negations and anchored patterns). Set to `false` to ignore the file. |
 | `summaryThrottleMs` | `5000` | Minimum interval between summary regenerations |
 
 The summary header lists detected vendored exclusions (`Vendored excluded: N (path1, path2, …)`) so you can audit and override when the heuristic guesses wrong.

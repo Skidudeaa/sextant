@@ -240,7 +240,21 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
 
     const cfg = loadRepoConfig(root);
     const globs = cfg.globs;
-    const ignored = cfg.ignore;
+    // WHY: chokidar's `ignored` accepts a mixed array of globs + functions.
+    // Static globs (cfg.ignore) prune subtrees efficiently at the watcher
+    // level; the gitignoreFilter is the correctness backstop for paths
+    // that survive the static prune. chokidar passes paths in
+    // root-relative form when `cwd` is set, but we normalize defensively
+    // for absolute paths in case any chokidar version emits them.
+    const ignored = cfg.gitignoreFilter
+      ? [
+          ...cfg.ignore,
+          (p) => {
+            const rel = path.isAbsolute(p) ? path.relative(root, p) : p;
+            return cfg.gitignoreFilter(rel);
+          },
+        ]
+      : cfg.ignore;
 
     const throttleMs = Math.floor(
       (summaryEverySecOverride ?? cfg.summaryEverySec ?? 0) * 1000
