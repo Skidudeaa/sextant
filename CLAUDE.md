@@ -49,10 +49,11 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
    - Returns `{ specifier, resolved, kind }` where kind is `relative|external|tsconfig|workspace|asset|unresolved`
 
 3. **Graph** (`lib/graph.js`) stores the dependency graph in SQLite (via sql.js)
-   - Tables: `files`, `imports`, `exports`, `reexports`, `meta`
+   - Tables: `files`, `imports`, `exports`, `reexports`, `meta`, `swift_declarations`, `swift_relations`, `swift_entry_files`
    - Provides fan-in/fan-out queries, neighbor expansion, hotspot detection
    - `findExportsBySymbol()` — export-graph lookup for common-term retrieval
    - `findReexportChain()` — BFS through re-export chains for barrel-file tracing
+   - `setSwiftEntryFile()` / `getSwiftEntryFiles()` — per-file `@main` attribute markers, populated by `intel.js` after each Swift indexOneFile
 
 4. **Intel** (`lib/intel.js`) orchestrates everything — the central module (highest fan-in)
    - Per-root state management via `stateByRoot` Map
@@ -195,6 +196,8 @@ All state lives in `.planning/intel/` (never committed):
 - **Summary is clamped**: hard-capped at ~2200 chars to stay within useful context budget
 - **Periodic heartbeats**: watcher pings every 30s even when idle — writing only on flush makes idle watchers look dead
 - **Entry point path exclusion**: `isEntryPoint()` rejects files in `fixtures/`, `tests/`, `examples/`, `demos/` etc. — prevents false positives from ranking above real results
+- **Project center vs vendored subtrees**: `lib/project-scope.js` detects vendored subtrees at depth=1 from the working tree using three strong signals (any single match marks vendored): (1) nested `.git/` directory with HEAD/refs, (2) conventional vendor dirnames (`vendor/`, `Pods/`, `Carthage/`, `third_party/`, `bower_components/`, `external/`, `deps/`), (3) GitHub-tarball-extract naming (`<owner>-<repo>-<short-hash>/`). Detected paths get added to `cfg.ignore` so they never enter the graph. The summary header surfaces "Vendored excluded: N (path1, path2, …)" so users can audit and override via `.codebase-intel.json` (`vendored: [...]` adds, `vendoredDetection: false` disables auto-detection). Conservative by design — manifest-only signals (subdir has `pyproject.toml` while root has `Package.swift`) would catch more vendored cases but false-positive on polyglot monorepos; users can list those explicitly.
+- **Swift entry-point detection**: two complementary signals merged in summary's "Likely entry points" list. (1) Filename heuristics in `isEntryPoint()`: `main.swift`, `AppDelegate.swift`, `<Type>App.swift` (SwiftUI App-protocol convention). (2) `@main` attribute scan in `lib/extractors/swift.js:hasAtMain()` — narrow regex over file content (precise word boundaries to reject `@mainView`, `xx@main`, `@@main`); `intel.js` calls it per-Swift-file and toggles a row in the new `swift_entry_files` table. Summary unions both signals, deduped, with `— @main` tag on rows that filename heuristic missed. Test/fixture path exclusion applies to both signals identically.
 - **No redundant metrics**: don't display values that are always identical (e.g., indexed files vs graph nodes)
 - **graph.db is single source of truth**: index.json was eliminated — file metadata, imports, exports all live in SQLite. No more O(N) JSON.stringify per flush.
 - **Test fixtures cause false-positive imports**: regex extractors parse test files and find import specifiers inside string literals (e.g., `import("./lazy")` in a test assertion). This produces harmless unresolved imports in health output — 99% resolution with 1 false positive is clean.

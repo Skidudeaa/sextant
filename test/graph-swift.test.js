@@ -265,3 +265,72 @@ describe("getSwiftHealthCounters", () => {
     assert.equal(h.relationsIndexedTotal, 2);
   });
 });
+
+describe("swift_entry_files (set / clear / get)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-swift-entry-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+    db = await graph.loadDb(tmpDir);
+  });
+
+  after(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("setSwiftEntryFile inserts a row, getSwiftEntryFiles returns it", () => {
+    graph.setSwiftEntryFile(db, "Sources/MyApp/MyApp.swift", "@main");
+    const rows = graph.getSwiftEntryFiles(db);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].path, "Sources/MyApp/MyApp.swift");
+    assert.equal(rows[0].reason, "@main");
+  });
+
+  it("setSwiftEntryFile twice on same path is idempotent (UPSERT)", () => {
+    graph.setSwiftEntryFile(db, "Sources/MyApp/MyApp.swift", "@main");
+    graph.setSwiftEntryFile(db, "Sources/MyApp/MyApp.swift", "@main");
+    const rows = graph.getSwiftEntryFiles(db);
+    assert.equal(rows.length, 1, "second set should not create duplicate row");
+  });
+
+  it("clearSwiftEntryFile removes a specific path's row only", () => {
+    graph.setSwiftEntryFile(db, "Sources/A.swift", "@main");
+    graph.setSwiftEntryFile(db, "Sources/B.swift", "@main");
+    graph.clearSwiftEntryFile(db, "Sources/A.swift");
+    const rows = graph.getSwiftEntryFiles(db).map((r) => r.path);
+    assert.ok(!rows.includes("Sources/A.swift"), "A should be cleared");
+    assert.ok(rows.includes("Sources/B.swift"), "B should remain");
+  });
+
+  it("clearSwiftEntryFile on non-existent path is a no-op (no throw)", () => {
+    assert.doesNotThrow(() => graph.clearSwiftEntryFile(db, "Sources/Nope.swift"));
+  });
+
+  it("deleteFile cascades through swift_entry_files", () => {
+    graph.upsertFile(db, { relPath: "Sources/Cascade.swift", type: "swift", sizeBytes: 1, mtimeMs: 1 });
+    graph.setSwiftEntryFile(db, "Sources/Cascade.swift", "@main");
+    assert.ok(
+      graph.getSwiftEntryFiles(db).some((r) => r.path === "Sources/Cascade.swift")
+    );
+
+    graph.deleteFile(db, "Sources/Cascade.swift");
+
+    assert.ok(
+      !graph.getSwiftEntryFiles(db).some((r) => r.path === "Sources/Cascade.swift"),
+      "deleteFile must remove the file's swift_entry_files row"
+    );
+  });
+
+  it("getSwiftEntryFiles returns rows in stable path-ascending order", () => {
+    // Clear residue from prior tests, then insert in reverse alphabetical.
+    for (const r of graph.getSwiftEntryFiles(db)) {
+      graph.clearSwiftEntryFile(db, r.path);
+    }
+    graph.setSwiftEntryFile(db, "Sources/Z.swift", "@main");
+    graph.setSwiftEntryFile(db, "Sources/A.swift", "@main");
+    graph.setSwiftEntryFile(db, "Sources/M.swift", "@main");
+    const paths = graph.getSwiftEntryFiles(db).map((r) => r.path);
+    assert.deepEqual(paths, ["Sources/A.swift", "Sources/M.swift", "Sources/Z.swift"]);
+  });
+});

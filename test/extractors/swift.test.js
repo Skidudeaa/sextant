@@ -263,4 +263,55 @@ extension PatientStore: Hashable {
       assert.equal(c.parserState, "ok");
     });
   });
+
+  // --- @main detection ---
+  describe("hasAtMain", () => {
+    it("matches canonical SwiftUI App", () => {
+      const code = `import SwiftUI
+
+@main
+struct MyApp: App {
+  var body: some Scene { WindowGroup {} }
+}`;
+      assert.equal(swift.hasAtMain(code), true);
+    });
+
+    it("matches inline @main on the same line as the struct", () => {
+      assert.equal(swift.hasAtMain("@main struct MyApp: App {}"), true);
+    });
+
+    it("matches @main on UIApplicationDelegate", () => {
+      const code = `@main
+class AppDelegate: UIResponder, UIApplicationDelegate {}`;
+      assert.equal(swift.hasAtMain(code), true);
+    });
+
+    it("rejects @mainView (must be a word boundary)", () => {
+      assert.equal(swift.hasAtMain("@mainView struct Foo {}"), false);
+    });
+
+    it("rejects @main_alt (must be a word boundary)", () => {
+      assert.equal(swift.hasAtMain("@main_alt struct Foo {}"), false);
+    });
+
+    it("rejects xx@main (preceded by a word char)", () => {
+      assert.equal(swift.hasAtMain("xx@main"), false);
+    });
+
+    it("rejects @@main (escaped)", () => {
+      assert.equal(swift.hasAtMain("@@main"), false);
+    });
+
+    it("returns false on empty / null / non-string input", () => {
+      assert.equal(swift.hasAtMain(""), false);
+      assert.equal(swift.hasAtMain(null), false);
+      assert.equal(swift.hasAtMain(undefined), false);
+      assert.equal(swift.hasAtMain(42), false);
+    });
+
+    it("returns false on file with no @main", () => {
+      const code = `struct ContentView: View { var body: some View { Text("hi") } }`;
+      assert.equal(swift.hasAtMain(code), false);
+    });
+  });
 });
