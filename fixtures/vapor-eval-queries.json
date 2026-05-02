@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "language": "swift",
+  "description": "External Swift benchmark — Vapor pinned at tag 4.121.4. Queries cover the Vapor public surface (types, protocols, extensions, common-name disambiguation). Three queries are starred ★ as 'pathological lift' candidates per docs/swift-v1-handoff.md — the graph layer should show measurable positive lift on those (rg alone has a hard time disambiguating common names like `URI`, `init`, `Service` in a multi-thousand-file repo). Queries are designed to be literal substrings of the canonical def line (rg invokes with -F). Manual-trigger only via scripts/eval-swift-external.sh; NOT part of npm test.",
+  "rootDir": "(set at runtime via --root /tmp/vapor-eval)",
+  "vaporSha": "4.121.4",
+  "cases": [
+    {
+      "id": "vapor-app-001",
+      "category": "type",
+      "query": "Application",
+      "relevantFiles": ["Sources/Vapor/Application.swift"],
+      "topK": 5,
+      "minUsefulnessScore": 0.3,
+      "notes": "Top-level Vapor type. Application.swift defines `public final class Application: Sendable`."
+    },
+    {
+      "id": "vapor-mw-001",
+      "category": "protocol",
+      "query": "protocol Middleware",
+      "relevantFiles": ["Sources/Vapor/Middleware/Middleware.swift"],
+      "acceptableFiles": ["Sources/Vapor/Concurrency/AsyncMiddleware.swift"],
+      "relevantHitPatterns": ["public protocol Middleware"],
+      "topK": 5,
+      "minUsefulnessScore": 0.3,
+      "notes": "Protocol def for request middleware. AsyncMiddleware.swift is acceptable because it defines a sub-protocol. Query rewritten to literal substring `protocol Middleware`."
+    },
+    {
+      "id": "vapor-req-001",
+      "category": "type",
+      "query": "Request",
+      "relevantFiles": ["Sources/Vapor/Request/Request.swift"],
+      "topK": 5,
+      "minUsefulnessScore": 0.2,
+      "notes": "Common-name type. Request.swift defines `public final class Request`. The def must rank above use-sites; in practice on Vapor's hub-heavy structure, rg's ranking puts use-sites first — this case quantifies that gap."
+    },
+    {
+      "id": "vapor-resp-001",
+      "category": "type",
+      "query": "Response",
+      "relevantFiles": ["Sources/Vapor/Response/Response.swift"],
+      "topK": 5,
+      "minUsefulnessScore": 0.2,
+      "notes": "Common-name type. Response.swift defines `public final class Response`."
+    },
+    {
+      "id": "vapor-elf-001",
+      "category": "type",
+      "query": "extension EventLoopFuture",
+      "relevantFiles": ["Sources/Vapor/Response/ResponseCodable.swift"],
+      "acceptableFiles": ["Sources/Vapor/Utilities/OptionalType.swift"],
+      "relevantHitPatterns": ["extension EventLoopFuture"],
+      "topK": 5,
+      "minUsefulnessScore": 0.3,
+      "notes": "EventLoopFuture's def lives in SwiftNIO (out-of-corpus). Vapor extends it in multiple files. ResponseCodable.swift's `extension EventLoopFuture: ResponseEncodable` is the most prominent."
+    },
+    {
+      "id": "vapor-svc-001",
+      "category": "protocol",
+      "query": "Service",
+      "relevantFiles": ["Sources/Vapor/Services/Service.swift"],
+      "topK": 5,
+      "minUsefulnessScore": 0.2,
+      "notes": "★ pathological-lift query per docs/swift-v1-handoff.md. `Service` is a common name that appears in many Vapor files; the canonical file is Services/Service.swift even though it defines `extension Application { public struct Service }` (nested type, not top-level). The graph layer should help rank this above use-sites."
+    },
+    {
+      "id": "vapor-uri-001",
+      "category": "type",
+      "query": "URI",
+      "relevantFiles": ["Sources/Vapor/Utilities/URI.swift"],
+      "topK": 5,
+      "minUsefulnessScore": 0.3,
+      "notes": "★ pathological-lift query. Initialism + common name. URI.swift defines `public struct URI: ... Codable, Sendable`."
+    },
+    {
+      "id": "vapor-init-001",
+      "category": "common-name",
+      "query": "public init",
+      "relevantFiles": ["Sources/Vapor/Application.swift"],
+      "acceptableFiles": [
+        "Sources/Vapor/Request/Request.swift",
+        "Sources/Vapor/Response/Response.swift",
+        "Sources/Vapor/Routing/Routes.swift"
+      ],
+      "topK": 5,
+      "minUsefulnessScore": 0.1,
+      "notes": "★ pathological-lift query. `public init` matches every public initializer in the repo. The expectation isn't a single canonical answer — it's that key type files (Application, Request, Response, Routes) make top-5. Tests pipeline robustness on extreme common-name floods."
+    },
+    {
+      "id": "vapor-ext-001",
+      "category": "extension",
+      "query": "extension Application",
+      "relevantFiles": ["Sources/Vapor/Application.swift"],
+      "acceptableFiles": [
+        "Sources/Vapor/Cache/Application+Cache.swift",
+        "Sources/Vapor/Client/Application+Clients.swift",
+        "Sources/Vapor/HTTP/Application+HTTP.swift",
+        "Sources/Vapor/Responder/Application+Responder.swift"
+      ],
+      "topK": 5,
+      "minUsefulnessScore": 0.2,
+      "notes": "Multi-file extension target. Vapor has many `extension Application` blocks; the +15% extension-target boost should fire on each. Application.swift (the type def) is the relevantFile; the Application+*.swift extension files are acceptable."
+    },
+    {
+      "id": "vapor-codable-001",
+      "category": "conformance",
+      "query": "Codable",
+      "relevantFiles": ["Sources/Vapor/Utilities/URI.swift"],
+      "acceptableFiles": [
+        "Sources/Vapor/Content/Content.swift",
+        "Sources/Vapor/Authentication/SessionAuthenticatable.swift"
+      ],
+      "topK": 5,
+      "minUsefulnessScore": 0.1,
+      "notes": "Conformance lookup. Many Vapor types conform to Codable; the def lives in the Swift stdlib (out-of-corpus). URI.swift is a prominent conformer. minUsefulness deliberately low — this query has many spread-out hits."
+    },
+    {
+      "id": "vapor-routes-001",
+      "category": "type",
+      "query": "Routes",
+      "relevantFiles": ["Sources/Vapor/Routing/Routes.swift"],
+      "topK": 5,
+      "minUsefulnessScore": 0.3,
+      "notes": "Routing collection type."
+    },
+    {
+      "id": "vapor-content-001",
+      "category": "protocol",
+      "query": "protocol ContentEncoder",
+      "relevantFiles": ["Sources/Vapor/Content/ContentCoders.swift"],
+      "relevantHitPatterns": ["protocol ContentEncoder"],
+      "topK": 5,
+      "minUsefulnessScore": 0.4,
+      "notes": "Encoder protocol for Vapor content negotiation. Query rewritten to literal substring."
+    },
+    {
+      "id": "vapor-ws-001",
+      "category": "type",
+      "query": "WebSocket",
+      "relevantFiles": ["Sources/Vapor/Concurrency/WebSocket+Concurrency.swift"],
+      "acceptableFiles": [
+        "Sources/Vapor/Routing/Request+WebSocket.swift",
+        "Sources/Vapor/HTTP/Server/HTTPServerUpgradeHandler.swift"
+      ],
+      "topK": 5,
+      "minUsefulnessScore": 0.2,
+      "notes": "WebSocket types in Vapor. The WebSocket type itself lives in WebSocketKit; Vapor's files extend and route it."
+    },
+    {
+      "id": "vapor-error-001",
+      "category": "protocol",
+      "query": "protocol AbortError",
+      "relevantFiles": ["Sources/Vapor/Error/AbortError.swift"],
+      "relevantHitPatterns": ["protocol AbortError"],
+      "topK": 5,
+      "minUsefulnessScore": 0.4,
+      "notes": "Error protocol for HTTP aborts. Query rewritten to literal substring."
+    },
+    {
+      "id": "vapor-validate-001",
+      "category": "protocol",
+      "query": "protocol Validatable",
+      "relevantFiles": ["Sources/Vapor/Validation/Validatable.swift"],
+      "relevantHitPatterns": ["protocol Validatable"],
+      "topK": 5,
+      "minUsefulnessScore": 0.4,
+      "notes": "Validation protocol. Query rewritten to literal substring."
+    }
+  ]
+}
