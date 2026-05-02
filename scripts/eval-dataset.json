@@ -148,11 +148,11 @@
       "category": "cross-file",
       "query": "extractImports",
       "relevantFiles": ["lib/extractor.js", "lib/extractors/javascript.js"],
-      "acceptableFiles": ["lib/extractors/index.js", "lib/extractors/python.js", "lib/intel.js"],
+      "acceptableFiles": ["lib/extractors/index.js", "lib/extractors/python.js", "lib/extractors/swift.js", "lib/intel.js"],
       "relevantHitPatterns": ["function extractImports"],
       "topK": 5,
       "minUsefulnessScore": 0.5,
-      "notes": "Dispatcher + implementation. Tests whether both the public API (extractor.js) and the JS extractor surface. Python extractor and registry are acceptable."
+      "notes": "Dispatcher + implementation. Tests whether both the public API (extractor.js) and the JS extractor surface. Python and Swift extractors are acceptable peer implementations."
     },
     {
       "id": "cross-004",

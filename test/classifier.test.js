@@ -43,10 +43,23 @@ describe("hasIdentifierShape", () => {
     assert.equal(hasIdentifierShape("scoring"), false);
   });
 
-  it("rejects plain uppercase words", () => {
-    // NOTE: Single uppercase word without underscore is not CONST_CASE
-    assert.equal(hasIdentifierShape("JWT"), false);
-    assert.equal(hasIdentifierShape("API"), false);
+  it("accepts initialisms (acronyms)", () => {
+    // WHY changed (Swift v1): bare uppercase initialisms (URL, JSON, JWT, API,
+    // XML) ARE code-relevant tokens — common in Swift/ObjC types like
+    // URLSession, JSONDecoder, and equally common in JS/Python imports.
+    // Previously rejected as "ambiguous English acronyms"; now accepted as
+    // identifiers so they earn the +3 identifier-shape signal in
+    // shouldRetrieve.  The cost of a false positive is one extra search
+    // returning loose hits (cheap); the cost of a false negative is missing
+    // a code query.
+    assert.equal(hasIdentifierShape("JWT"), true);
+    assert.equal(hasIdentifierShape("API"), true);
+    assert.equal(hasIdentifierShape("URL"), true);
+    assert.equal(hasIdentifierShape("JSON"), true);
+    // Initialism + camelCase tail also matches.
+    assert.equal(hasIdentifierShape("URLSession"), true);
+    assert.equal(hasIdentifierShape("JSONDecoder"), true);
+    assert.equal(hasIdentifierShape("XMLParser"), true);
   });
 
   it("rejects empty/short/null", () => {
