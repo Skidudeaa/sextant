@@ -46,6 +46,20 @@ async function run(ctx) {
       }
     }
 
+    // Swift Health (only when Swift files were seen — otherwise the block is noise)
+    if (h.swift && h.swift.filesSeen > 0) {
+      lines.push("");
+      lines.push(viz.c("  Swift Health", viz.colors.dim));
+      const s = h.swift;
+      const stateColor = s.parserState === "ok" ? viz.colors.green
+        : s.parserState === "init_failed" || s.parserState === "unavailable" ? viz.colors.red
+        : viz.colors.yellow;
+      lines.push(`    ${"Parser".padEnd(12)} ${viz.c(s.parserState ?? "unknown", stateColor)}`);
+      lines.push(`    ${"Files".padEnd(12)} ${s.filesParsedOk}/${s.filesSeen} parsed${s.filesParseErrors > 0 ? viz.c(`  (${s.filesParseErrors} errors)`, viz.colors.red) : ""}`);
+      lines.push(`    ${"Declarations".padEnd(12)} ${s.declarationsIndexed}`);
+      lines.push(`    ${"Relations".padEnd(12)} ${s.relationsIndexedTotal}  ${viz.c(`(${s.relationsIndexedDirect} direct · ${s.relationsIndexedHeuristic} heuristic)`, viz.colors.dim)}`);
+    }
+
     lines.push("");
     process.stdout.write(lines.join("\n") + "\n");
   } else {
