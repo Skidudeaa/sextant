@@ -268,6 +268,41 @@ All state lives in `.planning/intel/` (add `.planning/` to `.gitignore`):
 - Optional: [Zoekt](https://github.com/sourcegraph/zoekt) for large-repo text search
 - Optional: Python 3 for Python project indexing
 
+## Troubleshooting
+
+### `git pull` aborts with "Your local changes to `package-lock.json` would be overwritten"
+
+This happens when a stale clone's local `package-lock.json` diverges from what's on `main` — usually just metadata churn (name/version/bin entries from the `codebase-intel` → `sextant` rename, integrity-hash format from a different npm version) rather than intentional dep edits. Confirm with a quick diff and discard:
+
+```bash
+git diff package-lock.json | head -20         # confirm it's metadata churn, not intentional edits
+git checkout -- package-lock.json
+git pull origin main
+npm install
+npm link                                      # only if your global binary needs refreshing
+```
+
+If your local clone is many commits behind (>20), expect `npm install` after the pull to bump the lockfile slightly to match your local Node/npm. **Don't commit that** — it's environment churn, not real change. Repeat `git checkout -- package-lock.json` if it reappears.
+
+### `npm install` reports vulnerabilities
+
+The committed `package-lock.json` is the authoritative one; `npm audit` should report **0 vulnerabilities** on a clean pull. If it doesn't, you're probably on a stale lockfile — `git pull origin main && npm install` will bring you to the upstream version. If a real CVE lands on a transitive dep, the fix is committed upstream as a `chore(deps): npm audit fix` — pull rather than running `npm audit fix` locally so the lockfile stays authoritative across machines.
+
+### `sextant: command not found`, or running stale code after a pull
+
+`npm link` symlinks `bin/intel.js` into your global `node_modules`. The symlink can go stale if you switch Node versions, reinstall sextant globally, or pull while the link points at an older checkout. Verify the global binary is at the latest commit:
+
+```bash
+git -C "$(npm prefix -g)/lib/node_modules/sextant" log -1 --oneline
+# Should match `git log -1 --oneline` in your sextant clone.
+# If it doesn't:
+cd /path/to/sextant && npm link
+```
+
+### Swift parser shows `init_failed` or `unavailable` in `sextant doctor`
+
+The tree-sitter Swift WASM at `vendor/tree-sitter-swift.wasm` either didn't load (missing) or has an ABI mismatch with `web-tree-sitter`. Update the WASM following `vendor/README.md` — pull from the upstream `alex-pinkus/tree-sitter-swift` GitHub releases, **not** from the `tree-sitter-wasms` npm package (its bundled artifact uses an incompatible ABI). See [docs/swift-v1-scope.md](docs/swift-v1-scope.md) for full recovery instructions.
+
 ## License
 
 MIT
