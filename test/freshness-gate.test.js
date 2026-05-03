@@ -26,6 +26,30 @@ function gitInit(dir) {
   execSync('git config user.name "Test"', { cwd: dir });
   execSync("git config commit.gpgsign false", { cwd: dir });
 }
+
+// WHY: applyFreshnessGate -> enqueueRescan spawns `sextant scan` on PATH.
+// In CI / fresh clones (no `npm link`), the spawn raises ENOENT
+// asynchronously after the test has returned, which node:test reports as
+// an unhandled error.  A no-op shim makes the spawn succeed so the gate's
+// rescanState lands as "requested" and the test exercises only the body
+// content it actually asserts on.
+let _shimDir = null;
+let _origPath = null;
+function installSextantShim() {
+  _shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-shim-"));
+  const shim = path.join(_shimDir, "sextant");
+  fs.writeFileSync(shim, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  _origPath = process.env.PATH;
+  process.env.PATH = `${_shimDir}${path.delimiter}${_origPath || ""}`;
+}
+function removeSextantShim() {
+  if (_origPath != null) process.env.PATH = _origPath;
+  if (_shimDir) {
+    try { fs.rmSync(_shimDir, { recursive: true, force: true }); } catch {}
+  }
+  _shimDir = null;
+  _origPath = null;
+}
 function gitCommitFile(dir, name, content) {
   fs.writeFileSync(path.join(dir, name), content);
   execSync(`git add ${name}`, { cwd: dir });
@@ -96,6 +120,7 @@ describe("applyFreshnessGate: fresh path passes through rawSummary", () => {
 describe("applyFreshnessGate: stale path strips structural fields", () => {
   let dir;
   before(async () => {
+    installSextantShim();
     dir = makeRepo("stale");
     const db = await graph.loadDb(dir);
     freshness.recordScanState(db, dir);
@@ -104,9 +129,8 @@ describe("applyFreshnessGate: stale path strips structural fields", () => {
     gitCommitFile(dir, "newfile.js", "module.exports = 2;\n");
   });
   after(() => {
-    // The gate triggers a background spawn; give it a chance to fail-fast
-    // (most CI environments won't have `sextant` on PATH) before we rmSync.
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    removeSextantShim();
   });
 
   it("returns a minimal body containing no structural numbers", async () => {
