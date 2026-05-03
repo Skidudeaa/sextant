@@ -112,7 +112,17 @@ async function run() {
   // status-line path triggers is fully flushed before Node exits.
   const statusLinePromise = writeStatusLine(root);
 
-  const prompt = data.prompt || data.message || "";
+  const rawPrompt = data.prompt || data.message || "";
+
+  // WHY: cap prompt length before classification + retrieval. Classifier
+  // tokenization and downstream rg/zoekt queries scan the whole string;
+  // a runaway prompt (paste of a giant log, etc.) would stretch latency
+  // well past the hook budget. 8 KB is more than any real coding
+  // question; trim from the start so the most recent text wins.
+  const MAX_PROMPT_CHARS = 8192;
+  const prompt = rawPrompt.length > MAX_PROMPT_CHARS
+    ? rawPrompt.slice(rawPrompt.length - MAX_PROMPT_CHARS)
+    : rawPrompt;
 
   // 1. Classify
   let classification;

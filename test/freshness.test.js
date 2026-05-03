@@ -25,6 +25,31 @@ function gitInit(dir) {
   execSync("git config commit.gpgsign false", { cwd: dir });
 }
 
+// WHY: enqueueRescan spawns `sextant scan` via PATH lookup.  In CI / fresh
+// clones (no `npm link`), there is no `sextant` on PATH and the spawn
+// raises ENOENT *asynchronously* — after the test that triggered it has
+// returned — which node:test reports as an unhandled async error and fails
+// the whole test.  Drop a no-op shim onto PATH for the duration of the
+// suite so the spawn succeeds and the test only exercises the marker
+// logic it actually cares about.
+let _shimDir = null;
+let _origPath = null;
+function installSextantShim() {
+  _shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-shim-"));
+  const shim = path.join(_shimDir, "sextant");
+  fs.writeFileSync(shim, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  _origPath = process.env.PATH;
+  process.env.PATH = `${_shimDir}${path.delimiter}${_origPath || ""}`;
+}
+function removeSextantShim() {
+  if (_origPath != null) process.env.PATH = _origPath;
+  if (_shimDir) {
+    try { fs.rmSync(_shimDir, { recursive: true, force: true }); } catch {}
+  }
+  _shimDir = null;
+  _origPath = null;
+}
+
 function gitCommitFile(dir, name, content, message = "commit") {
   fs.writeFileSync(path.join(dir, name), content);
   execSync(`git add ${name}`, { cwd: dir });
@@ -152,13 +177,17 @@ describe("freshness.checkFreshness: scanner_version mismatch → stale", () => {
 
 describe("freshness.enqueueRescan: atomic single-flight", () => {
   let dir;
-  before(() => { dir = makeRepo("rescan"); });
+  before(() => {
+    installSextantShim();
+    dir = makeRepo("rescan");
+  });
   after(() => {
     if (dir) {
       // Best-effort: clean any spawned scan output before tearing down.
       try { fs.rmSync(path.join(dir, ".planning"), { recursive: true, force: true }); } catch {}
       fs.rmSync(dir, { recursive: true, force: true });
     }
+    removeSextantShim();
   });
 
   it("first call requests, second call sees pending", () => {

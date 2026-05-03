@@ -91,6 +91,23 @@ const TOOLS = [
 
 // --- Tool handlers ------------------------------------------------------
 
+// WHY: bound query length so a runaway agent or pathological prompt can't
+// fan out into multi-second rg invocations. 2 KB is well above any real
+// symbol/phrase search and well below anything that would exercise rg's
+// internal limits.
+const MAX_QUERY_CHARS = 2048;
+
+function normalizeQuery(query) {
+  if (!query || typeof query !== "string" || !query.trim()) {
+    throw new Error("query parameter is required");
+  }
+  const trimmed = query.trim();
+  if (trimmed.length > MAX_QUERY_CHARS) {
+    throw new Error(`query too long: ${trimmed.length} chars (max ${MAX_QUERY_CHARS})`);
+  }
+  return trimmed;
+}
+
 let _root = null;
 let _initialized = false;
 
@@ -105,14 +122,11 @@ async function ensureInit() {
 
 async function handleSearch(params) {
   await ensureInit();
-  const query = params.query;
-  if (!query || typeof query !== "string" || !query.trim()) {
-    throw new Error("query parameter is required");
-  }
+  const query = normalizeQuery(params.query);
   const limit = Number.isFinite(params.limit) ? params.limit : 10;
   const contextLines = Number.isFinite(params.context_lines) ? params.context_lines : 1;
 
-  const result = await retrieve(_root, query.trim(), {
+  const result = await retrieve(_root, query, {
     maxHits: limit * 5,
     maxSeedFiles: limit,
     hitsPerFileCap: 3,
