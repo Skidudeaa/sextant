@@ -86,7 +86,12 @@ node -e "
 const w = require('$ROOT/watch');
 w.writeHeartbeat('$tmp', 'stale.js');
 "
-touch -d "200 seconds ago" "$tmp/.planning/intel/.watcher_heartbeat"
+HEARTBEAT_PATH="$tmp/.planning/intel/.watcher_heartbeat" node -e "
+const fs = require('fs');
+const hbPath = process.env.HEARTBEAT_PATH;
+const stale = new Date(Date.now() - 200_000);
+fs.utimesSync(hbPath, stale, stale);
+"
 node -e "
 const fs = require('fs');
 const path = require('path');
