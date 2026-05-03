@@ -17,7 +17,7 @@ No build step. CommonJS throughout, no transpilation.
 | Command | What it runs |
 |---------|-------------|
 | `npm run test:unit` | 356 unit tests via `node:test` (~900ms) |
-| `npm run test:eval` | 19-query eval harness (MRR, nDCG, usefulness) |
+| `npm run test:eval` | 21-query eval harness (MRR, nDCG, usefulness) |
 | `npm test` | Full suite: unit + 5 bash integration scripts + eval |
 
 Async test bodies must use `async` directly on `it()` -- wrapping in inner async IIFEs silently swallows failures.

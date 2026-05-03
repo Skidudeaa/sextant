@@ -197,6 +197,17 @@
       "notes": "Small async helper deep inside a hook-command file. Captured from 2026-04-30 dogfooding observations: prior to def-site lifting in merge-results (commit 5c15a32), the hook path missed this when the user asked about the statusline. Locks in the def-site signal flowing through to small intra-file helpers."
     },
     {
+      "id": "scope-004",
+      "category": "scope",
+      "query": "statusline",
+      "relevantFiles": ["scripts/statusline-command.sh"],
+      "acceptableFiles": ["commands/hook-refresh.js", "lib/cli.js", "lib/summary.js"],
+      "relevantHitPatterns": ["statusline|statusLine|intel_summary"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Non-JS canonical answer. Captured from 2026-04-30 dogfooding: the actual implementation is a bash script at scripts/statusline-command.sh, but JS-heavy retrieval used to bury it behind hook-refresh.js / cli.js. Locks in that the .sh file surfaces in the top-5 for the bare term query."
+    },
+    {
       "id": "negative-001",
       "category": "negative",
       "query": "xyzzy_nonexistent_token_abc123",

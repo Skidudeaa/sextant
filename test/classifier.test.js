@@ -584,3 +584,46 @@ describe("shouldRetrieve — short concept questions", () => {
     }
   });
 });
+
+// WHY: Captured from 2026-04-30 dogfooding — meta-conversational status
+// inquiries like "how is this project coming along?" used to retrieve
+// because "project" survived noise filtering and the deferred +1
+// length bonus made the score borderline.  Adding "project"/"codebase"/
+// "status"/contractions to SKIP_TERMS drains these to zero terms so they
+// fall back to the static summary instead of injecting irrelevant code hits.
+describe("shouldRetrieve — conversational status inquiries", () => {
+  it("'how is this project coming along?' → skip", () => {
+    assert.equal(shouldRetrieve("how is this project coming along?").retrieve, false);
+  });
+
+  it("'how is the project going' → skip", () => {
+    assert.equal(shouldRetrieve("how is the project going").retrieve, false);
+  });
+
+  it("'what's the status' → skip", () => {
+    assert.equal(shouldRetrieve("what's the status").retrieve, false);
+  });
+
+  it("'how's it going' → skip", () => {
+    assert.equal(shouldRetrieve("how's it going").retrieve, false);
+  });
+
+  it("'how is the codebase looking' → skip", () => {
+    assert.equal(shouldRetrieve("how is the codebase looking").retrieve, false);
+  });
+
+  // And confirm that legitimate code questions that happen to mention
+  // "project" / "status" still retrieve via their stronger signals
+  // (identifier, path, tech-question + concrete target).
+  it("'where is project_config.json' → retrieve (path signal dominates)", () => {
+    const r = shouldRetrieve("where is project_config.json");
+    assert.equal(r.retrieve, true);
+    assert.ok(r.terms.includes("project_config.json"));
+  });
+
+  it("'how does StatusBar render' → retrieve (PascalCase identifier)", () => {
+    const r = shouldRetrieve("how does StatusBar render");
+    assert.equal(r.retrieve, true);
+    assert.ok(r.terms.includes("StatusBar"));
+  });
+});

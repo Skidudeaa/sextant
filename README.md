@@ -231,15 +231,15 @@ See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (ori
 
 ## Eval Results
 
-20/20 self-eval queries pass on the sextant repo itself: MRR 0.925, nDCG 0.930. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files), Vapor 4.121.4 (294 files; baseline at `fixtures/vapor-baseline.json`). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.958, nDCG 0.977.
+21/21 self-eval queries pass on the sextant repo itself: MRR 0.889, nDCG 0.916. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files), Vapor 4.121.4 (294 files; baseline at `fixtures/vapor-baseline.json`). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.958, nDCG 0.977.
 
 ### Running the eval suite
 
 These all run from a clean clone in under a minute (Vapor benchmark excluded — it's manual-trigger only):
 
 ```bash
-npm run test:unit                                                                                         # 564 pass, 8 skipped, 0 fail
-npm run test:eval                                                                                         # 20/20 self-eval, MRR 0.925, nDCG 0.930
+npm run test:unit                                                                                         # 590 pass, 8 skipped, 0 fail
+npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.889, nDCG 0.916
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture
 ```
