@@ -570,9 +570,18 @@ async function main() {
     }
   }
 
-  // Run all cases
+  // Run all cases.
+  // WHY backend "auto": production hooks and the MCP server use the auto
+  // path (zoekt when installed and indexed, else rg). Pinning the eval to
+  // "rg" measured an inferior code path — common-name def lookups in
+  // multi-thousand-file repos like Vapor came out at MRR 0.20 because
+  // rg's text-frequency ranking buries the canonical class def behind
+  // higher-fan-in consumer files.  Auto with zoekt restores rank-1 on
+  // those (Application/Request/Response 0.20 → 1.00).  Eval-as-production
+  // is the right framing; if zoekt is unavailable in the eval environment,
+  // pickBackend() falls back to rg and behavior matches the old baseline.
   const baseOpts = {
-    backend: "rg",
+    backend: "auto",
     maxHits: 50,
     contextLines: 1,
     contextMode: "lines",
