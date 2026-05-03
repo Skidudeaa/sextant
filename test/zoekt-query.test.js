@@ -18,10 +18,32 @@ describe("quoteIfPhrase", () => {
     assert.equal(quoteIfPhrase("public final class Application"), '"public final class Application"');
   });
 
-  it("leaves single-token queries unchanged", () => {
+  it("leaves plain single-token queries unchanged", () => {
     assert.equal(quoteIfPhrase("Application"), "Application");
     assert.equal(quoteIfPhrase("rerankFiles"), "rerankFiles");
     assert.equal(quoteIfPhrase("URLSession"), "URLSession");
+  });
+
+  it("escapes regex metacharacters in single-token queries", () => {
+    // WHY: zoekt's default query syntax is regex. `+` means one-or-more,
+    // not the literal `+` character — so `View+Toolbar` would never match
+    // the literal text in source files. Escape so it does.
+    assert.equal(quoteIfPhrase("View+Toolbar"), "View\\+Toolbar");
+    assert.equal(quoteIfPhrase("foo.bar"), "foo\\.bar");
+    assert.equal(quoteIfPhrase("a*b"), "a\\*b");
+    assert.equal(quoteIfPhrase("x?"), "x\\?");
+    assert.equal(quoteIfPhrase("a|b"), "a\\|b");
+    assert.equal(quoteIfPhrase("(group)"), "\\(group\\)");
+    assert.equal(quoteIfPhrase("[bracket]"), "\\[bracket\\]");
+    assert.equal(quoteIfPhrase("path\\sep"), "path\\\\sep");
+  });
+
+  it("escapes regex metacharacters inside multi-token quoted queries", () => {
+    // WHY: zoekt still interprets regex metacharacters inside double-quoted
+    // phrases. Without the escape, "View+Toolbar foo" would treat the `+`
+    // as a quantifier even though the phrase wrapping forces adjacency.
+    assert.equal(quoteIfPhrase("View+Toolbar foo"), '"View\\+Toolbar foo"');
+    assert.equal(quoteIfPhrase("a.b c"), '"a\\.b c"');
   });
 
   it("trims surrounding whitespace before deciding", () => {
@@ -34,7 +56,7 @@ describe("quoteIfPhrase", () => {
     assert.equal(quoteIfPhrase('"single"'), '"single"');
   });
 
-  it("strips embedded double quotes inside an unquoted multi-token query", () => {
+  it("strips embedded double quotes before processing", () => {
     // WHY: a stray internal quote would terminate the wrapping phrase early
     // and turn the rest into a separate clause — worse than the unwrapped
     // behavior. Drop the quote rather than splitting the query.
