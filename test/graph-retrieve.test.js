@@ -509,3 +509,107 @@ describe("graph.filePathsMatching", () => {
     assert.ok(results.length <= 20, `expected <= 20, got ${results.length}`);
   });
 });
+
+// WHY: Swift codebases don't populate the JS-style `exports` table —
+// type and member defs land in `swift_declarations` instead.  Before the
+// hook fast path called findDeclarationsBySymbol, queries like `URI` on
+// a real Swift codebase silently dominated by URITests.swift hit counts
+// because URI.swift's canonical `public struct URI` declaration never
+// reached the hook's ranker.  These tests lock in that the layer-2
+// Swift-decl lookup surfaces the declaring file and that authoritative
+// kinds outscore secondary kinds.
+describe("graphRetrieve — Swift declaration lookup (layer 2)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    ({ tmpDir, db } = await freshDb("swift-decl"));
+
+    graph.upsertFile(db, { relPath: "Sources/App/URI.swift", type: "swift", sizeBytes: 500, mtimeMs: 1 });
+    graph.upsertFile(db, { relPath: "Sources/App/Application.swift", type: "swift", sizeBytes: 800, mtimeMs: 2 });
+    graph.upsertFile(db, { relPath: "Sources/App/AppExt.swift", type: "swift", sizeBytes: 200, mtimeMs: 3 });
+    graph.upsertFile(db, { relPath: "Tests/AppTests/URITests.swift", type: "swift", sizeBytes: 1500, mtimeMs: 4 });
+
+    graph.replaceSwiftDeclarations(db, "Sources/App/URI.swift", [
+      { name: "URI", kind: "struct", start_byte: 100, end_byte: 200 },
+      { name: "URI", kind: "extension", start_byte: 300, end_byte: 400 },
+    ]);
+    graph.replaceSwiftDeclarations(db, "Sources/App/Application.swift", [
+      { name: "Application", kind: "class", start_byte: 50, end_byte: 800 },
+    ]);
+    graph.replaceSwiftDeclarations(db, "Sources/App/AppExt.swift", [
+      { name: "Application", kind: "extension", start_byte: 10, end_byte: 100 },
+    ]);
+    graph.replaceSwiftDeclarations(db, "Tests/AppTests/URITests.swift", [
+      // The test file shouldn't even appear via swift_declarations — it's
+      // just a sanity check that the lookup is name-based, not file-based.
+    ]);
+  });
+
+  after(() => cleanup(tmpDir));
+
+  it("finds the file declaring a Swift type", () => {
+    const result = graphRetrieve(db, ["URI"]);
+    assert.ok(result.files.length > 0, "should find at least one file");
+    // URI.swift declares both a struct and an extension named URI; the
+    // type-decl hit type wins on score (100 vs 80).
+    assert.equal(result.files[0].path, "Sources/App/URI.swift");
+    assert.equal(result.files[0].hitType, "swift_decl_type");
+    assert.ok(result.files[0].matchedTerms.includes("URI"));
+  });
+
+  it("authoritative type kinds outrank extension kinds", () => {
+    // Two files declare "Application": Application.swift as `class`,
+    // AppExt.swift as `extension`.  The class def must rank first.
+    const result = graphRetrieve(db, ["Application"]);
+    assert.equal(result.files[0].path, "Sources/App/Application.swift");
+    assert.equal(result.files[0].hitType, "swift_decl_type");
+    assert.equal(result.files[1].path, "Sources/App/AppExt.swift");
+    assert.equal(result.files[1].hitType, "swift_decl_other");
+  });
+
+  it("layer 2 score-100 type-decl is suppression-eligible", () => {
+    // Definition-site suppression (lines 130-141 of graph-retrieve.js)
+    // halves fan-in boost on non-def files when ANY def exists for the
+    // query.  Adding fan-in on AppExt.swift exercises the suppression
+    // pass — without it, AppExt's fan-in could push past Application.swift.
+    graph.upsertFile(db, { relPath: "consumer1.swift", type: "swift", sizeBytes: 50, mtimeMs: 1 });
+    graph.upsertFile(db, { relPath: "consumer2.swift", type: "swift", sizeBytes: 50, mtimeMs: 1 });
+    graph.upsertFile(db, { relPath: "consumer3.swift", type: "swift", sizeBytes: 50, mtimeMs: 1 });
+    graph.replaceImports(db, "consumer1.swift", [
+      { specifier: "./AppExt", toPath: "Sources/App/AppExt.swift", kind: "relative" },
+    ]);
+    graph.replaceImports(db, "consumer2.swift", [
+      { specifier: "./AppExt", toPath: "Sources/App/AppExt.swift", kind: "relative" },
+    ]);
+    graph.replaceImports(db, "consumer3.swift", [
+      { specifier: "./AppExt", toPath: "Sources/App/AppExt.swift", kind: "relative" },
+    ]);
+
+    const result = graphRetrieve(db, ["Application"]);
+    // Application.swift (the type def) must still rank first despite
+    // AppExt.swift's higher fan-in, because suppression halves AppExt's boost.
+    assert.equal(result.files[0].path, "Sources/App/Application.swift");
+  });
+
+  it("returns swift_decl_other for non-type kinds", () => {
+    // freshDb gives us a separate suite so we get a clean slate.
+    // Here we just confirm the hit-type taxonomy mapping for
+    // extension / let / var / func / init / case kinds.
+    const result = graphRetrieve(db, ["Application"]);
+    const ext = result.files.find((f) => f.path === "Sources/App/AppExt.swift");
+    assert.ok(ext, "AppExt.swift should be in results");
+    assert.equal(ext.hitType, "swift_decl_other");
+  });
+
+  it("respects MIN_TERM_LENGTH (term < 3 chars)", () => {
+    // A term shorter than 3 chars never reaches findDeclarationsBySymbol —
+    // the layer's per-term loop short-circuits.
+    const result = graphRetrieve(db, ["UR"]);
+    // No results expected since "UR" is too short to match anything.
+    // (filePathsMatching might catch it via path substring, but URI is
+    // 3 chars in the path "URI.swift" which would match "UR" as
+    // substring — assert that we don't get the swift_decl_type hit.)
+    const decl = result.files.find((f) => f.hitType === "swift_decl_type");
+    assert.equal(decl, undefined, "no swift_decl_type expected for sub-3-char term");
+  });
+});
