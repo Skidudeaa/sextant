@@ -189,28 +189,42 @@ prominent type's constructor") or a richer query DSL.
 new fixture class — currently no eval case exercises a fix that doesn't
 also regress something else.
 
-### 2. Hook merge layer false-promotes consumer files via lowercase queryTerms
+### 2. ~~Hook merge layer false-promotes consumer files via lowercase queryTerms~~ — CLOSED 2026-05-04
 
-`lib/merge-results.js:lineLevelAdjustment` lowercases query terms before
-calling `scoring.computeEnhancedSignals`. The exact_symbol +40% boost
-then false-matches Swift consumer-line variables (`let uri = URI(...)`)
-against lowercase query `URI` → `uri`. Even with the case-sensitive
-def_site fix in this commit, the +40% exact_symbol boost still inflates
-test-file scores enough that `URITests.swift` ranks above `URI.swift`
-in *hook* output (CLI/MCP path is unaffected because it uses different
-scoring).
+**Resolved by the lowercase-pathway fix** that drops the upstream
+`.toLowerCase()` at `lib/merge-results.js:120` and adds an opt-in
+`{ caseSensitive: true }` flag on `scoring.computeEnhancedSignals` that
+the hook merge layer passes through. CLI/MCP path keeps the default
+case-insensitive behavior unchanged.
 
-**Why we punted**: The lowercasing happens at multiple layers
-(merge-results' `queryTerms.map((t) => t.toLowerCase())` + scoring.js's
-own internal lowercasing for symbol matching). Untangling the case-
-sensitivity end-to-end is a deeper merge-layer rework. The hook still
-shows `URI.swift` in the top 7 (via Layer 2 swift-decl wiring), just
-not at rank 1.
+**What was actually fixed**: The bug was structurally worse than the
+original entry described — `merge-results.js:99`'s case-sensitive
+def-site guard was DEAD CODE because line 120 already lowercased the
+input. So `String("uri") === "URI"` was always false: the +25% def-site
+boost actually fired on consumer files (where extractSymbolDef returns
+the local var "uri") and never on canonical type defs (where it returns
+"URI"). The Swift consumer line `let uri = URI(...)` inherited a +25%
+def-site + +40% exact-symbol + +12% contains = +77% boost it didn't
+deserve.
 
-**Impact in production**: Modest — the user still sees the canonical
-file, just not first. A SwiftUI dev asking the hook "where's URI defined"
-will see `URI.swift` in the injected `<codebase-retrieval>` block, just
-behind URITests.swift.
+**Measured impact**: On Vapor 4.121.4 query "URI", `URITests.swift`'s
+fused score dropped from ~872 to 526 (a 40% reduction in the bug's
+inflation). Pinned by new tests in `test/merge-results.test.js`
+("mergeResults — case-sensitive symbol matching (Swift bug-2)") and
+`test/scoring.test.js` ("computeEnhancedSignals — caseSensitive option").
+
+**Residual gap surfaced by closing this**: `Sources/Vapor/Utilities/URI.swift`
+is now at rank 2 (up from "top 7" in the prior handoff). The rank-1
+flip is blocked by a separate issue, NOT the lowercase bug — zoekt's
+30-hit budget is consumed entirely by URITests.swift's text-frequency
+matches on "URI", so URI.swift never enters the zoekt result set and
+gets only its graph score (140) with no zoekt fusion. See acceptable
+debt #4 below for the path forward.
+
+**Hook regression now gated**: Before this fix, `bash scripts/eval-swift-external.sh diff`
+only exercised the CLI path. A `vapor-hook-baseline.json` is now
+committed and `diff` mode runs both CLI and hook comparators. Future
+case-sensitivity drift fails the gate.
 
 ### 3. Hook output and CLI/MCP output differ for Swift queries
 
@@ -228,7 +242,42 @@ its own subprocess budget (architectural change, breaks 200ms guarantee)
 or (b) a much higher hook-side base score for Swift-decl matches that
 risks crowding out other useful results. Either is a larger commit.
 
-### 4. The Vapor baseline numbers depend on zoekt being installed
+### 4. URI.swift at hook rank 2, blocked by zoekt text-frequency myopia
+
+Surfaced by closing acceptable debt #2 (above). Even with the
+false-firing pathway eliminated, `Sources/Vapor/Utilities/URI.swift`
+ranks below `Tests/VaporTests/URITests.swift` in production hook output
+because zoekt's per-line top-30 hits for query "URI" are entirely
+consumed by URITests.swift (URI appears dozens of times in that test
+file: `URITests`, `URI.Scheme`, `URI.Host`, etc.). URI.swift never
+enters the zoekt result set, so the merge layer can only score it
+from the graph (`swift_decl_type` → 100 * 1.4 = 140 points). After
+test-penalty math, URITests fused = 526 vs URI.swift fused = 140.
+
+**Possible fixes (own commits, not bundled)**:
+
+1. **Graph-canonical authority bump**: when a file has
+   `graphSignal in {swift_decl_type, exported_symbol}` AND no zoekt
+   hit, treat the graph match as a phantom def-line zoekt hit. The
+   graph KNOWS it's the canonical def; the merge layer can synthesize
+   a competitive zoekt score so `Sources/.../URI.swift` outranks a
+   zoekt-saturated test file. ~10 lines in `lib/merge-results.js`.
+   Risk: needs eval validation that the bump doesn't crowd out
+   high-quality zoekt hits in JS/Python paths.
+
+2. **Hook-side rg injection** (related to acceptable debt #3 above —
+   hook subprocess budget). Mirrors the CLI path's `injectGraphMatches`
+   helper that uses rg to find the canonical def line when zoekt
+   misses. Gives the hook the same 600-point hit-score floor. Trade-off:
+   every prompt pays the rg subprocess cost (~50-150ms), challenging
+   the 200ms hook budget.
+
+Option 1 is smaller and stays within budget; option 2 fully aligns
+hook with CLI quality. Defer until a user reports the rank-2 placement
+is causing real misorientation — eval gate catches regressions either
+way.
+
+### 5. The Vapor baseline numbers depend on zoekt being installed
 
 `scripts/eval-swift-external.sh` runs `node bin/intel.js scan` which
 auto-builds the zoekt index when the binary is on PATH. In environments
@@ -248,13 +297,18 @@ For a successor to confirm clean state in 60 seconds:
 
 ```bash
 cd /root/sextant
-git log --oneline -5                                                                                       # 0b21076 at top, plus 4 retrieval commits
-npm run test:unit                                                                                          # 604 pass, 8 skipped, 0 fail
+git log --oneline -5                                                                                       # 0b21076 at top, plus retrieval + bug-2 commits
+npm run test:unit                                                                                          # 614 pass, 8 skipped, 0 fail
 npm run test:eval                                                                                          # 21/21 self-eval, MRR 0.908, nDCG 0.916
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval   # 13/13 synthetic Swift
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval   # 7/7 mixed-language
-bash scripts/eval-swift-external.sh diff                                                                   # 15/15 Vapor, MRR 0.811
+bash scripts/eval-swift-external.sh diff                                                                   # CLI 15/15 (MRR 0.811) + hook 13/15 (MRR 0.689)
 ```
+
+`bash scripts/eval-swift-external.sh diff` now runs BOTH the CLI path
+(`fixtures/vapor-baseline.json`) and the hook fast path
+(`fixtures/vapor-hook-baseline.json`) comparators. Each prints PASS/FAIL
+independently and the script exits non-zero if either fails.
 
 End-to-end hook fast-path probe (proves the swift-decl wiring works in
 production, not just in eval):

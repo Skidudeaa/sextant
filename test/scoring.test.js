@@ -235,3 +235,87 @@ describe("isPythonPublicSymbol", () => {
     assert.equal(isPythonPublicSymbol(undefined), false);
   });
 });
+
+// ─── caseSensitive option (Swift bug-2 closure) ──────────────────────
+//
+// WHY: The hook merge layer passes case-preserved queryTerms with
+// { caseSensitive: true } so consumer-line variables (`let uri = URI(...)`)
+// don't false-match the type query `URI`.  The CLI/MCP path keeps default
+// (case-insensitive) for user-typing convenience.
+
+describe("computeEnhancedSignals — caseSensitive option", () => {
+  it("caseSensitive:true on Swift consumer line suppresses exact_symbol AND symbol_contains_query", () => {
+    // `let uri = URI(...)` → extractSymbolDef returns "uri" (the variable).
+    // Query "URI" is case-preserved.  Both Signal 1 (exact_symbol) and
+    // Signal 4 (symbol_contains_query) must reject this — that's the whole
+    // point of the fix: test-file consumer lines no longer inherit a +52%
+    // boost they don't deserve.
+    const hit = { score: 100, line: "    let uri = URI(scheme: .https, host: \"a\")", path: "X.swift" };
+    const result = computeEnhancedSignals(hit, ["URI"], { caseSensitive: true, explainHits: true });
+    assert.equal(
+      result.signals.some((s) => s.includes("exact_symbol")),
+      false,
+      `expected NO exact_symbol signal on consumer line, got: ${JSON.stringify(result.signals)}`
+    );
+    assert.equal(
+      result.signals.some((s) => s.includes("symbol_contains_query")),
+      false,
+      `expected NO symbol_contains_query signal on consumer line, got: ${JSON.stringify(result.signals)}`
+    );
+  });
+
+  it("caseSensitive:false (default) still false-fires on consumer line — regression guard for CLI path", () => {
+    // CLI/MCP path uses default opts (no caseSensitive).  The existing
+    // case-insensitive comparisons stay in place for user-typing
+    // convenience there.  This test pins that behavior so future refactors
+    // don't accidentally make the CLI path strict.
+    const hit = { score: 100, line: "    let uri = URI(scheme: .https, host: \"a\")", path: "X.swift" };
+    const result = computeEnhancedSignals(hit, ["URI"], { explainHits: true });
+    assert.equal(
+      result.signals.some((s) => s.includes("exact_symbol")),
+      true,
+      "default-mode SHOULD fire exact_symbol (CLI back-compat)"
+    );
+  });
+
+  it("caseSensitive:true on canonical Swift def line still fires exact_symbol", () => {
+    // Positive evidence: when query case matches the symbol case,
+    // case-sensitive mode behaves identically to the old insensitive mode
+    // for the canonical def line.  The +40% boost still lands.
+    const hit = { score: 100, line: "public struct URI: Codable, Sendable {", path: "X.swift" };
+    const result = computeEnhancedSignals(hit, ["URI"], { caseSensitive: true, explainHits: true });
+    assert.equal(
+      result.signals.some((s) => s.includes("exact_symbol")),
+      true,
+      `expected exact_symbol signal on canonical def line, got: ${JSON.stringify(result.signals)}`
+    );
+  });
+
+  it("caseSensitive:true with mismatched-case query does NOT fire exact_symbol", () => {
+    // Documents the accepted tradeoff at merge-results.js:86-96 in the
+    // hook path: a user typing lowercase "uri" loses the +40% boost on
+    // the canonical "URI" def.  Empirically this is unmeasured (0 of 40
+    // eval queries are case-mismatched); the graph-side path still finds
+    // the file via SQL LOWER().
+    const hit = { score: 100, line: "public struct URI: Codable {", path: "X.swift" };
+    const result = computeEnhancedSignals(hit, ["uri"], { caseSensitive: true, explainHits: true });
+    assert.equal(
+      result.signals.some((s) => s.includes("exact_symbol")),
+      false,
+      "lowercase query against PascalCase symbol must NOT fire exact_symbol in case-sensitive mode"
+    );
+  });
+
+  it("caseSensitive:true preserves JS canonical-case behavior (`loadDb` matches `function loadDb`)", () => {
+    // JS regression guard: canonical-case JS queries still get the +40%
+    // boost in the hook path.  Empirically every eval query is canonical
+    // case so this is the dominant path.
+    const hit = { score: 100, line: "function loadDb(root) {", path: "lib/graph.js" };
+    const result = computeEnhancedSignals(hit, ["loadDb"], { caseSensitive: true, explainHits: true });
+    assert.equal(
+      result.signals.some((s) => s.includes("exact_symbol")),
+      true,
+      `expected exact_symbol on canonical-case JS def, got: ${JSON.stringify(result.signals)}`
+    );
+  });
+});

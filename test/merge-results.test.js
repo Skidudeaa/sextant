@@ -314,3 +314,79 @@ describe("mergeResults — def-site line-level scoring", () => {
     assert.equal(result.files[0].fusedScore, 500);
   });
 });
+
+// ─── Case-sensitive symbol matching (Swift bug-2 closure) ──────────────
+//
+// WHY: In the hook fast-path the caller passes case-preserved queryTerms;
+// merge-results forwards them to scoring with { caseSensitive: true }.
+// On Swift consumer lines like `let uri = URI(...)` extractSymbolDef
+// returns the LOCAL VARIABLE name "uri", not the type "URI".  Case-sensitive
+// matching distinguishes a variable declaration from a type definition,
+// preventing test-file consumer lines from inheriting the +25%/+40%/+12%
+// def-site stack and outranking the canonical type def file.
+
+describe("mergeResults — case-sensitive symbol matching (Swift bug-2)", () => {
+  it("URI.swift outranks URITests.swift consumer-only file (the headline case)", () => {
+    const zoektHits = [
+      { path: "Sources/URI.swift",     lineNumber: 12, line: "public struct URI: Codable, Sendable {",                  score: 500 },
+      { path: "Tests/URITests.swift",  lineNumber: 8,  line: "    let uri = URI(scheme: .https, host: \"example.com\")", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["URI"] });
+    assert.equal(result.files[0].path, "Sources/URI.swift",
+      `expected URI.swift first, got ${result.files[0].path} fused=${result.files[0].fusedScore} vs ${result.files[1].path} fused=${result.files[1].fusedScore}`);
+    assert.ok(result.files[0].fusedScore > result.files[1].fusedScore);
+  });
+
+  it("consumer line `let uri = URI(...)` gets NO def-site boost for query 'URI'", () => {
+    // Negative-evidence: extractSymbolDef returns "uri" (the variable),
+    // queryTerms ["URI"] is case-preserved into scoring; case-sensitive
+    // gate rejects "URI" === "uri".  Result: no +25% def-site, no +40%
+    // exact-symbol, no +12% symbol_contains_query.  Raw score survives.
+    const zoektHits = [
+      { path: "X.swift", lineNumber: 1, line: "    let uri = URI(scheme: .https, host: \"a\")", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["URI"] });
+    // No bonuses; fused = raw 500.  (No file-type penalty: X.swift isn't a test path.)
+    assert.equal(result.files[0].fusedScore, 500);
+  });
+
+  it("def line `public struct URI` DOES get the def-site boost for query 'URI'", () => {
+    // Positive-evidence: this assertion proves the previously-dead
+    // case-sensitive guard at merge-results.js:99 now actually fires.
+    // Before the fix, queryTerms was lowercased to ["uri"] upstream so
+    // String("uri") === "URI" was always false and the +25% never fired.
+    const zoektHits = [
+      { path: "X.swift", lineNumber: 1, line: "public struct URI: Codable {", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["URI"] });
+    // DEF_SITE_PRIORITY 0.25 + EXACT_SYMBOL_BOOST 0.40 + SYMBOL_CONTAINS_QUERY 0.12 = +77%
+    // Allow some slack for rounding; assert at least the def-site +25% landed.
+    assert.ok(result.files[0].fusedScore >= 500 * 1.25,
+      `expected at least +25% def-site boost on canonical def line, got fused=${result.files[0].fusedScore}`);
+  });
+
+  it("JS regression: canonical-case def line `function loadDb()` still gets the def-site stack", () => {
+    // Confirms the case-sensitive guard doesn't break JS — when the user
+    // types the canonical camelCase, the def-site boost still fires.
+    const zoektHits = [
+      { path: "lib/graph.js", lineNumber: 1, line: "function loadDb(root) {", score: 500 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["loadDb"] });
+    assert.ok(result.files[0].fusedScore >= 500 * 1.25,
+      `expected def-site boost on canonical-case JS def line, got fused=${result.files[0].fusedScore}`);
+  });
+
+  it("termCoverageBonus regression: multi-term coverage still fires after upstream lowercase removal", () => {
+    // termCoverageBonus lowercases internally (merge-results.js:237/241),
+    // so removing the upstream .toLowerCase() at line 120 must not
+    // disturb its case-insensitive substring counting.
+    const zoektHits = [
+      { path: "a.js", lineNumber: 10, line: "foo();",                score: 500 },
+      { path: "a.js", lineNumber: 20, line: "function FOO() {}",     score: 500 },
+    ];
+    // Mixed-case query; termCoverageBonus should still match BOTH terms
+    // on the def line (case-insensitive substring) and pick line 20.
+    const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["foo", "function"] });
+    assert.equal(result.files[0].zoektHit.lineNumber, 20);
+  });
+});

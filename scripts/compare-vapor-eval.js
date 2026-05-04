@@ -38,6 +38,16 @@ function topK(files, k) {
   return new Set((files || []).slice(0, k));
 }
 
+// WHY: eval-retrieve.js writes per-case `withGraph.files` / `withoutGraph.files`
+// (graph-on-vs-off A/B run), while eval-hook.js writes flat `rankedFiles` (the
+// hook path is graph-only).  This helper accepts either schema so the same
+// comparator gates both baselines.
+function caseFiles(c) {
+  if (c && c.withGraph && Array.isArray(c.withGraph.files)) return c.withGraph.files;
+  if (c && Array.isArray(c.rankedFiles)) return c.rankedFiles;
+  return [];
+}
+
 function setMinus(a, b) {
   const out = [];
   for (const x of a) if (!b.has(x)) out.push(x);
@@ -79,8 +89,8 @@ function main() {
       warnings.push(`case ${cur.id} present in current but not in baseline (new query?)`);
       continue;
     }
-    const baseTop3 = topK(base.withGraph?.files, 3);
-    const curTop3 = topK(cur.withGraph?.files, 3);
+    const baseTop3 = topK(caseFiles(base), 3);
+    const curTop3 = topK(caseFiles(cur), 3);
     const dropped = setMinus(baseTop3, curTop3);
     if (dropped.length > 0) {
       failures.push(
@@ -96,13 +106,19 @@ function main() {
     }
   }
 
-  // Soft signal: pathological-lift queries.
+  // Soft signal: pathological-lift queries.  Hook-baseline cases don't carry
+  // withGraph/withoutGraph (the hook path is graph-only by design), so the
+  // graphLiftNDCG section silently degrades to <not-applicable> for hook diffs.
   console.log("");
   console.log("Pathological-lift queries (graphLiftNDCG):");
   for (const id of STARRED_PATHOLOGICAL_LIFT) {
     const cur = current.cases?.find((c) => c.id === id);
     if (!cur) {
       console.log(`  ${id}: <missing>`);
+      continue;
+    }
+    if (!cur.withGraph || !cur.withoutGraph) {
+      console.log(`  ${id} (query="${cur.query}"): <not-applicable> [graph-only path]`);
       continue;
     }
     const lift = (cur.withGraph?.ndcg ?? 0) - (cur.withoutGraph?.ndcg ?? 0);

@@ -231,14 +231,14 @@ See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (ori
 
 ## Eval Results
 
-21/21 self-eval queries pass on the sextant repo itself: MRR 0.908, nDCG 0.916. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries): MRR 0.811, nDCG 0.800 — see `fixtures/vapor-baseline.json`. Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
+21/21 self-eval queries pass on the sextant repo itself: MRR 0.908, nDCG 0.916. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.689, nDCG 0.695, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
 
 ### Running the eval suite
 
 These all run from a clean clone in under a minute (Vapor benchmark excluded — it's manual-trigger only):
 
 ```bash
-npm run test:unit                                                                                         # 604 pass, 8 skipped, 0 fail
+npm run test:unit                                                                                         # 614 pass, 8 skipped, 0 fail
 npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.908, nDCG 0.916
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture
@@ -247,10 +247,12 @@ node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --
 The Vapor benchmark clones `vapor/vapor` at a pinned tag, scans, and diffs against the committed baseline (~1–3 min):
 
 ```bash
-bash scripts/eval-swift-external.sh                                  # diff against fixtures/vapor-baseline.json
-bash scripts/eval-swift-external.sh regen-baseline                   # refresh baseline after intentional scoring changes
-VAPOR_SHA=4.121.4 bash scripts/eval-swift-external.sh regen-baseline # pin to a different Vapor tag
-VAPOR_DIR=/somewhere/else bash scripts/eval-swift-external.sh        # override clone target if /tmp is restricted
+bash scripts/eval-swift-external.sh                                       # diff CLI + hook (both gates must pass)
+bash scripts/eval-swift-external.sh hook-diff                             # hook gate only
+bash scripts/eval-swift-external.sh regen-baseline                        # refresh CLI baseline after intentional scoring changes
+bash scripts/eval-swift-external.sh regen-hook-baseline                   # refresh hook baseline
+VAPOR_SHA=4.121.4 bash scripts/eval-swift-external.sh regen-baseline      # pin to a different Vapor tag
+VAPOR_DIR=/somewhere/else bash scripts/eval-swift-external.sh             # override clone target if /tmp is restricted
 ```
 
 See [EVAL_FINDINGS.md](EVAL_FINDINGS.md) for methodology, scoring evolution, and bugs found by eval. See [docs/swift-v1-scope.md](docs/swift-v1-scope.md) for what Swift v1 is and isn't.

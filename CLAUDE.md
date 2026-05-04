@@ -222,7 +222,7 @@ node scripts/eval-retrieve.js --verbose   # hit lines + scoring signals
 node scripts/eval-retrieve.js --json      # machine-readable
 ```
 
-Current self-eval metrics on HEAD: **MRR 0.908, nDCG 0.916, 21/21 pass.** External Vapor 4.121.4 benchmark (294 Swift files): **MRR 0.811, nDCG 0.800, 15/15 pass** — see `fixtures/vapor-baseline.json` and `scripts/eval-swift-external.sh`.
+Current self-eval metrics on HEAD: **MRR 0.908, nDCG 0.916, 21/21 pass.** External Vapor 4.121.4 benchmark — CLI path (`fixtures/vapor-baseline.json`): **MRR 0.811, nDCG 0.800, 15/15 pass**. Hook fast-path (`fixtures/vapor-hook-baseline.json`, gated by the same `bash scripts/eval-swift-external.sh diff` command): **MRR 0.689, nDCG 0.695, 13/15 pass** (the 2 fails are `vapor-elf-001` and `vapor-init-001`, both pre-existing acceptable debt). The hook baseline is graph-only — no `withGraph`/`withoutGraph` A/B since the hook path doesn't run with graph disabled in production.
 
 Backend choice matters. The eval harness uses `backend: "auto"` (zoekt when installed, else rg) — the same path production hooks and the MCP server take. Pinning to `"rg"` measured an inferior code path: common-name def lookups in multi-thousand-file Swift repos (Vapor's `Application`/`Request`/`Response`) come out at MRR 0.20 because rg's text-frequency ranking buries the canonical class def behind higher-fan-in consumer files. With zoekt the same queries surface the canonical file at rank 1.
 

@@ -1,0 +1,505 @@
+{
+  "aggregates": {
+    "totalCases": 15,
+    "passed": 13,
+    "failed": 2,
+    "meanPrecision": 0.18333333333333338,
+    "meanMRR": 0.6895238095238094,
+    "meanNDCG": 0.6952821795971216,
+    "meanRecall": 0.8666666666666667,
+    "failedIds": [
+      "vapor-elf-001",
+      "vapor-init-001"
+    ],
+    "passedIds": [
+      "vapor-app-001",
+      "vapor-mw-001",
+      "vapor-req-001",
+      "vapor-resp-001",
+      "vapor-svc-001",
+      "vapor-uri-001",
+      "vapor-ext-001",
+      "vapor-codable-001",
+      "vapor-routes-001",
+      "vapor-content-001",
+      "vapor-ws-001",
+      "vapor-error-001",
+      "vapor-validate-001"
+    ]
+  },
+  "cases": [
+    {
+      "id": "vapor-app-001",
+      "category": "type",
+      "query": "Application",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "Application"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Application.swift",
+        "Tests/VaporTests/ApplicationTests.swift",
+        "Sources/XCTVapor/+Application.swift",
+        "Sources/Vapor/Cache/Application+Cache.swift",
+        "Sources/Vapor/Cache/MemoryCache.swift",
+        "Sources/Vapor/Client/Application+Clients.swift",
+        "Sources/Vapor/Commands/CommandContext+Application.swift",
+        "Sources/Vapor/Core/Core.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 49
+    },
+    {
+      "id": "vapor-mw-001",
+      "category": "protocol",
+      "query": "protocol Middleware",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "protocol",
+        "Middleware"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 0.5,
+      "ndcg": 0.5449702648457346,
+      "hitQuality": false,
+      "rankedFiles": [
+        "Tests/VaporTests/MiddlewareTests.swift",
+        "Sources/Vapor/Middleware/Middleware.swift",
+        "Sources/Vapor/Middleware/Application+Middleware.swift",
+        "Sources/Vapor/Routing/RoutesBuilder+Middleware.swift",
+        "Sources/Vapor/Utilities/DataProtocol+Copy.swift"
+      ],
+      "fileCount": 5,
+      "durationMs": 26
+    },
+    {
+      "id": "vapor-req-001",
+      "category": "type",
+      "query": "Request",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "Request"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Request/Request.swift",
+        "Tests/VaporTests/RequestTests.swift",
+        "Sources/Vapor/Authentication/AuthenticationCache.swift",
+        "Sources/Vapor/Cache/Request+Cache.swift",
+        "Sources/Vapor/Client/Request+Client.swift",
+        "Sources/Vapor/Concurrency/RequestBody+Concurrency.swift",
+        "Sources/Vapor/Concurrency/ResponseCodable+Concurrency.swift",
+        "Sources/Vapor/Concurrency/WebSocket+Concurrency.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 41
+    },
+    {
+      "id": "vapor-resp-001",
+      "category": "type",
+      "query": "Response",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "Response"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Response/Response.swift",
+        "Sources/Vapor/Utilities/AnyResponse.swift",
+        "Sources/Vapor/Concurrency/ResponseCodable+Concurrency.swift",
+        "Sources/Vapor/Middleware/FileMiddleware.swift",
+        "Sources/Vapor/Response/Response+Body.swift",
+        "Sources/Vapor/Response/ResponseCodable.swift"
+      ],
+      "fileCount": 6,
+      "durationMs": 21
+    },
+    {
+      "id": "vapor-elf-001",
+      "category": "type",
+      "query": "extension EventLoopFuture",
+      "isNegative": false,
+      "k": 5,
+      "pass": false,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "extension",
+        "EventLoopFuture"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0,
+      "recall": 0,
+      "mrr": 0,
+      "ndcg": 0,
+      "hitQuality": false,
+      "rankedFiles": [
+        "Sources/Development/routes.swift",
+        "Sources/Vapor/Application.swift",
+        "Sources/Vapor/Cache/Cache.swift",
+        "Sources/Vapor/Client/Client.swift",
+        "Sources/Vapor/Exports.swift",
+        "Sources/Vapor/View/View.swift",
+        "Sources/Vapor/Core/Running.swift",
+        "Tests/VaporTests/FileTests.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 32
+    },
+    {
+      "id": "vapor-svc-001",
+      "category": "protocol",
+      "query": "Service",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "Service"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.25,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Services/Service.swift",
+        "Tests/VaporTests/ServiceTests.swift",
+        "Sources/Vapor/Services/App+Service.swift",
+        "Sources/Vapor/Services/Req+Service.swift"
+      ],
+      "fileCount": 4,
+      "durationMs": 21
+    },
+    {
+      "id": "vapor-uri-001",
+      "category": "type",
+      "query": "URI",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "URI"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 0.5,
+      "ndcg": 0.6309297535714575,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Tests/VaporTests/URITests.swift",
+        "Sources/Vapor/Utilities/URI.swift",
+        "Sources/Vapor/HTTP/EndpointCache.swift",
+        "Sources/Vapor/Security/OTP.swift",
+        "Sources/Vapor/Security/ValidatedCertificateChain.swift",
+        "Tests/VaporTests/SecurityTests.swift",
+        "Tests/VaporTests/Utilities/CapturingMetricsSystem.swift"
+      ],
+      "fileCount": 7,
+      "durationMs": 20
+    },
+    {
+      "id": "vapor-init-001",
+      "category": "common-name",
+      "query": "public init",
+      "isNegative": false,
+      "k": 5,
+      "pass": false,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "public",
+        "init"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0,
+      "recall": 0,
+      "mrr": 0,
+      "ndcg": 0,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Bcrypt/Bcrypt.swift",
+        "Sources/Vapor/_Deprecations.swift",
+        "Sources/Vapor/Services/Service.swift",
+        "Sources/Vapor/Sessions/Session.swift",
+        "Sources/Vapor/View/View.swift",
+        "Sources/Vapor/Utilities/URI.swift",
+        "Sources/Vapor/Utilities/Base32.swift",
+        "Sources/Vapor/Utilities/File.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 26
+    },
+    {
+      "id": "vapor-ext-001",
+      "category": "extension",
+      "query": "extension Application",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "extension",
+        "Application"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.3,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 0.7448444159280145,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Application.swift",
+        "Tests/VaporTests/ApplicationTests.swift",
+        "Sources/XCTVapor/+Application.swift",
+        "Sources/Vapor/Cache/Application+Cache.swift",
+        "Sources/Vapor/Cache/MemoryCache.swift",
+        "Sources/Vapor/Client/Application+Clients.swift",
+        "Sources/Vapor/Commands/CommandContext+Application.swift",
+        "Sources/Vapor/Core/Core.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 18
+    },
+    {
+      "id": "vapor-codable-001",
+      "category": "conformance",
+      "query": "Codable",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "Codable"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.1,
+      "recall": 1,
+      "mrr": 0.14285714285714285,
+      "ndcg": 0.08393733275603986,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Response/ResponseCodable.swift",
+        "Sources/Vapor/Concurrency/ResponseCodable+Concurrency.swift",
+        "Sources/Vapor/Cache/Cache.swift",
+        "Sources/Vapor/Content/Content.swift",
+        "Sources/Vapor/Sessions/Session.swift",
+        "Sources/Vapor/Utilities/File.swift",
+        "Sources/Vapor/Utilities/URI.swift",
+        "Tests/VaporTests/ClientTests.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 21
+    },
+    {
+      "id": "vapor-routes-001",
+      "category": "type",
+      "query": "Routes",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "Routes"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Routing/Routes.swift",
+        "Sources/Vapor/Routing/Application+Routes.swift",
+        "Sources/Vapor/Routing/RoutesBuilder.swift",
+        "Sources/Vapor/Routing/RoutesBuilder+Group.swift",
+        "Sources/Vapor/Routing/RoutesBuilder+Method.swift",
+        "Sources/Vapor/Routing/RoutesBuilder+Middleware.swift",
+        "Sources/Vapor/Routing/RoutesBuilder+WebSocket.swift",
+        "Sources/Vapor/Commands/RoutesCommand.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 13
+    },
+    {
+      "id": "vapor-content-001",
+      "category": "protocol",
+      "query": "protocol ContentEncoder",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "protocol",
+        "ContentEncoder"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": false,
+      "rankedFiles": [
+        "Sources/Vapor/Content/ContentCoders.swift",
+        "Sources/Vapor/Client/ClientRequest.swift",
+        "Sources/Vapor/Client/ClientResponse.swift",
+        "Sources/Vapor/Content/ContentConfiguration.swift",
+        "Sources/Vapor/Content/ContentContainer.swift",
+        "Sources/Vapor/Content/JSONCoders+Content.swift",
+        "Sources/Vapor/Content/PlaintextEncoder.swift",
+        "Sources/Vapor/Multipart/FormDataEncoder+Content.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 13
+    },
+    {
+      "id": "vapor-ws-001",
+      "category": "type",
+      "query": "WebSocket",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "WebSocket"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 30,
+      "graphWarnings": [],
+      "precision": 0.3,
+      "recall": 1,
+      "mrr": 0.2,
+      "ndcg": 0.4245509268555779,
+      "hitQuality": true,
+      "rankedFiles": [
+        "Sources/Vapor/Routing/RoutesBuilder+WebSocket.swift",
+        "Sources/Vapor/Routing/Request+WebSocket.swift",
+        "Tests/VaporTests/AsyncWebSocketTests.swift",
+        "Tests/VaporTests/WebSocketTests.swift",
+        "Sources/Vapor/Concurrency/WebSocket+Concurrency.swift",
+        "Tests/VaporTests/AsyncRouteTests.swift"
+      ],
+      "fileCount": 6,
+      "durationMs": 12
+    },
+    {
+      "id": "vapor-error-001",
+      "category": "protocol",
+      "query": "protocol AbortError",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "protocol",
+        "AbortError"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 29,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": false,
+      "rankedFiles": [
+        "Sources/Vapor/Error/AbortError.swift",
+        "Sources/Development/routes.swift",
+        "Sources/Vapor/Error/Abort.swift",
+        "Sources/Vapor/Middleware/ErrorMiddleware.swift",
+        "Sources/Vapor/Responder/DefaultResponder.swift",
+        "Sources/Vapor/URLEncodedForm/URLEncodedFormError.swift",
+        "Sources/Vapor/Validation/ValidationsError.swift",
+        "Sources/Vapor/Logging/Logger+Report.swift"
+      ],
+      "fileCount": 8,
+      "durationMs": 15
+    },
+    {
+      "id": "vapor-validate-001",
+      "category": "protocol",
+      "query": "protocol Validatable",
+      "isNegative": false,
+      "k": 5,
+      "pass": true,
+      "classifiedForRetrieval": true,
+      "queryTerms": [
+        "protocol",
+        "Validatable"
+      ],
+      "zoektAvailable": true,
+      "zoektHitCount": 15,
+      "graphWarnings": [],
+      "precision": 0.2,
+      "recall": 1,
+      "mrr": 1,
+      "ndcg": 1,
+      "hitQuality": false,
+      "rankedFiles": [
+        "Sources/Vapor/Validation/Validatable.swift",
+        "Sources/Vapor/Deprecations/Validatable+validate.swift",
+        "Tests/VaporTests/AsyncRouteTests.swift",
+        "Tests/VaporTests/RouteTests.swift",
+        "Tests/VaporTests/ValidationTests.swift",
+        "Sources/Vapor/Utilities/DataProtocol+Copy.swift"
+      ],
+      "fileCount": 6,
+      "durationMs": 12
+    }
+  ]
+}
