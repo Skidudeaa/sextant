@@ -5,3 +5,6 @@ __pycache__/
 
 # Per-repo state (generated, not checked in)
 .planning/
+
+# Local-only config (e.g. compound-engineering.local.md review-agent overrides)
+*.local.md
