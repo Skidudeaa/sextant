@@ -16,7 +16,7 @@ No build step. CommonJS throughout, no transpilation.
 
 | Command | What it runs |
 |---------|-------------|
-| `npm run test:unit` | 356 unit tests via `node:test` (~900ms) |
+| `npm run test:unit` | 628 unit tests across 148 suites via `node:test` (~9s) |
 | `npm run test:eval` | 21-query eval harness (MRR, nDCG, usefulness) |
 | `npm test` | Full suite: unit + 5 bash integration scripts + eval |
 
@@ -43,11 +43,11 @@ lib/
   zoekt.js                Zoekt HTTP backend (optional)
   cli.js                  shared CLI utilities
   extractors/             JS/TS (regex imports, AST exports), Python (AST)
-mcp/server.js             JSON-RPC 2.0 MCP server (4 tools)
+mcp/server.js             JSON-RPC 2.0 MCP server (5 tools)
 watch.js                  chokidar file watcher + heartbeat + dashboard
 test/                     node:test unit tests
 scripts/
-  eval-retrieve.js        retrieval eval harness (19 cases)
+  eval-retrieve.js        retrieval eval harness (21 cases)
   eval-dataset.json       eval test cases
   setup.sh                one-command project deployment
 ```

@@ -16,8 +16,8 @@ It is **not** a semantic code understanding engine, LSP, vector database, or IDE
 npm install          # install dependencies (chokidar, fast-glob, sql.js, @babel/parser)
 npm link             # make `sextant` globally available (`codebase-intel` still works as alias)
 npm test             # unit tests (node:test) + 5 bash integration scripts + eval harness
-npm run test:unit    # unit tests (326+, ~900ms)
-npm run test:eval    # just the 19-query eval harness
+npm run test:unit    # unit tests (628 in 148 suites, ~9s)
+npm run test:eval    # just the 21-query eval harness
 ```
 
 No build step. CommonJS throughout, no transpilation.

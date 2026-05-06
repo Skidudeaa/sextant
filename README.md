@@ -148,10 +148,12 @@ There is no channel that both the user and Claude see simultaneously.
 ## Features
 
 - **Health-gated scoring** -- graph boosts disabled when import resolution drops below 90%
+- **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; an atomic single-flight rescan is enqueued in the background
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
 - **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
 - **Query-aware hooks** -- classifies each prompt, retrieves code-relevant context in <200ms
 - **AST export extraction** -- JS/TS via @babel/parser with regex fallback on parse failure
+- **TS ESM Node16 awareness** -- `.ts` source importing `./foo.js` resolves to `./foo.ts` per the NodeNext convention; opt-in via importer extension so pure-JS projects keep literal semantics
 - **MCP server** -- 5 tools (search, related, explain, health, scope) registered per-project via `.mcp.json`
 - **Definition over hub** -- definition-site scoring beats high fan-in hub files
 - **Source-first search** -- source files searched before docs/config to prevent changelog saturation
@@ -173,6 +175,9 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant summary` | Print what Claude sees |
 | `sextant retrieve <query>` | Ranked search with graph context |
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |
+| `sextant inject` | Print the current `<codebase-intelligence>` body to stdout (freshness-gated, same contract as the hooks) |
+| `sextant update --file <relPath>` | Re-extract a single file and update the graph (used by the watcher; useful for ad-hoc reindex) |
+| `sextant telemetry [--json \| --tail N] [--include-old]` | Audit the freshness-gate dataset: stale rate, stale-reason breakdown, scan duration percentiles |
 | `sextant zoekt <index\|serve\|search>` | Manage Zoekt code search (optional) |
 | `sextant mcp` | Start the MCP server (stdio, used by Claude Code) |
 | `sextant hook sessionstart` | SessionStart hook entry point |
@@ -188,7 +193,8 @@ Optional `.codebase-intel.json` at project root:
   "ignore": ["legacy/**", "vendor/**"],
   "vendored": ["mcp-servers"],
   "vendoredDetection": true,
-  "summaryThrottleMs": 5000
+  "gitignoreHonoring": true,
+  "summaryEverySec": 5
 }
 ```
 
@@ -199,7 +205,7 @@ Optional `.codebase-intel.json` at project root:
 | `vendored` | `[]` | Explicit subdirs to exclude from indexing (always honored, additive to auto-detection) |
 | `vendoredDetection` | `true` | Auto-detect vendored subtrees at depth=1 (nested `.git/`, conventional dirnames like `vendor/`/`Pods/`/`Carthage/`/`target/`, GitHub-tarball naming). Set to `false` to disable. |
 | `gitignoreHonoring` | `true` | Honor the project's root `.gitignore` (semantics-correct via the `ignore` npm package, including negations and anchored patterns). Set to `false` to ignore the file. |
-| `summaryThrottleMs` | `5000` | Minimum interval between summary regenerations |
+| `summaryEverySec` | `5` | Minimum interval (seconds) between summary regenerations |
 
 The summary header lists detected vendored exclusions (`Vendored excluded: N (path1, path2, …)`) so you can audit and override when the heuristic guesses wrong.
 
@@ -238,7 +244,7 @@ See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (ori
 These all run from a clean clone in under a minute (Vapor benchmark excluded — it's manual-trigger only):
 
 ```bash
-npm run test:unit                                                                                         # 614 pass, 8 skipped, 0 fail
+npm run test:unit                                                                                         # 620 pass, 8 skipped, 0 fail
 npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.908, nDCG 0.916
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture

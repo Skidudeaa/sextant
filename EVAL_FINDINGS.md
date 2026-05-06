@@ -1,5 +1,7 @@
 # Retrieval Evaluation Findings
 
+> **Historical document.** The numbers and case counts below reflect the v4/v5 era harness (19 cases). The current harness has 21 cases across 7 categories, scoring MRR 0.908 / nDCG 0.916 / 21/21 pass on the self-eval corpus. For up-to-date eval numbers and methodology, see the **Eval Harness** section of [CLAUDE.md](CLAUDE.md). This file is preserved as archaeology for the scoring evolution that got us here (definition-site priority, fan-in suppression, source-first rg, export-graph lookup, AST export extraction).
+
 ## Eval Harness
 
 Self-referential harness: 19 queries against the sextant index. Each runs with and without graph boosts to isolate the graph's effect.
