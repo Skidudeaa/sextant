@@ -463,6 +463,24 @@ describe("shouldRetrieve — edge cases", () => {
     assert.equal(shouldRetrieve("hello").retrieve, false);
   });
 
+  // WHY: these specific phrasings come from the 2026-04-30 dogfooding session
+  // where the user asked candidly whether retrieval was helping. Each one
+  // tripped retrieval pre-fix and pulled noise (e.g. lib/scoring.js for
+  // "how is this project coming along"). Locked in here as exact-string
+  // regressions so the conversational-skip threshold can't silently slip
+  // back without a test failure.
+  it("'how is this project coming along?' → skip (project-status meta)", () => {
+    assert.equal(shouldRetrieve("how is this project coming along?").retrieve, false);
+  });
+
+  it("'how is the project going' → skip (project-status meta)", () => {
+    assert.equal(shouldRetrieve("how is the project going").retrieve, false);
+  });
+
+  it("'yes' → skip (bare confirmation)", () => {
+    assert.equal(shouldRetrieve("yes").retrieve, false);
+  });
+
   // And verify genuine tech questions with concrete code targets still fire.
   it("'how does rerankFiles work' → retrieve (identifier + tech-question)", () => {
     const r = shouldRetrieve("how does rerankFiles work");

@@ -1,8 +1,12 @@
 const intel = require("../lib/intel");
-const { stripUnsafeXmlTags, applyFreshnessGate } = require("../lib/cli");
+const { stripUnsafeXmlTags, applyFreshnessGate, rootsFromArgs } = require("../lib/cli");
 
 async function run() {
-  const root = process.cwd();
+  // WHY: honour --root / --roots / --roots-file like every other command.
+  // Earlier code hardcoded process.cwd(), so `sextant inject --root /other`
+  // silently injected the cwd's summary instead of the named repo's —
+  // same shape as the watch-start / watch-stop bug fixed in 4a89721.
+  const root = rootsFromArgs(process.argv)[0];
   await intel.init(root);
   const raw = intel.readSummary(root);
   if (!raw || !raw.trim()) process.exit(0);
