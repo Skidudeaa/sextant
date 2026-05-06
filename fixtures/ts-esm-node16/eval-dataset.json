@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "language": "typescript",
+  "description": "TypeScript ESM Node16/NodeNext fixture. Source code writes `import { Foo } from './foo.js'` per the NodeNext convention; the on-disk file is `foo.ts`. Exercises sextant's resolver rewrite from JS-family extensions to TS-family equivalents when the importer is itself TS. Pre-fix, this corpus reported 0% local import resolution; post-fix it should report 100%, and graph-based ranking should fire because resolution clears the 90% health gate.",
+  "rootDir": "fixtures/ts-esm-node16",
+  "cases": [
+    {
+      "id": "ts-esm-001-schema-def",
+      "category": "symbol",
+      "query": "User",
+      "relevantFiles": ["src/schemas.ts"],
+      "acceptableFiles": ["src/api.ts", "src/index.ts"],
+      "relevantHitPatterns": ["interface User"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Canonical schema definition. schemas.ts must rank #1 — the def site beats the consumer files via def-site signal + fan-in. Post-fix, fan-in on schemas.ts should be 2 (api.ts and index.ts both import it via './schemas.js'); pre-fix, fan-in was 0 because the resolver couldn't bridge the .js→.ts gap."
+    },
+    {
+      "id": "ts-esm-002-api-def",
+      "category": "symbol",
+      "query": "fetchUser",
+      "relevantFiles": ["src/api.ts"],
+      "acceptableFiles": ["src/index.ts"],
+      "relevantHitPatterns": ["function fetchUser", "fetchUser"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Function definition lookup. api.ts must rank #1 by def-site signal. Validates that the resolver fix doesn't regress single-file definition retrieval."
+    },
+    {
+      "id": "ts-esm-003-cross-file",
+      "category": "cross-file",
+      "query": "Session",
+      "relevantFiles": ["src/schemas.ts"],
+      "acceptableFiles": ["src/api.ts", "src/index.ts"],
+      "relevantHitPatterns": ["interface Session"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Cross-file consumer pattern. Session is defined in schemas.ts and imported by api.ts and index.ts via the NodeNext .js convention. schemas.ts must rank #1 — proves the fan-in graph edge was recorded post-fix."
+    },
+    {
+      "id": "ts-esm-004-negative",
+      "category": "negative",
+      "query": "absent_ts_esm_xyz_qwerty987",
+      "relevantFiles": [],
+      "relevantHitPatterns": [],
+      "topK": 5,
+      "minUsefulnessScore": 0.0,
+      "notes": "Garbage query. Must return zero results regardless of resolver state."
+    }
+  ]
+}

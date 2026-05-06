@@ -218,3 +218,67 @@ describe("resolver - edge cases", () => {
     assert.equal(result.kind, "unresolved");
   });
 });
+
+// WHY: TypeScript with `"moduleResolution": "node16" | "nodenext"` requires source code
+// to write `import "./foo.js"` even when the on-disk file is `./foo.ts`. The resolver
+// must rewrite the JS-family extension to its TS-family equivalent — but only when the
+// importer is itself TS, so pure-JS projects continue to honour literal .js semantics.
+describe("resolver - TS ESM Node16 .js → .ts rewrite", () => {
+  let nxTmpDir;
+
+  before(() => {
+    nxTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-nodenext-"));
+    fs.mkdirSync(path.join(nxTmpDir, "src"), { recursive: true });
+    // schemas.ts only — exercise the headline rewrite case
+    fs.writeFileSync(path.join(nxTmpDir, "src", "schemas.ts"), "export const Foo = 1;");
+    // Component.tsx only — .jsx → .tsx variant
+    fs.writeFileSync(
+      path.join(nxTmpDir, "src", "Component.tsx"),
+      "export default () => null;"
+    );
+    // api.mts only — .mjs → .mts variant
+    fs.writeFileSync(path.join(nxTmpDir, "src", "api.mts"), "export const api = 1;");
+    // helper.ts only, with a .js importer — guard for pure-JS projects
+    fs.writeFileSync(path.join(nxTmpDir, "src", "helper.ts"), "export const h = 1;");
+    // both.js + both.ts — literal-wins guard for mixed repos
+    fs.writeFileSync(path.join(nxTmpDir, "src", "both.js"), "module.exports = {};");
+    fs.writeFileSync(path.join(nxTmpDir, "src", "both.ts"), "export const both = 1;");
+  });
+
+  after(() => {
+    if (nxTmpDir) {
+      fs.rmSync(nxTmpDir, { recursive: true, force: true });
+      clearCaches(nxTmpDir);
+    }
+  });
+
+  it(".ts importer + ./schemas.js resolves to schemas.ts", () => {
+    const result = resolveImport(nxTmpDir, "src/index.ts", "./schemas.js");
+    assert.equal(result.resolved, "src/schemas.ts");
+    assert.equal(result.kind, "relative");
+  });
+
+  it(".tsx importer + ./Component.jsx resolves to Component.tsx", () => {
+    const result = resolveImport(nxTmpDir, "src/App.tsx", "./Component.jsx");
+    assert.equal(result.resolved, "src/Component.tsx");
+    assert.equal(result.kind, "relative");
+  });
+
+  it(".ts importer + ./api.mjs resolves to api.mts", () => {
+    const result = resolveImport(nxTmpDir, "src/index.ts", "./api.mjs");
+    assert.equal(result.resolved, "src/api.mts");
+    assert.equal(result.kind, "relative");
+  });
+
+  it(".ts importer + ./both.js prefers literal both.js (mixed-repo guard)", () => {
+    const result = resolveImport(nxTmpDir, "src/index.ts", "./both.js");
+    assert.equal(result.resolved, "src/both.js");
+    assert.equal(result.kind, "relative");
+  });
+
+  it(".js importer + ./helper.js does NOT rewrite to helper.ts (pure-JS guard)", () => {
+    const result = resolveImport(nxTmpDir, "src/index.js", "./helper.js");
+    assert.equal(result.resolved, null);
+    assert.equal(result.kind, "unresolved");
+  });
+});

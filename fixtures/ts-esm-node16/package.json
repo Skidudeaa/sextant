@@ -1,0 +1,7 @@
+{
+  "name": "ts-esm-node16-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ESM Node16 / NodeNext fixture: TS source uses .js extension in import specifiers per the TypeScript NodeNext convention. Exercises sextant's resolver rewrite for the .ts ↔ .js extension mismatch."
+}
