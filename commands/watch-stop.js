@@ -1,8 +1,13 @@
 const fs = require("fs");
 const path = require("path");
+const { rootsFromArgs } = require("../lib/cli");
 
 async function run() {
-  const root = process.cwd();
+  // WHY: honour --root / --roots / --roots-file like every other command.
+  // Earlier code hardcoded process.cwd(), so `sextant watch-stop --root /other`
+  // silently stopped the watcher for whatever directory the caller happened
+  // to be `cd`-ed into instead of the one named on the flag.
+  const root = rootsFromArgs(process.argv)[0];
   const dir = path.join(root, ".planning", "intel");
   const hbPath = path.join(dir, ".watcher_heartbeat");
   const lockPath = path.join(dir, ".watcher.pid");

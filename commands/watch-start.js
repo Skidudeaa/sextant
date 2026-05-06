@@ -1,11 +1,15 @@
-const { getWatcherStatus } = require("../lib/cli");
+const { getWatcherStatus, rootsFromArgs } = require("../lib/cli");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function run() {
-  const root = process.cwd();
+  // WHY: honour --root / --roots / --roots-file like every other command.
+  // Earlier code hardcoded process.cwd(), so `sextant watch-start --root /other`
+  // started the watcher in whatever directory the caller was cd-ed into
+  // instead of the one named on the flag — symmetric to the watch-stop bug.
+  const root = rootsFromArgs(process.argv)[0];
   const ws = getWatcherStatus(root);
   if (ws.running) {
     console.log("watcher already running (" + ws.ageSec + "s ago)");

@@ -173,3 +173,73 @@ describe("claimPidLock / releasePidLock", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// watch-stop CLI honours --root
+// ---------------------------------------------------------------------------
+//
+// WHY: regression test for the bug where `sextant watch-stop --root /other`
+// silently ignored --root and operated on process.cwd() — meaning a user
+// running watch-stop from inside repo A while passing --root /repoB would
+// kill repo A's watcher and leave repo B's lockfile untouched. The same
+// shape applies to watch-start. Verified end-to-end on /root/manus-api-mcp
+// (2026-05-06) before the fix.
+const { spawnSync } = require("child_process");
+
+describe("watch-stop CLI --root flag", () => {
+  let cwdDir, targetDir;
+
+  beforeEach(() => {
+    cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-cwd-"));
+    targetDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-target-"));
+    // Lay down fake watcher state in BOTH dirs. The bug would clean cwdDir;
+    // the fix must clean only targetDir.
+    for (const d of [cwdDir, targetDir]) {
+      fs.mkdirSync(path.join(d, ".planning", "intel"), { recursive: true });
+      // Use PID 1 — guaranteed-alive but un-killable from non-root in most
+      // environments; here the test runs as root, so to avoid actually
+      // signalling init we use a clearly-dead high PID instead.
+      fs.writeFileSync(path.join(d, ".planning", "intel", ".watcher.pid"), "2147483646");
+      fs.writeFileSync(path.join(d, ".planning", "intel", ".watcher_heartbeat"), "");
+    }
+  });
+
+  function cleanupDirs() {
+    for (const d of [cwdDir, targetDir]) {
+      if (d && fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
+    }
+  }
+
+  it("operates on --root, not process.cwd()", () => {
+    const binPath = path.resolve(__dirname, "..", "bin", "intel.js");
+    try {
+      const result = spawnSync(process.execPath, [binPath, "watch-stop", "--root", targetDir], {
+        cwd: cwdDir,
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 0, `watch-stop exited ${result.status}: ${result.stderr}`);
+
+      // Target's lockfile + heartbeat must be cleaned (the bug operated on cwd
+      // instead, leaving these untouched).
+      assert.equal(
+        fs.existsSync(path.join(targetDir, ".planning", "intel", ".watcher.pid")),
+        false,
+        "expected target's .watcher.pid to be cleaned"
+      );
+      assert.equal(
+        fs.existsSync(path.join(targetDir, ".planning", "intel", ".watcher_heartbeat")),
+        false,
+        "expected target's heartbeat to be cleaned"
+      );
+
+      // CWD's lockfile must still exist (the bug would clean this one).
+      assert.equal(
+        fs.existsSync(path.join(cwdDir, ".planning", "intel", ".watcher.pid")),
+        true,
+        "CWD's .watcher.pid should be untouched when --root names a different dir"
+      );
+    } finally {
+      cleanupDirs();
+    }
+  });
+});
