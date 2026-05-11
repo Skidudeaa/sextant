@@ -46,6 +46,28 @@
       "topK": 5,
       "minUsefulnessScore": 0.0,
       "notes": "Garbage query. Must return zero results regardless of resolver state."
+    },
+    {
+      "id": "ts-esm-005-mts-def",
+      "category": "symbol",
+      "query": "loadModuleConfig",
+      "relevantFiles": ["src/module-config.mts"],
+      "acceptableFiles": ["src/esm-entry.ts"],
+      "relevantHitPatterns": ["function loadModuleConfig"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "NodeNext ESM source writes './module-config.mjs' while the implementation is module-config.mts. Retrieval must surface the .mts definition."
+    },
+    {
+      "id": "ts-esm-006-cts-def",
+      "category": "symbol",
+      "query": "loadCommonConfig",
+      "relevantFiles": ["src/common-config.cts"],
+      "acceptableFiles": ["src/cjs-entry.ts"],
+      "relevantHitPatterns": ["function loadCommonConfig"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "NodeNext CJS source writes './common-config.cjs' while the implementation is common-config.cts. Retrieval must surface the .cts definition."
     }
   ]
 }

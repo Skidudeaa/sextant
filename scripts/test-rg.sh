@@ -278,8 +278,41 @@ const rg = require('$ROOT/lib/rg');
 "
 
 # ──────────────────────────────────────────────────────────────
-# Test 10: searchInFiles() returns hits for specific files
+# Test 10: source-first treats .mts and .cts as source files
 # ──────────────────────────────────────────────────────────────
+rm -rf "$tmp"/*
+mkdir -p "$tmp/src"
+echo "source_module_marker" > "$tmp/000-notes.md"
+echo "source_module_marker" > "$tmp/001-guide.txt"
+echo "export const source_module_marker = 'esm';" > "$tmp/src/module.mts"
+echo "export const source_module_marker = 'cjs';" > "$tmp/src/module.cts"
+
+node -e "
+$NORM
+const rg = require('$ROOT/lib/rg');
+(async () => {
+  const result = await rg.search('$tmp', 'source_module_marker', { maxHits: 2, contextLines: 0 });
+  const paths = result.hits.map(h => norm(h.path));
+  if (!paths.includes('src/module.mts') || !paths.includes('src/module.cts')) {
+    console.error('Expected .mts and .cts source hits to fill the budget, got', paths);
+    process.exit(1);
+  }
+  const nonSource = paths.filter(p => !p.endsWith('.mts') && !p.endsWith('.cts'));
+  if (nonSource.length > 0) {
+    console.error('Expected only .mts/.cts source hits with maxHits=2, got', paths);
+    process.exit(1);
+  }
+  console.log('  source-first treats .mts/.cts as source files: OK');
+})().catch(e => { console.error(e); process.exit(1); });
+"
+
+# ──────────────────────────────────────────────────────────────
+# Test 11: searchInFiles() returns hits for specific files
+# ──────────────────────────────────────────────────────────────
+rm -rf "$tmp"/*
+mkdir -p "$tmp/src"
+echo "sourcefirst_marker" > "$tmp/src/impl.js"
+
 node -e "
 $NORM
 const rg = require('$ROOT/lib/rg');
@@ -298,7 +331,7 @@ const rg = require('$ROOT/lib/rg');
 "
 
 # ──────────────────────────────────────────────────────────────
-# Test 11: excluded directories are not searched
+# Test 12: excluded directories are not searched
 # ──────────────────────────────────────────────────────────────
 # WHY: Uses non-source extensions (.txt) in excluded dirs so that only
 # phase 2 (non-source search) would find them.  Phase 1 source globs
@@ -337,7 +370,7 @@ const rg = require('$ROOT/lib/rg');
 "
 
 # ──────────────────────────────────────────────────────────────
-# Test 12: context lines are populated when contextLines > 0
+# Test 13: context lines are populated when contextLines > 0
 # ──────────────────────────────────────────────────────────────
 rm -rf "$tmp"/*
 mkdir -p "$tmp/src"
@@ -369,7 +402,7 @@ const rg = require('$ROOT/lib/rg');
 "
 
 # ──────────────────────────────────────────────────────────────
-# Test 13: contextLines=0 produces empty before/after arrays
+# Test 14: contextLines=0 produces empty before/after arrays
 # ──────────────────────────────────────────────────────────────
 node -e "
 const rg = require('$ROOT/lib/rg');
@@ -389,7 +422,7 @@ const rg = require('$ROOT/lib/rg');
 "
 
 # ──────────────────────────────────────────────────────────────
-# Test 14: phase 2 fills remaining capacity with non-source hits
+# Test 15: phase 2 fills remaining capacity with non-source hits
 # ──────────────────────────────────────────────────────────────
 rm -rf "$tmp"/*
 mkdir -p "$tmp/src"
@@ -419,7 +452,7 @@ const rg = require('$ROOT/lib/rg');
 "
 
 # ──────────────────────────────────────────────────────────────
-# Test 15: phase 2 is skipped when source hits exhaust maxHits
+# Test 16: phase 2 is skipped when source hits exhaust maxHits
 # ──────────────────────────────────────────────────────────────
 rm -rf "$tmp"/*
 mkdir -p "$tmp/src"

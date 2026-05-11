@@ -24,6 +24,20 @@ function rmrf(p) {
 }
 
 describe("loadRepoConfig — .gitignore honoring", () => {
+  it("default JS/TS source globs include .mts and .cts files", () => {
+    const root = tmpRoot();
+    try {
+      const cfg = loadRepoConfig(root);
+      const jsTsGlobs = cfg.globs.filter((g) => String(g).includes("{"));
+      assert.ok(
+        jsTsGlobs.some((g) => String(g).includes("mts") && String(g).includes("cts")),
+        `expected a default JS/TS glob to include mts and cts, got: ${cfg.globs.join(", ")}`
+      );
+    } finally {
+      rmrf(root);
+    }
+  });
+
   it("returns null filter when no .gitignore exists", () => {
     const root = tmpRoot();
     try {

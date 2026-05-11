@@ -81,3 +81,17 @@ test("fileTypeHeuristic recognizes .swift", () => {
   assert.equal(fileTypeHeuristic("Sources/MyApp/main.swift"), "swift");
   assert.equal(fileTypeHeuristic("MyApp.swift"), "swift");
 });
+
+test("fileTypeHeuristic recognizes .mts and .cts TypeScript module files", () => {
+  assert.equal(fileTypeHeuristic("src/api.mts"), "mts");
+  assert.equal(fileTypeHeuristic("src/api.cts"), "cts");
+});
+
+test("isIndexable accepts .mts and .cts files outside excluded dirs", () => {
+  assert.equal(isIndexable("src/api.mts"), true);
+  assert.equal(isIndexable("src/api.cts"), true);
+  // Defensive blacklist matches /<excluded>/ (nested); top-level dist/build
+  // are handled by fast-glob's ignore globs, same as the Swift coverage above.
+  assert.equal(isIndexable("pkg/dist/api.mts"), false);
+  assert.equal(isIndexable("pkg/build/api.cts"), false);
+});

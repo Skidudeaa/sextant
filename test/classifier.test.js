@@ -83,6 +83,8 @@ describe("looksLikePath", () => {
     assert.equal(looksLikePath("graph.js"), true);
     assert.equal(looksLikePath("config.yaml"), true);
     assert.equal(looksLikePath("resolver.ts"), true);
+    assert.equal(looksLikePath("entry.mts"), true);
+    assert.equal(looksLikePath("entry.cts"), true);
     assert.equal(looksLikePath("app.py"), true);
     assert.equal(looksLikePath("main.go"), true);
     assert.equal(looksLikePath("Cargo.toml"), true);

@@ -150,6 +150,28 @@ describe("freshness.checkFreshness: scanner_version mismatch → stale", () => {
   });
 });
 
+describe("freshness.checkFreshness: pre-NodeNext resolver scans → stale", () => {
+  let dir;
+  before(() => { dir = makeRepo("nodenext-version"); });
+  after(() => { if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("treats scanner version 1 records as stale under the current resolver semantics", async () => {
+    const db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+    // Version 1 predates the NodeNext .js -> .ts resolver rewrite. Old graphs
+    // can contain unresolved edges that current code would now resolve, so they
+    // must be invalidated instead of treated as fresh.
+    graph.setMetaValue(db, freshness.META_SCANNER_VERSION, "1");
+    await graph.persistDb(dir);
+
+    const result = await freshness.checkFreshness(dir);
+    assert.equal(result.fresh, false);
+    assert.equal(result.reason, "scanner_version_changed");
+    assert.equal(result.evidence.stored, "1");
+    assert.equal(result.evidence.current, freshness.SCANNER_VERSION);
+  });
+});
+
 describe("freshness.enqueueRescan: atomic single-flight", () => {
   let dir;
   before(() => { dir = makeRepo("rescan"); });

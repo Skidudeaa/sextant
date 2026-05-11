@@ -39,6 +39,18 @@ describe("extractor registry", () => {
     assert.ok(ext !== null);
   });
 
+  it("forExtension('mts') returns javascript extractor", () => {
+    const ext = registry.forExtension("mts");
+    assert.ok(ext !== null);
+    assert.ok(typeof ext.extractImports === "function");
+  });
+
+  it("forExtension('cts') returns javascript extractor", () => {
+    const ext = registry.forExtension("cts");
+    assert.ok(ext !== null);
+    assert.ok(typeof ext.extractExports === "function");
+  });
+
   it("forExtension('py') returns python extractor", () => {
     const ext = registry.forExtension("py");
     assert.ok(ext !== null);
