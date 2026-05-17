@@ -106,8 +106,11 @@ async function ensureInit() {
 // WHY: an MCP client (or a prompt-injected agent) can pass an unbounded query.
 // retrieve() shells out to rg/zoekt with it; a multi-MB pattern blows latency
 // and memory for no benefit. Cap at 2 KB (far above any real symbol/phrase).
-// The empty/missing branch keeps the exact "query parameter is required"
-// string — test/mcp-server.test.js asserts on it.
+// WHY throw, not truncate: silently searching a 2 KB prefix of a longer query
+// answers a different question than asked — the "degrade by guessing" failure
+// sextant exists to prevent (DESIGN_PHILOSOPHY: drift must be loud). Surface
+// it as an explicit error instead. The empty/missing branch keeps the exact
+// "query parameter is required" string — test/mcp-server.test.js asserts on it.
 const MAX_QUERY_BYTES = 2048;
 
 function normalizeQuery(raw) {
@@ -115,7 +118,10 @@ function normalizeQuery(raw) {
     throw new Error("query parameter is required");
   }
   const trimmed = raw.trim();
-  return trimmed.length > MAX_QUERY_BYTES ? trimmed.slice(0, MAX_QUERY_BYTES) : trimmed;
+  if (trimmed.length > MAX_QUERY_BYTES) {
+    throw new Error(`query too long: ${trimmed.length} chars (max ${MAX_QUERY_BYTES})`);
+  }
+  return trimmed;
 }
 
 async function handleSearch(params) {

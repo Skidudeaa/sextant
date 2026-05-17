@@ -337,6 +337,25 @@ describe("MCP server — tools/call handlers", () => {
     }
   });
 
+  it("sextant_search with over-length query returns isError (not silent truncation)", async () => {
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_search",
+        arguments: { query: "x".repeat(2049) },
+      });
+      assert.ok(result.isError, "over-length query should return isError: true");
+      assert.ok(
+        result.content[0].text.includes("query too long"),
+        `expected 'query too long', got: ${result.content[0].text}`
+      );
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
   it("sextant_related with missing file returns isError", async () => {
     const origCwd = process.cwd;
     process.cwd = () => root;
