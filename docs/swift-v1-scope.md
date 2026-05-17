@@ -134,13 +134,21 @@ Two evaluation surfaces ship with v1:
   NOT in `npm test`). Regenerate baseline with
   `bash scripts/eval-swift-external.sh regen-baseline`.
 
-The external benchmark is honest about a finding worth keeping visible:
-the graph layer's lift on Vapor is currently **neutral** (0.000 nDCG
-delta, identical Graph ON / Graph OFF rankings on the three starred
-"pathological-lift" queries `URI`, `init`, `Service`). The plan's
-expectation that Vapor would be where graph-machinery value showed up is
-not supported by the data on this corpus. Future scoring tuning should
-re-run this benchmark on the same pinned dataset and quantify the delta.
+The external benchmark records a finding worth keeping visible (issue #2,
+resolved): the graph layer's lift on Vapor was reported as **neutral**
+(0.000 nDCG delta) — but that was a **measurement artifact**, not the
+truth. The old graph-OFF arm toggled only `rerankMinResolutionPct`, which
+left graph *injection* running in both arms; on Swift, injection (not
+reranking) is the graph's primary value-add, so the metric was blind to
+it. With graph-OFF corrected to a true total-off (`retrieve(..., {
+noGraph: true })`), Vapor lift is **+0.086 nDCG (positive)**: `URI` lifts
+**+1.000** (without the graph, `URI.swift` is buried out of top-3 by
+`URITests.swift` text frequency), `extension`-class queries +0.610. The
+two still-neutral starred queries are neutral for understood reasons —
+`Service` is already nDCG 1.0 without the graph (text scoring saturates),
+`init` matches 182 decls with no disambiguating signal. Condition: graph
+lift is positive when text frequency buries a canonical decl behind its
+test/consumer files; neutral when text scoring already finds the def.
 
 A second real-corpus finding: test-tagged sources living outside `Tests/`
 directories (`Sources/XCTVapor/`, `Sources/VaporTesting/`) are not caught

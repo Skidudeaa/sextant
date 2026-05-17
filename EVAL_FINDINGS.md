@@ -156,7 +156,7 @@ SB-1 invariant verified at the SQL level — `PatientStore.update` has 3 distinc
 
 Run via `bash scripts/eval-swift-external.sh` (manual-trigger only, NOT in `npm test`). Diff mode gates on mean MRR delta ≥ -0.05 and per-case top-3 retention. Baseline at `fixtures/vapor-baseline.json`; regenerate via `bash scripts/eval-swift-external.sh regen-baseline` when bumping `VAPOR_SHA`.
 
-**Honest finding worth keeping visible**: graph lift on Vapor is currently neutral, contradicting the original plan's expectation that Vapor would be where graph-machinery value showed up. Tracked as Skidudeaa/sextant#2 with three exit paths (scoring change → measurable lift, second corpus where lift IS positive, or documented "this corpus shape doesn't benefit" finding).
+**Honest finding worth keeping visible** — ~~graph lift on Vapor is currently neutral~~ **RESOLVED (#2)**: the 0.000 above was a measurement artifact. `eval-retrieve.js` simulated graph-OFF by toggling `rerankMinResolutionPct` only, which disabled reranking but left graph *injection* running in both arms (injection is gated by `graphAvailable`, not `useGraphBoost`). On Swift the graph's value is injection, not fan-in rerank, so the metric was blind to it. Corrected graph-OFF to a true total-off (`retrieve(..., { noGraph: true })`): **Vapor graphLiftNDCG = +0.086 (positive)**, `vapor-uri-001` +1.000 (canonical `URI.swift` is out of top-3 without the graph), `vapor-ext-001` +0.610. Neutral starred queries remain neutral for understood reasons (`Service` text-saturated; `init` 182-decl ambiguity). Outcome spans the issue's exit paths 1 (measurable committed positive lift) + 3 (documented corpus-shape condition: lift is positive iff text frequency buries the canonical decl behind its test/consumer files). See CLAUDE.md "Eval Harness".
 
 **Second finding**: test-tagged sources outside `Tests/` directories (`Sources/XCTVapor/`, `Sources/VaporTesting/`) aren't caught by `TEST_PENALTY`'s path heuristic and outrank canonical defs on common-name queries. Tracked as Skidudeaa/sextant#1.
 
@@ -169,4 +169,4 @@ Run via `bash scripts/eval-swift-external.sh` (manual-trigger only, NOT in `npm 
 3. ~~**Re-export chain tracing**~~ — DONE. BFS through `reexports` table up to 5 hops, follows barrel-file chains to original definition.
 4. **Template string imports** — regex extractor silently misses `require(\`./\${name}\`)`. Would need AST-based JS extraction or heuristic fallback.
 5. **Broaden `TEST_PENALTY` matcher** (#1) — catch SwiftPM-style test-helper targets that live outside `Tests/`.
-6. **Investigate Vapor graph-lift neutrality** (#2) — quantify which corpus shapes benefit from the structural lane.
+6. ~~**Investigate Vapor graph-lift neutrality** (#2)~~ — DONE. The neutrality was a metric artifact (graph-OFF disabled rerank only, not injection). Fixed via `noGraph` total-off; Vapor lift now +0.086 positive, committed as the reproducible target.

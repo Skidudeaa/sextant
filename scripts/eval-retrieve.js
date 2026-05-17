@@ -84,10 +84,19 @@ async function runOnce(root, query, opts) {
   }
 }
 
-// ARCHITECTURE: Graph-ON forces rerankMinResolutionPct: 0 to enable boosts
-// regardless of actual resolution. Graph-OFF forces rerankMinResolutionPct: 101
-// to guarantee boosts are disabled. This isolates the graph boost effect even
-// when real resolution is below the default 90% threshold.
+// ARCHITECTURE: Graph-ON forces rerankMinResolutionPct: 0 to enable rerank
+// boosts regardless of actual resolution. Graph-OFF uses noGraph:true, which
+// disables the ENTIRE graph lane — injection (export-graph / swift-decl /
+// re-export chain), related-expansion, and rerank boosts — degrading to pure
+// rg/zoekt + text/def-site scoring.
+//
+// WHY noGraph instead of the old rerankMinResolutionPct:101: that only
+// disabled *reranking*; injection still ran in both arms (it is gated by
+// graphAvailable, not by useGraphBoost — lib/retrieve.js). graphLiftNDCG was
+// therefore blind to the graph layer's primary value on Swift, where the win
+// is injecting a canonical decl rg never reached, not reranking fan-in.
+// Empirically (Vapor #2): on `URI`, total-graph-off drops the canonical
+// URI.swift out of top-3 entirely while the old metric reported 0.000 lift.
 async function runCase(evalCase, root, baseOpts) {
   const caseOpts = { ...baseOpts, ...(evalCase.retrieveOpts || {}) };
 
@@ -100,7 +109,7 @@ async function runCase(evalCase, root, baseOpts) {
   const withoutGraph = await runOnce(root, evalCase.query, {
     ...caseOpts,
     explainHits: true,
-    rerankMinResolutionPct: 101,
+    noGraph: true,
   });
 
   return { evalCase, withGraph, withoutGraph };
