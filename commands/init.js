@@ -19,14 +19,24 @@ function ensureMcpJson(root) {
   if (existing?.mcpServers?.sextant) return { path: p, alreadyRegistered: true };
   existing.mcpServers = existing.mcpServers || {};
   existing.mcpServers.sextant = SEXTANT_MCP_ENTRY;
-  fs.writeFileSync(p, JSON.stringify(existing, null, 2) + "\n");
+  // WHY tmp+rename: .mcp.json may already hold OTHER MCP servers. A bare
+  // writeFileSync truncates-then-writes; a crash mid-write leaves a truncated
+  // file and silently wipes the user's other servers. rename(2) is atomic on
+  // the same filesystem — the file is either the old valid JSON or the new.
+  const tmp = p + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(existing, null, 2) + "\n");
+  fs.renameSync(tmp, p);
   return { path: p, alreadyRegistered: false };
 }
 
-// WHY: init was silent — users had no feedback on what it did.  Report the
-// created files and explicitly surface the "hooks not wired" case, which is
-// the #1 source of confusion (README claimed init wires hooks; CLAUDE.md
-// correctly says it doesn't).  Honest output beats mismatched docs.
+// WHY: init was silent — users had no feedback on what it did.  intel.init()
+// (called from run() below) DOES wire the SessionStart + UserPromptSubmit
+// hooks into .claude/settings.json via ensureClaudeSettingsUnlocked.  These
+// helpers VERIFY the write landed and report it.  The "add to settings.json"
+// fallback in printStatus only fires in the rare case ensureClaudeSettings
+// bailed without writing — a pre-existing settings.json that isn't readable
+// JSON or isn't an object (it deliberately refuses to clobber unreadable user
+// config).  Honest output beats mismatched docs.
 function hasSextantHook(settings, event) {
   const events = settings?.hooks?.[event];
   if (!Array.isArray(events)) return false;

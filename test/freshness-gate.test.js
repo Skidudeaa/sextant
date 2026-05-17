@@ -40,6 +40,23 @@ function makeRepo(prefix) {
   return dir;
 }
 
+// WHY: applyFreshnessGate on the stale path calls freshness.enqueueRescan,
+// which spawns `sextant scan` via PATH. On a fresh clone with no `npm link`
+// that spawn fails ENOENT *asynchronously* after the test returned — node:test
+// reports it as an unhandled error and fails the suite. A no-op `sextant` on
+// PATH makes the spawn resolve and exit 0 deterministically.
+function installSextantShim() {
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-shim-"));
+  fs.writeFileSync(path.join(shimDir, "sextant"), "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(path.join(shimDir, "sextant"), 0o755);
+  const prevPath = process.env.PATH;
+  process.env.PATH = shimDir + path.delimiter + prevPath;
+  return () => {
+    process.env.PATH = prevPath;
+    try { fs.rmSync(shimDir, { recursive: true, force: true }); } catch {}
+  };
+}
+
 const FAKE_RAW_SUMMARY = [
   "## Codebase intelligence",
   "",
@@ -95,7 +112,9 @@ describe("applyFreshnessGate: fresh path passes through rawSummary", () => {
 
 describe("applyFreshnessGate: stale path strips structural fields", () => {
   let dir;
+  let restoreShim;
   before(async () => {
+    restoreShim = installSextantShim();
     dir = makeRepo("stale");
     const db = await graph.loadDb(dir);
     freshness.recordScanState(db, dir);
@@ -104,8 +123,9 @@ describe("applyFreshnessGate: stale path strips structural fields", () => {
     gitCommitFile(dir, "newfile.js", "module.exports = 2;\n");
   });
   after(() => {
-    // The gate triggers a background spawn; give it a chance to fail-fast
-    // (most CI environments won't have `sextant` on PATH) before we rmSync.
+    // The gate triggered a background `sextant` spawn; the PATH shim made it
+    // resolve and exit 0 fast. Restore PATH, then tear down.
+    if (restoreShim) restoreShim();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 

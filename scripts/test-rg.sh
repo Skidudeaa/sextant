@@ -477,5 +477,32 @@ const rg = require('$ROOT/lib/rg');
 })().catch(e => { console.error(e); process.exit(1); });
 "
 
+# ──────────────────────────────────────────────────────────────
+# Test: leading-dash query is treated as a pattern, not an rg flag
+# WHY: regression guard for the `--` argv separator (argument-injection
+# hardening). Without `--`, `rg -F -dashtoken_xyz .` aborts with
+# "unrecognized flag" and the search returns 0 hits / throws.
+# ──────────────────────────────────────────────────────────────
+mkdir -p "$tmp/dash/src"
+printf -- '-dashtoken_xyz appears here\n' > "$tmp/dash/src/leading.js"
+
+node -e "
+$NORM
+const rg = require('$ROOT/lib/rg');
+(async () => {
+  const result = await rg.search('$tmp/dash', '-dashtoken_xyz', { maxHits: 10, contextLines: 0 });
+  if (result.hits.length !== 1 || norm(result.hits[0].path) !== 'src/leading.js') {
+    console.error('search(): leading-dash query not matched as pattern, got', JSON.stringify(result.hits));
+    process.exit(1);
+  }
+  const inFiles = await rg.searchInFiles('$tmp/dash', '-dashtoken_xyz', ['src/leading.js'], {});
+  if (inFiles.length !== 1) {
+    console.error('searchInFiles(): leading-dash query not matched, got', JSON.stringify(inFiles));
+    process.exit(1);
+  }
+  console.log('  leading-dash query treated as pattern (-- separator): OK');
+})().catch(e => { console.error(e); process.exit(1); });
+"
+
 echo ""
 echo "All rg tests passed!"

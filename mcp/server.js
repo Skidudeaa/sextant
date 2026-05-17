@@ -103,16 +103,28 @@ async function ensureInit() {
   _initialized = true;
 }
 
-async function handleSearch(params) {
-  await ensureInit();
-  const query = params.query;
-  if (!query || typeof query !== "string" || !query.trim()) {
+// WHY: an MCP client (or a prompt-injected agent) can pass an unbounded query.
+// retrieve() shells out to rg/zoekt with it; a multi-MB pattern blows latency
+// and memory for no benefit. Cap at 2 KB (far above any real symbol/phrase).
+// The empty/missing branch keeps the exact "query parameter is required"
+// string — test/mcp-server.test.js asserts on it.
+const MAX_QUERY_BYTES = 2048;
+
+function normalizeQuery(raw) {
+  if (!raw || typeof raw !== "string" || !raw.trim()) {
     throw new Error("query parameter is required");
   }
+  const trimmed = raw.trim();
+  return trimmed.length > MAX_QUERY_BYTES ? trimmed.slice(0, MAX_QUERY_BYTES) : trimmed;
+}
+
+async function handleSearch(params) {
+  await ensureInit();
+  const query = normalizeQuery(params.query);
   const limit = Number.isFinite(params.limit) ? params.limit : 10;
   const contextLines = Number.isFinite(params.context_lines) ? params.context_lines : 1;
 
-  const result = await retrieve(_root, query.trim(), {
+  const result = await retrieve(_root, query, {
     maxHits: limit * 5,
     maxSeedFiles: limit,
     hitsPerFileCap: 3,

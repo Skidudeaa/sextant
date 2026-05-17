@@ -39,6 +39,23 @@ function makeRepo(prefix) {
   return dir;
 }
 
+// WHY: enqueueRescan() spawns `sextant scan` via PATH lookup. On a fresh clone
+// with no `npm link`, the spawn fails ENOENT *asynchronously*, after the
+// triggering test has already returned — node:test then reports it as an
+// unhandled error and fails the whole suite. A no-op `sextant` on PATH makes
+// the spawn resolve and exit 0 deterministically, regardless of environment.
+function installSextantShim() {
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-shim-"));
+  fs.writeFileSync(path.join(shimDir, "sextant"), "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(path.join(shimDir, "sextant"), 0o755);
+  const prevPath = process.env.PATH;
+  process.env.PATH = shimDir + path.delimiter + prevPath;
+  return () => {
+    process.env.PATH = prevPath;
+    try { fs.rmSync(shimDir, { recursive: true, force: true }); } catch {}
+  };
+}
+
 describe("freshness.captureCurrentState", () => {
   let dir;
   before(() => { dir = makeRepo("capture"); });
@@ -174,8 +191,10 @@ describe("freshness.checkFreshness: pre-NodeNext resolver scans → stale", () =
 
 describe("freshness.enqueueRescan: atomic single-flight", () => {
   let dir;
-  before(() => { dir = makeRepo("rescan"); });
+  let restoreShim;
+  before(() => { restoreShim = installSextantShim(); dir = makeRepo("rescan"); });
   after(() => {
+    if (restoreShim) restoreShim();
     if (dir) {
       // Best-effort: clean any spawned scan output before tearing down.
       try { fs.rmSync(path.join(dir, ".planning"), { recursive: true, force: true }); } catch {}

@@ -26,7 +26,7 @@ No build step. CommonJS throughout, no transpilation.
 
 ```bash
 cd /path/to/project
-sextant init         # creates .planning/intel/, registers sextant MCP server in .mcp.json
+sextant init         # creates .planning/intel/, wires SessionStart+UserPromptSubmit hooks into .claude/settings.json, registers sextant MCP server in .mcp.json
 sextant scan --force # indexes files, builds dependency graph
 ```
 

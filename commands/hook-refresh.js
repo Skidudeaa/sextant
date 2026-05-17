@@ -112,7 +112,14 @@ async function run() {
   // status-line path triggers is fully flushed before Node exits.
   const statusLinePromise = writeStatusLine(root);
 
-  const prompt = data.prompt || data.message || "";
+  // WHY 8 KB tail cap: this hook runs on every UserPromptSubmit inside the
+  // ~200ms budget. A runaway paste (whole file, log dump) would blow
+  // classification + retrieval latency. Keep the TAIL — the user's actual
+  // ask/instruction is almost always at the end of a long paste, not the top.
+  const rawPrompt = data.prompt || data.message || "";
+  const MAX_PROMPT_BYTES = 8192;
+  const prompt =
+    rawPrompt.length > MAX_PROMPT_BYTES ? rawPrompt.slice(-MAX_PROMPT_BYTES) : rawPrompt;
 
   // 1. Classify
   let classification;
