@@ -1,20 +1,21 @@
 "use strict";
 
-const { describe, it, before } = require("node:test");
+const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { spawnSync } = require("child_process");
 
 const { extractImports, extractExports, extractBatch } = require("../../lib/extractors/python");
 
-// Guard: skip all tests if python3 is unavailable
-let pythonAvailable = false;
+// Guard: skip all tests if python3 is unavailable.
+// WHY: node:test evaluates the `skip` option at registration time (while the
+// describe() body runs), BEFORE any before() hook fires. Probing inside a
+// before() hook left pythonAvailable=false at the moment skip was captured, so
+// these 8 tests were silently skipped on every machine — even with python3
+// present. The probe must run synchronously at module load.
+const pythonAvailable =
+  spawnSync("python3", ["--version"], { encoding: "utf8", timeout: 5000 }).status === 0;
 
 describe("python extractor", () => {
-  before(() => {
-    const r = spawnSync("python3", ["--version"], { encoding: "utf8", timeout: 5000 });
-    pythonAvailable = r.status === 0;
-  });
-
   describe("extractImports", () => {
     it("import os", { skip: !pythonAvailable && "python3 not available" }, () => {
       const result = extractImports("import os\nimport sys\n", "app.py");
