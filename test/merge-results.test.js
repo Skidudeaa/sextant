@@ -390,3 +390,43 @@ describe("mergeResults — case-sensitive symbol matching (Swift bug-2)", () => 
     assert.equal(result.files[0].zoektHit.lineNumber, 20);
   });
 });
+
+describe("mergeResults — test-path penalty (Python/Go filename conventions)", () => {
+  const C = require("../lib/scoring-constants");
+
+  // Regression: dogfooding on a Python project (2026-05-25) found test_*.py
+  // files outranking real source.  The penalty regexes knew only JS
+  // (__tests__/, .test.js) and Swift (Tests/, XCT*/, *Testing/) conventions;
+  // pytest's filename-PREFIX convention (test_*.py discovered anywhere) fell
+  // through with zero penalty, so a test file sharing one query token ranked
+  // beside the source that actually defined the symbol.
+
+  it("ranks a Python source file above an equal-scoring test_*.py file", () => {
+    // Identical line + score — the ONLY differentiator is the test penalty.
+    // Pre-fix both scored equally and the alphabetical tiebreak
+    // ("app/test_widget.py" < "app/widget.py") put the TEST file at rank 1.
+    const zoektHits = [
+      { path: "app/test_widget.py", lineNumber: 5, line: "def make_widget():", score: 100 },
+      { path: "app/widget.py",      lineNumber: 5, line: "def make_widget():", score: 100 },
+    ];
+    const result = mergeResults({ files: [] }, zoektHits);
+    assert.equal(result.files[0].path, "app/widget.py",
+      "real source must outrank the equal-scoring test_*.py file");
+    assert.equal(result.files[1].path, "app/test_widget.py");
+  });
+
+  it("penalizes test_*.py (prefix) and *_test.go (suffix), not lookalikes", () => {
+    const fused = (path) => mergeResults(
+      { files: [] },
+      [{ path, lineNumber: 1, line: "x", score: 100 }]
+    ).files[0].fusedScore;
+    const penalized = 100 * (1 - C.TEST_PENALTY);
+    assert.equal(fused("pkg/test_foo.py"), penalized, "test_ filename prefix penalized");
+    assert.equal(fused("pkg/foo_test.go"), penalized, "_test filename suffix penalized");
+    // Anchored to the basename, so a test_data/ fixtures DIR (basename
+    // foo.py) is not a test file, and lookalikes are not penalized.
+    assert.equal(fused("test_data/foo.py"), 100, "fixtures dir not penalized");
+    assert.equal(fused("pkg/pytest_plugin.py"), 100, "pytest_ prefix is not test_");
+    assert.equal(fused("pkg/latest.py"), 100, "trailing 'test' without _ not penalized");
+  });
+});
