@@ -14,7 +14,8 @@
     "test:unit": "node --test test/*.test.js test/extractors/*.test.js",
     "test:integration": "bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh",
     "test:eval": "node scripts/eval-retrieve.js",
-    "test:eval:hook": "node scripts/eval-hook.js"
+    "test:eval:hook": "node scripts/eval-hook.js",
+    "test:eval:python": "node bin/intel.js scan --root fixtures/python-eval --force && node scripts/eval-retrieve.js --root fixtures/python-eval --dataset fixtures/python-eval/eval-dataset.json"
   },
   "dependencies": {
     "@babel/parser": "^7.29.2",

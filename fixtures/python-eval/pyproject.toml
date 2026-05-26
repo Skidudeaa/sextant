@@ -1,0 +1,10 @@
+[project]
+name = "sextant-python-eval"
+version = "0.0.0"
+description = "Synthetic Python corpus for sextant retrieval eval — exercises the Python test-path penalty (test_*.py filename convention)."
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+# Tests are co-located with source (test_*.py next to the module), the layout
+# that the test-path penalty regexes missed before 2026-05-25.
+python_files = ["test_*.py"]

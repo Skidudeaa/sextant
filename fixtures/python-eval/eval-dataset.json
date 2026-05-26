@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "language": "python",
+  "description": "Synthetic Python eval corpus. Primary purpose: lock in the test-path penalty for Python's filename convention (test_*.py discovered alongside source, NOT under a tests/ dir). Before the 2026-05-25 fix, co-located test_*.py files got ZERO test penalty and outranked the canonical module whenever no strong def-site rescued it (the dogfooding miss). py-penalty-001 is the hard regression guard (proven pre-fix FAIL / post-fix PASS on the hook path); the remaining cases cover ordinary Python symbol/multiword/fuzzy/negative retrieval. The eval corpus was JS + Swift only before this fixture, so Python retrieval regressions passed npm run test:eval and the swift external gate silently. Run with: node bin/intel.js scan --root fixtures/python-eval --force; node scripts/eval-retrieve.js --root fixtures/python-eval --dataset fixtures/python-eval/eval-dataset.json; node scripts/eval-hook.js --root fixtures/python-eval --dataset fixtures/python-eval/eval-dataset.json",
+  "rootDir": "fixtures/python-eval",
+  "cases": [
+    {
+      "id": "py-penalty-001",
+      "category": "scope",
+      "query": "FLAG_REGISTRY",
+      "relevantFiles": ["app/feature_gate.py"],
+      "relevantHitPatterns": ["FLAG_REGISTRY"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "notes": "HARD REGRESSION GUARD for the Python test-path penalty (lib/retrieve.js:isTestPath, lib/merge-results.js:fileTypePenalty). FLAG_REGISTRY is defined once in feature_gate.py and imported/used in two co-located test_*.py files (test_feature_gate.py, test_flag_rollout.py). A Python module-level constant gets NO def-site / exact-symbol boost (extractSymbolDef does not recognize `NAME: T = {`), so on the hook path the test files' usage lines tie the definition and the test penalty is the ONLY signal that keeps feature_gate.py on top. Proven sensitivity on eval-hook.js: with the penalty, feature_gate.py ranks #1 (MRR 1.000, usefulness 0.667 >= 0.6 -> PASS); revert the test_*.py regex and it falls to rank 2 behind a test file (MRR 0.333, usefulness 0.517 < 0.6 -> FAIL). This is exactly the dogfooding miss class. See [[project_test_path_penalty_per_language_gap]]."
+    },
+    {
+      "id": "py-flag-001",
+      "category": "scope",
+      "query": "flag",
+      "relevantFiles": ["app/feature_gate.py"],
+      "relevantHitPatterns": ["FLAG_REGISTRY", "def enable_flag", "feature flag"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Fuzzy single-word query — the closest analog to the dogfooding 'flags flipped' miss. feature_gate.py is the canonical flag module but its filename does NOT contain 'flag', while two co-located test_*.py files do. The penalty effect is visible in the CLI graph-OFF arm: revert the regex and the graph-OFF ranking flips to test_flag_rollout.py #1 (graph-ON keeps feature_gate.py #1 via its fan-in=3 boost, so this is a softer signal than py-penalty-001). Kept as a realistic fuzzy-query case, NOT relied on as the hard guard."
+    },
+    {
+      "id": "py-sym-001",
+      "category": "symbol",
+      "query": "CorrectionBroker",
+      "relevantFiles": ["app/broker.py"],
+      "acceptableFiles": ["app/service.py"],
+      "relevantHitPatterns": ["class CorrectionBroker"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Control case. A class def gets the +65% def-site/exact-symbol stack, so broker.py ranks #1 even though test_broker.py is co-located. Confirms the test penalty does NOT over-fire and bury a symbol that has a genuine strong definition signal."
+    },
+    {
+      "id": "py-multi-001",
+      "category": "multiword",
+      "query": "def route",
+      "relevantFiles": ["app/router.py"],
+      "relevantHitPatterns": ["def route"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "notes": "Control case. router.py defines both add_route and route; the literal 'def route' must reach router.py's method def at rank #1."
+    },
+    {
+      "id": "py-negative-001",
+      "category": "negative",
+      "query": "absent_python_xyz_qwerty987",
+      "relevantFiles": [],
+      "relevantHitPatterns": [],
+      "topK": 5,
+      "minUsefulnessScore": 0.0,
+      "notes": "Garbage query across the Python corpus. Must return zero results."
+    }
+  ]
+}
