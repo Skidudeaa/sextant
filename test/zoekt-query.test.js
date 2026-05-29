@@ -3,7 +3,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { quoteIfPhrase } = require("../lib/zoekt");
+const { quoteIfPhrase, escapeForZoekt } = require("../lib/zoekt");
 
 // WHY: zoekt's default query parser AND's whitespace-separated tokens as
 // independent substring clauses, while rg with -F treats the same query as
@@ -74,5 +74,47 @@ describe("quoteIfPhrase", () => {
   it("treats tabs and newlines as whitespace for phrase detection", () => {
     assert.equal(quoteIfPhrase("foo\tbar"), '"foo\tbar"');
     assert.equal(quoteIfPhrase("foo\nbar"), '"foo\nbar"');
+  });
+});
+
+// WHY: escapeForZoekt is the AND-fallback form used when a phrase query
+// returns zero hits (searchFast/search). It must escape regex metacharacters
+// like quoteIfPhrase BUT must NOT quote-wrap multi-token input, so the query
+// degrades to zoekt's whitespace-AND conjunction. This is the recall recovery
+// for natural-language prompts whose tokens are scattered in source (the
+// real-repo A4 failure: phrase "hyperdrive meds source" matched nothing, the
+// canonical source was absent; the unquoted AND form matched it). The contrast
+// with quoteIfPhrase (which always quotes) is the load-bearing distinction.
+describe("escapeForZoekt", () => {
+  it("does NOT quote-wrap multi-token queries (the AND-form contract)", () => {
+    // The key difference from quoteIfPhrase: no surrounding quotes, so zoekt
+    // treats the tokens as an independent-clause conjunction, not a phrase.
+    assert.equal(escapeForZoekt("hyperdrive meds source"), "hyperdrive meds source");
+    assert.equal(escapeForZoekt("protocol Middleware"), "protocol Middleware");
+    assert.notEqual(escapeForZoekt("protocol Middleware"), quoteIfPhrase("protocol Middleware"));
+  });
+
+  it("still escapes regex metacharacters (multi- and single-token)", () => {
+    // Same escape policy as quoteIfPhrase, just without the quoting.
+    assert.equal(escapeForZoekt("View+Toolbar foo"), "View\\+Toolbar foo");
+    assert.equal(escapeForZoekt("a.b c"), "a\\.b c");
+    assert.equal(escapeForZoekt("View+Toolbar"), "View\\+Toolbar");
+  });
+
+  it("leaves single-token queries identical to quoteIfPhrase (both unquoted)", () => {
+    assert.equal(escapeForZoekt("Application"), "Application");
+    assert.equal(escapeForZoekt("rerankFiles"), "rerankFiles");
+  });
+
+  it("strips embedded quotes and passes through caller-quoted DSL", () => {
+    assert.equal(escapeForZoekt('foo "bar baz'), "foo bar baz");
+    assert.equal(escapeForZoekt('"already quoted"'), '"already quoted"');
+  });
+
+  it("handles empty / whitespace-only / non-string input gracefully", () => {
+    assert.equal(escapeForZoekt(""), "");
+    assert.equal(escapeForZoekt("   "), "");
+    assert.equal(escapeForZoekt(null), null);
+    assert.equal(escapeForZoekt(42), 42);
   });
 });

@@ -46,6 +46,30 @@
       "notes": "Control case. router.py defines both add_route and route; the literal 'def route' must reach router.py's method def at rank #1."
     },
     {
+      "id": "py-nl-001",
+      "category": "nl-scatter",
+      "query": "clinician reminder escalation acknowledged",
+      "relevantFiles": ["app/notifications.py"],
+      "relevantHitPatterns": ["clinician", "reminder", "escalation"],
+      "topK": 5,
+      "minUsefulnessScore": 0.6,
+      "minRecall": 1.0,
+      "maxPrimaryRank": 1,
+      "notes": "HARD REGRESSION GUARD for A4 (natural-language recall collapse). The four query tokens appear SCATTERED in app/notifications.py and the filename contains none of them, so the multi-token query becomes a zoekt PHRASE query (quoteIfPhrase) that matches nothing, and the graph filename layer cannot reach the file. Pre-fix the canonical file is ABSENT from the candidate set (recall 0 -> FAIL via minRecall). The zero-hit AND-fallback in lib/zoekt.js:searchFast re-issues the query unquoted (whitespace-AND), which content-matches notifications.py -> rank 1 (recall 1.0, MRR 1.0 -> PASS). minRecall/maxPrimaryRank are the gate fields added to eval-hook.js for exactly this class (usefulness alone never inspects recall, which is why A4 shipped silently). REQUIRES a warm zoekt index — graph-only mode cannot recover this. See [[project_real_repo_retrieval_failures]]."
+    },
+    {
+      "id": "py-reexport-001",
+      "category": "reexport",
+      "query": "RequestRouter",
+      "relevantFiles": ["app/router.py"],
+      "acceptableFiles": ["app/__init__.py", "app/service.py"],
+      "relevantHitPatterns": ["class RequestRouter"],
+      "topK": 5,
+      "minUsefulnessScore": 0.5,
+      "maxPrimaryRank": 1,
+      "notes": "B3 structural guard (def-over-barrel). RequestRouter is defined in app/router.py and re-exported through the app/__init__.py barrel. The query must surface the DEFINING module at rank 1, not the re-export shim. On a large real repo the merge layer evicted the def in favor of the barrel because graph base scores (~100) lose to a zoekt-corroborated barrel line (~500); lib/merge-results.js:DEF_SCORE_FLOOR floors canonical-def graph signals so the def competes. NOTE: at this fixture's tiny scale the def line is inside zoekt's hit cap, so this case does NOT reliably fail pre-fix (the def is not evicted when the corpus is small). It is a soft structural guard; the HARD, scale-independent B3 lock is the unit test in test/merge-results.test.js."
+    },
+    {
       "id": "py-negative-001",
       "category": "negative",
       "query": "absent_python_xyz_qwerty987",

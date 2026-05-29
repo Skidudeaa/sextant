@@ -4,8 +4,8 @@
     "passed": 13,
     "failed": 2,
     "meanPrecision": 0.18333333333333338,
-    "meanMRR": 0.6895238095238094,
-    "meanNDCG": 0.6952821795971216,
+    "meanMRR": 0.755,
+    "meanNDCG": 0.7405699343876153,
     "meanRecall": 0.8666666666666667,
     "failedIds": [
       "vapor-elf-001",
@@ -58,7 +58,7 @@
         "Sources/Vapor/Core/Core.swift"
       ],
       "fileCount": 8,
-      "durationMs": 49
+      "durationMs": 48
     },
     {
       "id": "vapor-mw-001",
@@ -77,18 +77,18 @@
       "graphWarnings": [],
       "precision": 0.2,
       "recall": 1,
-      "mrr": 0.5,
-      "ndcg": 0.5449702648457346,
+      "mrr": 1,
+      "ndcg": 0.8637574337885663,
       "hitQuality": false,
       "rankedFiles": [
-        "Tests/VaporTests/MiddlewareTests.swift",
         "Sources/Vapor/Middleware/Middleware.swift",
+        "Tests/VaporTests/MiddlewareTests.swift",
         "Sources/Vapor/Middleware/Application+Middleware.swift",
         "Sources/Vapor/Routing/RoutesBuilder+Middleware.swift",
         "Sources/Vapor/Utilities/DataProtocol+Copy.swift"
       ],
       "fileCount": 5,
-      "durationMs": 26
+      "durationMs": 24
     },
     {
       "id": "vapor-req-001",
@@ -120,7 +120,7 @@
         "Sources/Vapor/Concurrency/WebSocket+Concurrency.swift"
       ],
       "fileCount": 8,
-      "durationMs": 41
+      "durationMs": 38
     },
     {
       "id": "vapor-resp-001",
@@ -150,7 +150,7 @@
         "Sources/Vapor/Response/ResponseCodable.swift"
       ],
       "fileCount": 6,
-      "durationMs": 21
+      "durationMs": 22
     },
     {
       "id": "vapor-elf-001",
@@ -183,7 +183,7 @@
         "Tests/VaporTests/FileTests.swift"
       ],
       "fileCount": 8,
-      "durationMs": 32
+      "durationMs": 19
     },
     {
       "id": "vapor-svc-001",
@@ -211,7 +211,7 @@
         "Sources/Vapor/Services/Req+Service.swift"
       ],
       "fileCount": 4,
-      "durationMs": 21
+      "durationMs": 18
     },
     {
       "id": "vapor-uri-001",
@@ -229,12 +229,12 @@
       "graphWarnings": [],
       "precision": 0.2,
       "recall": 1,
-      "mrr": 0.5,
-      "ndcg": 0.6309297535714575,
+      "mrr": 1,
+      "ndcg": 1,
       "hitQuality": true,
       "rankedFiles": [
-        "Tests/VaporTests/URITests.swift",
         "Sources/Vapor/Utilities/URI.swift",
+        "Tests/VaporTests/URITests.swift",
         "Sources/Vapor/HTTP/EndpointCache.swift",
         "Sources/Vapor/Security/OTP.swift",
         "Sources/Vapor/Security/ValidatedCertificateChain.swift",
@@ -242,7 +242,7 @@
         "Tests/VaporTests/Utilities/CapturingMetricsSystem.swift"
       ],
       "fileCount": 7,
-      "durationMs": 20
+      "durationMs": 14
     },
     {
       "id": "vapor-init-001",
@@ -275,7 +275,7 @@
         "Sources/Vapor/Utilities/File.swift"
       ],
       "fileCount": 8,
-      "durationMs": 26
+      "durationMs": 22
     },
     {
       "id": "vapor-ext-001",
@@ -308,7 +308,7 @@
         "Sources/Vapor/Core/Core.swift"
       ],
       "fileCount": 8,
-      "durationMs": 18
+      "durationMs": 21
     },
     {
       "id": "vapor-codable-001",
@@ -326,21 +326,21 @@
       "graphWarnings": [],
       "precision": 0.1,
       "recall": 1,
-      "mrr": 0.14285714285714285,
-      "ndcg": 0.08393733275603986,
+      "mrr": 0.125,
+      "ndcg": 0.07539623924207248,
       "hitQuality": true,
       "rankedFiles": [
         "Sources/Vapor/Response/ResponseCodable.swift",
+        "Sources/Vapor/Validation/ValidatorResult.swift",
         "Sources/Vapor/Concurrency/ResponseCodable+Concurrency.swift",
         "Sources/Vapor/Cache/Cache.swift",
         "Sources/Vapor/Content/Content.swift",
         "Sources/Vapor/Sessions/Session.swift",
         "Sources/Vapor/Utilities/File.swift",
-        "Sources/Vapor/Utilities/URI.swift",
-        "Tests/VaporTests/ClientTests.swift"
+        "Sources/Vapor/Utilities/URI.swift"
       ],
       "fileCount": 8,
-      "durationMs": 21
+      "durationMs": 16
     },
     {
       "id": "vapor-routes-001",
@@ -405,7 +405,7 @@
         "Sources/Vapor/Multipart/FormDataEncoder+Content.swift"
       ],
       "fileCount": 8,
-      "durationMs": 13
+      "durationMs": 17
     },
     {
       "id": "vapor-ws-001",
@@ -435,7 +435,7 @@
         "Tests/VaporTests/AsyncRouteTests.swift"
       ],
       "fileCount": 6,
-      "durationMs": 12
+      "durationMs": 13
     },
     {
       "id": "vapor-error-001",
@@ -468,7 +468,7 @@
         "Sources/Vapor/Logging/Logger+Report.swift"
       ],
       "fileCount": 8,
-      "durationMs": 15
+      "durationMs": 14
     },
     {
       "id": "vapor-validate-001",
@@ -499,7 +499,7 @@
         "Sources/Vapor/Utilities/DataProtocol+Copy.swift"
       ],
       "fileCount": 6,
-      "durationMs": 12
+      "durationMs": 14
     }
   ]
 }

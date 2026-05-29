@@ -18,12 +18,16 @@ describe("mergeResults — graph only (no zoekt)", () => {
 
     const result = mergeResults(graphResults, []);
     assert.equal(result.files.length, 2);
-    // Graph boost: 100 * 1.4 = 140
+    // graph.js is exported_symbol (a canonical-def signal), so it gets the
+    // DEF_SCORE_FLOOR: max(graphScore, 600 + graphScore) = 600 + 100*1.4 = 740.
+    // WHY floored: a graph-only canonical def must compete on the zoekt ~500
+    // scale or it gets evicted below text-only hits (bug B3-def-eviction).
     assert.equal(result.files[0].path, "lib/graph.js");
-    assert.equal(result.files[0].fusedScore, 140);
+    assert.equal(result.files[0].fusedScore, 740);
     assert.equal(result.files[0].graphSignal, "exported_symbol");
     assert.equal(result.files[0].zoektHit, null);
-    // Second file: 60 * 1.4 = 84
+    // intel.js is path_match (NOT a def signal) — no floor, plain graph boost:
+    // 60 * 1.4 = 84.
     assert.equal(result.files[1].path, "lib/intel.js");
     assert.equal(result.files[1].fusedScore, 84);
   });
@@ -88,8 +92,12 @@ describe("mergeResults — fusion (graph + zoekt)", () => {
 
     const result = mergeResults(graphResults, zoektHits);
     assert.equal(result.files.length, 1);
-    // Graph: 100 * 1.4 = 140, Zoekt: 50, Sum: 190, Fusion: 190 * 1.2 = 228
-    assert.equal(result.files[0].fusedScore, 228);
+    // Fusion: (100*1.4 + 50) * 1.2 = 228.  But graph.js is exported_symbol
+    // (canonical-def signal), so the DEF_SCORE_FLOOR floor of 600 + 100*1.4 =
+    // 740 applies via Math.max — and 740 > 228, so the floor wins.  (When the
+    // zoekt corroboration is strong enough that fusion exceeds 740, the fused
+    // score wins instead — the floor is purely a Math.max, never lowers.)
+    assert.equal(result.files[0].fusedScore, 740);
     assert.equal(result.files[0].graphSignal, "exported_symbol");
     assert.ok(result.files[0].zoektHit);
     assert.equal(result.files[0].zoektHit.lineNumber, 78);
@@ -107,10 +115,13 @@ describe("mergeResults — fusion (graph + zoekt)", () => {
 
     const result = mergeResults(graphResults, zoektHits);
     assert.equal(result.files.length, 2);
-    // graph.js: graph-only, no fusion — 100 * 1.4 = 140
+    // graph.js: graph-only exported_symbol — no fusion bonus, but the
+    // canonical-def floor lifts it to 600 + 100*1.4 = 740 (was 140).  This is
+    // the bug-B3 fix: a graph-only def must outrank text-only hits, not be
+    // buried beneath them.
     const graphFile = result.files.find((f) => f.path === "lib/graph.js");
-    assert.equal(graphFile.fusedScore, 140);
-    // other.js: zoekt-only, no fusion — 50
+    assert.equal(graphFile.fusedScore, 740);
+    // other.js: zoekt-only, no fusion, no def signal — 50
     const zoektFile = result.files.find((f) => f.path === "lib/other.js");
     assert.equal(zoektFile.fusedScore, 50);
   });
@@ -388,6 +399,111 @@ describe("mergeResults — case-sensitive symbol matching (Swift bug-2)", () => 
     // on the def line (case-insensitive substring) and pick line 20.
     const result = mergeResults({ files: [] }, zoektHits, { queryTerms: ["foo", "function"] });
     assert.equal(result.files[0].zoektHit.lineNumber, 20);
+  });
+});
+
+// ─── Canonical-def floor (bug B3-def-eviction) ─────────────────────────
+//
+// WHY: graph-only canonical-def files and zoekt hits live on incompatible
+// score scales (graph def ceiling ~161 vs zoekt line ~500).  fusedScore =
+// graphScore + zoektScore let ANY zoekt-corroborated file outscore ANY
+// graph-only def.  Reproduced on a real Python repo: the canonical class def
+// (graph rank 1, exported_symbol) was evicted to dead-last and cut by the
+// top-8 slice whenever its def line fell outside zoekt's capped hit set,
+// while text-only docs/HTML/test files that mention the symbol filled the
+// top slots.  The floor mirrors retrieve.js:injectGraphMatches (CLI path
+// already floors canonical-def injections at 600 vs zoekt's ~500 band).
+
+describe("mergeResults — canonical-def floor (bug B3-def-eviction)", () => {
+  it("graph-only canonical def is NOT evicted below text-only zoekt hits", () => {
+    // Mirrors the somaNotes 'ProgressNoteGenerator' pathology: the true class
+    // def is graph-only (its def line crowded out of zoekt's capped hit set),
+    // while a pile of text-only doc/source files DO have zoekt hits at ~500.
+    const graphResults = {
+      files: [
+        // canonical class def — exported_symbol, high fan-in, graph rank 1,
+        // but absent from zoekt's hit set (inZoekt=false)
+        { path: "generators/progress_generator.py", hitType: "exported_symbol", matchedTerms: ["ProgressNoteGenerator"], fanIn: 51, score: 107.9 },
+      ],
+    };
+    // Text-only files that mention the symbol — none is the definition.
+    const zoektHits = [
+      { path: "docs/ARCHITECTURE.md",     lineNumber: 10, line: "ProgressNoteGenerator builds the note", score: 500 },
+      { path: "hyperdrive/matching.py",   lineNumber: 20, line: "from generators import ProgressNoteGenerator", score: 500 },
+      { path: "services/note_compiler.py",lineNumber: 30, line: "gen = ProgressNoteGenerator()", score: 500 },
+      { path: "somaNotes.py",             lineNumber: 40, line: "ProgressNoteGenerator", score: 500 },
+    ];
+    const result = mergeResults(graphResults, zoektHits, {
+      queryTerms: ["ProgressNoteGenerator"],
+      maxFiles: 8,
+    });
+    const defRank = result.files.findIndex((f) => f.path === "generators/progress_generator.py");
+    assert.notEqual(defRank, -1, "canonical def must NOT be evicted from the result set");
+    assert.equal(defRank, 0,
+      `canonical def must outrank text-only hits, got rank ${defRank + 1}: ` +
+      result.files.map((f) => f.path).join(", "));
+  });
+
+  it("a barrel re-exporter (def signal + zoekt hit) and the true def both survive; true def's higher fan-in keeps it competitive", () => {
+    // Both files carry the exported_symbol signal; the barrel also has a zoekt
+    // hit (it literally contains `from .x import Y`).  Both must be present and
+    // both above text-only noise.  The true def has higher fan-in-boosted graph
+    // score, so the +graphScore term in the floor keeps it ahead of any
+    // equal-text-only file.
+    const graphResults = {
+      files: [
+        { path: "generators/progress_generator.py", hitType: "exported_symbol", matchedTerms: ["ProgressNoteGenerator"], fanIn: 51, score: 107.9 },
+        { path: "generators/__init__.py",           hitType: "exported_symbol", matchedTerms: ["ProgressNoteGenerator"], fanIn: 1,  score: 101.39 },
+      ],
+    };
+    const zoektHits = [
+      { path: "generators/__init__.py", lineNumber: 3,  line: "from .progress_generator import ProgressNoteGenerator", score: 501 },
+      { path: "docs/ARCHITECTURE.md",   lineNumber: 10, line: "ProgressNoteGenerator builds the note", score: 500 },
+      { path: "scripts/debug_progress_test.py", lineNumber: 5, line: "ProgressNoteGenerator()", score: 500 },
+    ];
+    const result = mergeResults(graphResults, zoektHits, {
+      queryTerms: ["ProgressNoteGenerator"],
+      maxFiles: 8,
+    });
+    const paths = result.files.map((f) => f.path);
+    assert.ok(paths.includes("generators/progress_generator.py"), "true def must survive");
+    const defRank = paths.indexOf("generators/progress_generator.py");
+    const docRank = paths.indexOf("docs/ARCHITECTURE.md");
+    // The text-only doc must rank below the true def.
+    assert.ok(defRank !== -1 && (docRank === -1 || defRank < docRank),
+      `true def (rank ${defRank + 1}) must outrank text-only doc (rank ${docRank + 1}): ${paths.join(", ")}`);
+  });
+
+  it("floor never LOWERS a strongly-corroborated def (Math.max semantics)", () => {
+    // A def file that is also strongly zoekt-corroborated already exceeds the
+    // floor via fusion — the floor must not pull it down.
+    const graphResults = {
+      files: [
+        { path: "lib/a.js", hitType: "exported_symbol", matchedTerms: ["foo"], fanIn: 10, score: 100 },
+      ],
+    };
+    const zoektHits = [
+      { path: "lib/a.js", lineNumber: 1, line: "export function foo() {", score: 800 },
+    ];
+    const result = mergeResults(graphResults, zoektHits, { queryTerms: ["foo"] });
+    // Fusion (graph + zoekt, then *1.2, plus def-site/exact boosts) far exceeds
+    // the 600+graphScore floor, so the higher fused score is kept.
+    assert.ok(result.files[0].fusedScore > 740,
+      `strongly-corroborated def should keep its higher fused score, got ${result.files[0].fusedScore}`);
+  });
+
+  it("non-def graph signals (path_match / reexport_chain) get NO floor", () => {
+    // Only exported_symbol / swift_decl_type are canonical-def signals.  A
+    // path_match must not be floored onto the zoekt scale — that would
+    // over-promote filename coincidences above real text matches.
+    const graphResults = {
+      files: [
+        { path: "lib/watcher.js", hitType: "path_match", matchedTerms: ["watch"], fanIn: 0, score: 60 },
+      ],
+    };
+    const result = mergeResults(graphResults, [], { queryTerms: ["watch"] });
+    // path_match: 60 * 1.4 = 84, no floor.
+    assert.equal(result.files[0].fusedScore, 84);
   });
 });
 

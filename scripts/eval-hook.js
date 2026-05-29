@@ -270,7 +270,17 @@ function evaluateHookCase(evalCase, caseRun, zoektAvailable) {
     const rank = primary ? rankedFiles.indexOf(primary) : -1;
     const fileScore = rank === 0 ? 1.0 : (rank >= 1 && rank <= 2 ? 0.7 : (rank >= 3 && rank <= 9 ? 0.4 : 0.0));
     const usefulness = 0.50 * fileScore + 0.50 * (precision ?? 0);
-    pass = usefulness >= minUsefulness;
+    // WHY: recall and primary-rank gates are OPT-IN per case. The usefulness
+    // score above weights only the single primary file's rank and precision —
+    // it never inspects recall, so a natural-language query that returns ZERO
+    // canonical files (the A4 recall-collapse failure) could still "pass". That
+    // blind spot is exactly why A4/B3 shipped undetected. Cases targeting the
+    // NL-recall / def-eviction classes set minRecall / maxPrimaryRank to make
+    // those failures fail loudly. Absent the fields, behavior is unchanged.
+    const recallOk = evalCase.minRecall == null || (recall ?? 0) >= evalCase.minRecall;
+    const primaryRank = rank === -1 ? Infinity : rank + 1;
+    const rankOk = evalCase.maxPrimaryRank == null || primaryRank <= evalCase.maxPrimaryRank;
+    pass = usefulness >= minUsefulness && recallOk && rankOk;
   }
 
   return {
