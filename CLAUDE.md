@@ -178,6 +178,7 @@ All state lives in `.planning/intel/` (never committed):
 - `history.json` — health snapshots for sparkline trends
 - `telemetry.jsonl` (+ `.old`) — append-only freshness-gate events; rotates past 1 MiB
 - `.rescan_pending` — atomic single-flight marker for the freshness gate's async rescan; orphaned markers expire after 5 minutes
+- `.scan_in_progress` — cooperative-pause marker: while it's fresh (<90s), a live watcher defers its graph.db writes so a concurrent `scan`/`rescan` can't be clobbered; refreshed during the scan, cleared (pid-aware) on exit
 - `.watcher_heartbeat` — watcher alive signal (mtime checked by statusline)
 - `.watcher_last_file` — last file the watcher processed
 - `.last_injected_hash.summary.*` — per-session dedupe hashes for static summary injection
@@ -211,6 +212,7 @@ All state lives in `.planning/intel/` (never committed):
 - **Silent absence over false confidence**: when the freshness gate detects stale state, the injected `<codebase-intelligence>` body is rebuilt from scratch with only filesystem/git-derived fields (no graph-derived numbers). Stale structural claims never enter the prompt; the LLM has nothing to misquote. The old "ALERT: INDEX STALE -- ship anyway" model is gone — it cried wolf on idle repos and still leaked stale numbers when the repo HAD changed.
 - **Freshness ≠ age**: a 5-day-old graph of an unchanged repo is fresh; a 1-minute-old graph after `git checkout` is stale. The gate compares git HEAD + status fingerprint + version stamps, not wall-clock elapsed time. The fingerprint excludes `.planning/` so sextant's own writes don't pollute the signal.
 - **Atomic single-flight rescan**: stale detection enqueues at most one async rescan per repo at a time, gated by an `O_CREAT|O_EXCL` marker file with a 5-minute orphan-recovery window. The spawned `sextant scan` runs with `--allow-concurrent --force`; the watcher's RAM cache gets invalidated correctly via the mtime-gated `loadDb()`, so concurrent execution is safe.
+- **Cooperative watcher pause (scan/watcher coexistence)**: `scan`/`rescan` no longer hard-refuse while the watcher is live. The scan drops a `.scan_in_progress` marker (refreshed on progress, cleared pid-aware in `finally`); the watcher, advertising `scanPauseProtocol` in its heartbeat, **defers its graph.db writes** while the marker is fresh and resumes after — its post-scan persist reloads the scan's result via the mtime-gated `loadDb()` instead of clobbering it. The deferral lives on the actual writer (`intel.js:scheduleGraphPersist`'s timer callback), not just `watch.js:flush()`, so a persist timer armed *before* the marker appeared is also caught — the gap an adversarial review found. `scan` still refuses only when the running watcher predates the protocol (no `scanPauseProtocol` in its heartbeat); `--allow-concurrent` bypasses the refusal but the marker still pauses a current watcher. Defense in depth: `graph.js:persistDb` now does its `loadDb` *inside* the write lock, closing a load-then-write TOCTOU for any other concurrent writer.
 
 ## Eval Harness
 

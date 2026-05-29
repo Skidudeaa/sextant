@@ -5,6 +5,20 @@ const fs = require("fs");
 const intel = require("./lib/intel");
 const viz = require("./lib/terminal-viz");
 const { shouldReindex, triggerReindex } = require("./lib/zoekt-reindex");
+const freshness = require("./lib/freshness");
+
+// WHY: advertised in the heartbeat so `sextant scan` can tell whether the
+// running watcher honors the .scan_in_progress pause marker. A watcher started
+// before this code shipped won't write the field, and scan falls back to
+// refusing rather than risk a clobber it can't prevent. Bump only if the
+// pause contract changes in a way scan must detect.
+const SCAN_PAUSE_PROTOCOL = 1;
+
+// How often the flush re-checks while deferring to a live scan. Kept short so
+// queued changes land promptly once the scan clears its marker, but not a busy
+// loop. The marker's stale window (freshness.SCAN_MARKER_STALE_MS) bounds the
+// deferral even if a scan crashes without clearing it.
+const SCAN_DEFER_RECHECK_MS = 750;
 
 // WHY: Heartbeat file lets hooks detect whether the watcher is running.
 // Written on start and after each flush.  Hooks read the mtime to
@@ -28,6 +42,7 @@ function writeHeartbeat(root, lastFile, activity) {
       lastEventMs: activity?.lastEventMs ?? null,
       lastFlushMs: activity?.lastFlushMs ?? null,
       totalUpdates: activity?.totalUpdates ?? null,
+      scanPauseProtocol: SCAN_PAUSE_PROTOCOL,
     };
     fs.writeFileSync(
       path.join(dir, ".watcher_heartbeat"),
@@ -285,10 +300,28 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
     heartbeatIntervals.push(heartbeatInterval);
 
     const pending = new Set();
+    let scanDeferTimer = null;
     const flush = debounce(async () => {
+      if (!pending.size) return;
+
+      // WHY defer: a manual `sextant scan`/`rescan` is rewriting graph.db. Our
+      // in-memory copy predates the scan's writes, so flushing now (mutate +
+      // persist) would clobber the scan with stale state — the exact race the
+      // old hard-refuse guarded against. Instead, leave `pending` intact and
+      // re-arm; once the scan clears its marker, the next flush's mtime-gated
+      // loadDb picks up the scan's fresh db and applies these queued changes on
+      // top. The marker self-expires (freshness.SCAN_MARKER_STALE_MS) so a
+      // crashed scan can't freeze flushes forever. Heartbeat keeps ticking so
+      // the watcher still reads as alive while deferring.
+      if (freshness.isScanInProgress(root)) {
+        writeHeartbeat(root, dashState.lastUpdateFile, dashboardActivityFor(dashState));
+        clearTimeout(scanDeferTimer);
+        scanDeferTimer = setTimeout(() => flush(), SCAN_DEFER_RECHECK_MS);
+        return;
+      }
+
       const files = [...pending];
       pending.clear();
-      if (!files.length) return;
 
       for (const rel of files) {
         try {

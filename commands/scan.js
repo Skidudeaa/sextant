@@ -3,6 +3,7 @@ const { loadRepoConfig } = require("../lib/config");
 const { hasFlag, getWatcherStatus } = require("../lib/cli");
 const zoekt = require("../lib/zoekt");
 const telemetry = require("../lib/telemetry");
+const freshness = require("../lib/freshness");
 
 async function run(ctx) {
   const pruneMissing = ctx.argv[0] === "rescan";
@@ -12,19 +13,23 @@ async function run(ctx) {
   const isTTY = process.stdout.isTTY;
 
   // WHY concurrent-run guard: a live watcher and a scan both loadDb → mutate
-  // → persistDb. Even with the new cross-process write lock on graph.db, the
-  // two processes can interleave (watcher handles file event mid-scan), and
-  // sql.js gives each process its own in-memory copy — so a watcher flush
-  // landing mid-scan can clobber scan's progress with stale state. Refusing
-  // loudly is safer than racing; users who know what they're doing can pass
-  // --allow-concurrent.
+  // → persistDb from independent sql.js in-memory copies, so a watcher flush
+  // landing mid-scan can clobber the scan with stale state. A CURRENT watcher
+  // avoids this cooperatively: it advertises `scanPauseProtocol` in its
+  // heartbeat and DEFERS its flushes while we hold the .scan_in_progress
+  // marker (written per-root below). So we only refuse when the watcher is
+  // running AND can't prove it'll pause — an older watcher with no
+  // scanPauseProtocol field — AND the user hasn't forced it. --allow-concurrent
+  // still bypasses everything (manual override). The marker is written
+  // regardless, so even a forced concurrent run gets the watcher to defer.
   if (!allowConcurrent) {
     for (const r of ctx.roots) {
       const ws = getWatcherStatus(r);
-      if (ws.running) {
+      if (ws.running && !(ws.scanPauseProtocol >= 1)) {
         const msg =
-          `[sextant] watcher is running for ${r} (pid ${ws.pid ?? "?"}).\n` +
-          `Two writers can race on graph.db. Stop it first:\n` +
+          `[sextant] watcher is running for ${r} (pid ${ws.pid ?? "?"}) and predates the\n` +
+          `scan-pause protocol, so it can't defer its writes while you scan.\n` +
+          `Restart it (auto-restarts next Claude Code session) or stop it first:\n` +
           `  sextant watch-stop\n` +
           `Or override (at your own risk) with --allow-concurrent.\n`;
         process.stderr.write(msg);
@@ -59,14 +64,31 @@ async function run(ctx) {
     let scanSuccess = false;
     let scanError = null;
 
+    // WHY: drop the scan-in-progress marker so a live (current) watcher defers
+    // its flushes and can't clobber us. Written even under --allow-concurrent
+    // and even with no watcher — harmless if nobody reads it. Refreshed in
+    // onProgress so a long scan keeps it fresh; cleared in finally.
+    freshness.markScanInProgress(r);
+
     const cfg = loadRepoConfig(r);
     const globs = cliGlobs.length ? cliGlobs : cfg.globs;
 
     // Progress callback for visual feedback
     let lastRender = 0;
+    let lastMarkerTouch = scanStartMs;
     let skippedCount = 0;
     let indexedCount = 0;
     const onProgress = ({ phase, total, processed, file, skipped, ghostCount }) => {
+      // Refresh the scan-in-progress marker periodically so its mtime stays
+      // within freshness.SCAN_MARKER_STALE_MS for the whole scan — otherwise a
+      // long scan would let the marker go stale and the watcher would resume
+      // mid-scan. Throttled so it isn't a write per file.
+      const tNow = Date.now();
+      if (tNow - lastMarkerTouch >= 10000) {
+        lastMarkerTouch = tNow;
+        freshness.markScanInProgress(r);
+      }
+
       // Track skipped vs indexed
       if (phase === "indexing") {
         if (skipped) skippedCount++;
@@ -149,14 +171,14 @@ async function run(ctx) {
       scanError = err?.message || String(err);
       throw err;
     } finally {
-      // WHY clear the rescan marker here (not in intel.js's bulk scan
-      // path): if intel.scan throws before reaching its persist+clear
-      // sequence, the marker would otherwise sit untouched until the
-      // 5-minute orphan TTL expires, blocking every subsequent stale
-      // read from triggering a fresh rescan.  Clearing in finally covers
-      // both success and failure with no special-casing.
-      const freshness = require("../lib/freshness");
+      // WHY clear in finally (not in intel.js's bulk scan path): if intel.scan
+      // throws before reaching its persist+clear sequence, the markers would
+      // sit untouched until their TTLs expire — the rescan marker blocking the
+      // next stale-read rescan, the scan-in-progress marker freezing the
+      // watcher's flushes. Clearing both here covers success and failure with
+      // no special-casing.
       freshness.clearRescanMarker(r);
+      freshness.clearScanMarker(r);
 
       // WHY in finally: scan.completed is the load-bearing telemetry event
       // for Option 5's adaptive sync/async chooser -- it must record on

@@ -243,3 +243,57 @@ describe("freshness.clearRescanMarker", () => {
     freshness.clearRescanMarker(dir);
   });
 });
+
+describe("freshness scan-in-progress marker (cooperative watcher pause)", () => {
+  let dir;
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-scanmarker-"));
+    fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
+  });
+  after(() => { if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("isScanInProgress: false with no marker, true after mark, false after clear", () => {
+    assert.equal(freshness.isScanInProgress(dir), false);
+    freshness.markScanInProgress(dir);
+    assert.equal(freshness.isScanInProgress(dir), true);
+    freshness.clearScanMarker(dir);
+    assert.equal(freshness.isScanInProgress(dir), false);
+  });
+
+  it("treats a marker older than SCAN_MARKER_STALE_MS as not-in-progress (crashed scan recovers)", () => {
+    freshness.markScanInProgress(dir);
+    const p = freshness.scanMarkerPath(dir);
+    // Backdate the marker past the stale window — simulates a scan that crashed
+    // without clearing it. The watcher must resume rather than freeze forever.
+    const staleSec = (Date.now() - freshness.SCAN_MARKER_STALE_MS - 5000) / 1000;
+    fs.utimesSync(p, staleSec, staleSec);
+    assert.equal(freshness.isScanInProgress(dir), false);
+    // A fresh re-mark flips it back true (refresh-during-scan keeps it alive).
+    freshness.markScanInProgress(dir);
+    assert.equal(freshness.isScanInProgress(dir), true);
+    freshness.clearScanMarker(dir);
+  });
+
+  it("clearScanMarker is a no-op when no marker exists", () => {
+    assert.equal(fs.existsSync(freshness.scanMarkerPath(dir)), false);
+    freshness.clearScanMarker(dir); // must not throw
+    assert.equal(freshness.isScanInProgress(dir), false);
+  });
+
+  it("clearScanMarker leaves a marker owned by a different live pid (two concurrent scans)", () => {
+    // Simulate scan B's marker, then scan A (this process) calling clear in its
+    // finally — it must NOT unlink B's claim, or the watcher would resume while
+    // B is still writing. A non-matching pid is preserved; ownerless/our-pid
+    // markers are cleared.
+    const p = freshness.scanMarkerPath(dir);
+    const otherPid = process.pid + 1; // a different (here, not-running) pid stands in for scan B
+    fs.writeFileSync(p, JSON.stringify({ pid: otherPid, at: new Date().toISOString() }) + "\n");
+    freshness.clearScanMarker(dir);
+    assert.equal(fs.existsSync(p), true, "must not clear another scan's marker");
+
+    // Our own marker clears normally.
+    freshness.markScanInProgress(dir); // rewrites with this process's pid
+    freshness.clearScanMarker(dir);
+    assert.equal(fs.existsSync(p), false, "must clear our own marker");
+  });
+});

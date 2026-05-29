@@ -96,6 +96,26 @@ describe("getWatcherStatus", () => {
     const status = getWatcherStatus("/tmp/sextant-does-not-exist-" + Date.now());
     assert.equal(status.running, false);
   });
+
+  it("surfaces scanPauseProtocol from the heartbeat payload (current watcher)", () => {
+    const hbPath = path.join(tmpDir, ".planning", "intel", ".watcher_heartbeat");
+    const iso = new Date().toISOString();
+    fs.writeFileSync(hbPath, iso + "\n" + JSON.stringify({ pid: 123, scanPauseProtocol: 1 }) + "\n");
+    const status = getWatcherStatus(tmpDir);
+    assert.equal(status.running, true);
+    assert.equal(status.scanPauseProtocol, 1);
+  });
+
+  it("reports scanPauseProtocol null for a pre-protocol (older) watcher heartbeat", () => {
+    // Legacy payload with no scanPauseProtocol field — scan must fall back to
+    // refusing rather than assume the watcher will pause.
+    const hbPath = path.join(tmpDir, ".planning", "intel", ".watcher_heartbeat");
+    const iso = new Date().toISOString();
+    fs.writeFileSync(hbPath, iso + "\n" + JSON.stringify({ pid: 123 }) + "\n");
+    const status = getWatcherStatus(tmpDir);
+    assert.equal(status.running, true);
+    assert.equal(status.scanPauseProtocol, null);
+  });
 });
 
 // ---------------------------------------------------------------------------
