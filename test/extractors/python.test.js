@@ -61,20 +61,61 @@ class MyModel:
       assert.ok(result.some((r) => r.name === "MyModel" && r.kind === "class"));
     });
 
-    it("__all__ list overrides defaults", { skip: !pythonAvailable && "python3 not available" }, () => {
+    it("__all__ scopes exports but preserves the construct kind of locally-defined names", { skip: !pythonAvailable && "python3 not available" }, () => {
+      // WHY: __all__ is the authoritative export LIST (internal names excluded),
+      // but a name listed there is either locally DEFINED or merely re-exported.
+      // normalizeExports cross-references __all__ against the local defs so a
+      // locally-defined name keeps its construct kind (function/class/const) and
+      // only a name with no local definition (a barrel re-export) gets "explicit".
+      // This distinction is load-bearing: graph-retrieve uses "explicit" to mean
+      // "re-export" and withholds the canonical-def floor from it (B3 edge fix).
       const code = `
-__all__ = ["greet"]
+from app.other import ReExported
+
+__all__ = ["greet", "Model", "CONST", "ReExported"]
 
 def greet():
     pass
+
+class Model:
+    pass
+
+CONST = 42
 
 def _internal():
     pass
 `;
       const result = extractExports(code, "app.py");
-      assert.equal(result.length, 1);
-      assert.equal(result[0].name, "greet");
-      assert.equal(result[0].kind, "explicit");
+      const byName = Object.fromEntries(result.map((r) => [r.name, r.kind]));
+      // Internal (_internal) excluded; only __all__ names exported.
+      assert.equal(result.length, 4);
+      // Locally-defined names keep their construct kind.
+      assert.equal(byName.greet, "function");
+      assert.equal(byName.Model, "class");
+      assert.equal(byName.CONST, "const");
+      // Re-exported (imported, not defined here) → explicit.
+      assert.equal(byName.ReExported, "explicit");
+    });
+
+    it("captures annotated ALLCAPS module constants (ast.AnnAssign)", { skip: !pythonAvailable && "python3 not available" }, () => {
+      // WHY: a typed module constant `FLAG_REGISTRY: Dict[str, bool] = {...}` is
+      // an ast.AnnAssign, not ast.Assign — the extractor missed it, leaving the
+      // constant with NO export signal so a barrel re-exporting it outranked the
+      // real def (B3 constant edge). Annotated ALLCAPS constants WITH a value are
+      // now exported as kind "const"; a bare annotation (no value) is a
+      // declaration, not a definition, and is excluded.
+      const code = `
+from typing import Dict
+
+FLAG_REGISTRY: Dict[str, bool] = {"a": True}
+DECLARED_ONLY: int
+lower_annotated: int = 5
+`;
+      const result = extractExports(code, "config.py");
+      const byName = Object.fromEntries(result.map((r) => [r.name, r.kind]));
+      assert.equal(byName.FLAG_REGISTRY, "const");
+      assert.ok(!("DECLARED_ONLY" in byName), "bare annotation (no value) is not an export");
+      assert.ok(!("lower_annotated" in byName), "non-ALLCAPS annotated assignment is not a constant export");
     });
 
     it("empty code returns []", () => {

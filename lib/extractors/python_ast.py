@@ -256,6 +256,22 @@ def extract(file_path: str, content: str) -> Dict[str, Any]:
                     if name.isupper() or (name and not name.startswith("_")):
                         if name.isupper():
                             assigns.append(name)
+        elif isinstance(n, ast.AnnAssign):
+            # WHY: a top-level ANNOTATED constant — `FLAG_REGISTRY: Dict[str, bool]
+            # = {...}` — is an ast.AnnAssign, not ast.Assign, so the branch above
+            # missed it and the constant had NO export signal. A barrel that
+            # re-exported such a constant then received the merge layer's
+            # canonical-def floor and outranked the real (signal-less) definition
+            # (B3 constant edge, 2026-05-28). Capture annotated ALLCAPS constants
+            # with a value so the defining module carries the def signal. Require
+            # a value so a bare annotation (`X: int`) — a declaration, not a
+            # definition — is not treated as an export.
+            if (
+                n.value is not None
+                and isinstance(n.target, ast.Name)
+                and n.target.id.isupper()
+            ):
+                assigns.append(n.target.id)
 
     return {
         "path": file_path,

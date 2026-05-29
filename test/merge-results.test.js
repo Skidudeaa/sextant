@@ -505,6 +505,52 @@ describe("mergeResults — canonical-def floor (bug B3-def-eviction)", () => {
     // path_match: 60 * 1.4 = 84, no floor.
     assert.equal(result.files[0].fusedScore, 84);
   });
+
+  it("withholds the fusion bonus from a re-export signal", () => {
+    // A re-export shim's graph edge and its zoekt `from .mod import X` line are
+    // the SAME fact, not independent corroboration — so it must NOT earn the
+    // inBoth fusion bonus.  Two files with identical graph score + identical
+    // zoekt line, differing ONLY in graph signal: path_match earns the *1.2
+    // bonus, reexport_chain does not.  Neither is a DEF_SIGNAL_TYPE, so the
+    // canonical-def floor is not involved — this isolates the fusion bonus.
+    const line = "alpha beta gamma"; // no def-site/exact-symbol trigger
+    const graphResults = {
+      files: [
+        { path: "a_pathmatch.js", hitType: "path_match",     matchedTerms: ["alpha"], fanIn: 0, score: 100 },
+        { path: "b_reexport.js",  hitType: "reexport_chain", matchedTerms: ["alpha"], fanIn: 0, score: 100 },
+      ],
+    };
+    const zoektHits = [
+      { path: "a_pathmatch.js", lineNumber: 1, line, score: 500 },
+      { path: "b_reexport.js",  lineNumber: 1, line, score: 500 },
+    ];
+    const result = mergeResults(graphResults, zoektHits, { queryTerms: ["alpha"] });
+    const a = result.files.find((f) => f.path === "a_pathmatch.js").fusedScore;
+    const b = result.files.find((f) => f.path === "b_reexport.js").fusedScore;
+    assert.ok(a > b, `path_match (fusion bonus) must exceed reexport_chain (no bonus): a=${a} b=${b}`);
+    assert.ok(Math.abs(a - b * 1.2) < 1, `path_match should be exactly the reexport score * 1.2: a=${a} b=${b}`);
+  });
+
+  it("canonical def outranks a re-export barrel of the same symbol (B3 constant edge)", () => {
+    // The somaNotes FLAG_REGISTRY pathology after the full fix: the def carries
+    // an exported_symbol signal (AnnAssign now surfaces annotated constants) and
+    // is floored; the __init__ barrel is a reexport_chain with a zoekt re-export
+    // line but earns neither the floor nor the fusion bonus.  The floored def
+    // must win even though the barrel is zoekt-corroborated.
+    const graphResults = {
+      files: [
+        { path: "app/feature_gate.py", hitType: "exported_symbol", matchedTerms: ["FLAG_REGISTRY"], fanIn: 3, score: 100 },
+        { path: "app/__init__.py",     hitType: "reexport_chain",  matchedTerms: ["FLAG_REGISTRY"], fanIn: 1, score: 80 },
+      ],
+    };
+    const zoektHits = [
+      { path: "app/__init__.py",     lineNumber: 3, line: "from .feature_gate import FLAG_REGISTRY", score: 500 },
+      { path: "app/feature_gate.py", lineNumber: 9, line: "FLAG_REGISTRY = {", score: 500 },
+    ];
+    const result = mergeResults(graphResults, zoektHits, { queryTerms: ["FLAG_REGISTRY"], maxFiles: 8 });
+    assert.equal(result.files[0].path, "app/feature_gate.py",
+      `def must outrank re-export barrel, got: ${result.files.map((f) => f.path).join(", ")}`);
+  });
 });
 
 describe("mergeResults — test-path penalty (Python/Go filename conventions)", () => {

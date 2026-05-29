@@ -3,7 +3,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { quoteIfPhrase, escapeForZoekt } = require("../lib/zoekt");
+const { quoteIfPhrase, escapeForZoekt, rankByTokenCoverage } = require("../lib/zoekt");
 
 // WHY: zoekt's default query parser AND's whitespace-separated tokens as
 // independent substring clauses, while rg with -F treats the same query as
@@ -116,5 +116,41 @@ describe("escapeForZoekt", () => {
     assert.equal(escapeForZoekt("   "), "");
     assert.equal(escapeForZoekt(null), null);
     assert.equal(escapeForZoekt(42), 42);
+  });
+});
+
+// WHY: rankByTokenCoverage powers the Tier-3 OR-fallback in search() — when a
+// long NL question's tokens are scattered across the repo (no single file
+// contains them all, so phrase AND both return nothing), the union (OR) query
+// matches anything with ANY token. Ranking those by distinct-token COVERAGE
+// floats the file that touches the most concepts above a file that merely
+// repeats one common token. Pure function — locked here without a daemon.
+describe("rankByTokenCoverage", () => {
+  const tokens = ["clinical", "problems", "jaccard", "similarity"];
+
+  it("ranks the highest-coverage file first, not the highest hit-count file", () => {
+    const hits = [
+      // a file that mentions ONE common token many times (high count, low coverage)
+      { path: "noise.py", line: "clinical clinical clinical clinical", score: 900 },
+      { path: "noise.py", line: "clinical note", score: 850 },
+      // the canonical file: covers all four concepts across its lines (low per-line score)
+      { path: "problem_clustering.py", line: "cluster clinical problems by", score: 400 },
+      { path: "problem_clustering.py", line: "jaccard similarity threshold", score: 380 },
+    ];
+    const ranked = rankByTokenCoverage(hits, tokens);
+    assert.equal(ranked[0].path, "problem_clustering.py"); // coverage 4 > coverage 1
+    assert.equal(ranked.length, 2); // one (best) hit per file
+  });
+
+  it("breaks coverage ties by best line score and dedupes to one hit per file", () => {
+    const hits = [
+      { path: "a.py", line: "clinical problems", score: 100 },
+      { path: "b.py", line: "clinical problems", score: 500 },
+      { path: "b.py", line: "clinical", score: 200 },
+    ];
+    const ranked = rankByTokenCoverage(hits, tokens);
+    assert.equal(ranked[0].path, "b.py"); // equal coverage (2), higher score wins
+    assert.equal(ranked[0].score, 500); // keeps the best line
+    assert.equal(ranked.length, 2);
   });
 });
