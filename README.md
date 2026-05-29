@@ -237,7 +237,7 @@ See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (ori
 
 ## Eval Results
 
-21/21 self-eval queries pass on the sextant repo itself: MRR 0.908, nDCG 0.916. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.689, nDCG 0.695, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
+21/21 self-eval queries pass on the sextant repo itself: MRR 0.908, nDCG 0.916. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.755, nDCG 0.741, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
 
 ### Running the eval suite
 
