@@ -385,3 +385,44 @@ done
 - Tier B feasibility + the under-reporting risk were derived by independent
   adversarial review against the span-keyed storage model, not taken from the
   field report.
+
+## Addendum (2026-05-30): Tier 0 shipped — and what it actually bought
+
+Tier 0 (WASM 0.7.1 → 0.7.2, `SCANNER_VERSION` 2→3) shipped on branch
+`feat/swift-grammar-0.7.2` (commits `a741b02` doc, `5576916` feat, `ec22f86`
+test guard). Two corrections to this doc's earlier framing, both from probing
+the **real extractor** against both grammars:
+
+1. **Raw-string failure was non-determinism, not "flakiness."** 0.7.1's
+   external scanner leaked state across `parse()` calls, and sextant reuses
+   **one module-level parser for every file in a scan** (`swift.js`, `let
+   parser` set once, never reset). So the result of parsing a raw-string —
+   and a top-level `#if` — depended on the *previously parsed file*: the same
+   input returned `ok` or `ERR` by position (a fresh-parser parse and a
+   reused-parser parse of identical source disagreed). That means **the same
+   repo could extract a different graph depending on file scan order** — silent
+   non-determinism, the failure mode sextant exists to prevent. 0.7.2 is
+   order-independent (verified: reused-parser, fresh-parser, and repeated
+   parses all agree). **This correctness win — not the benchmark numbers — is
+   the real justification for the bump.** Both Vapor and self-eval reported
+   *exact parity* across the bump precisely because neither corpus exercises
+   `#if` or the carryover; that parity is "no regression," not "no effect."
+
+2. **The eval blind spot is now closed by a function-level guard**, not an eval
+   fixture. `test/extractors/swift.test.js` → "grammar 0.7.2 guards": three
+   tests (top-level `#if`, function-body `#if`, back-to-back raw strings) that
+   **fail on 0.7.1 (28 pass / 3 fail) and pass on 0.7.2 (668/668)** — verified
+   discriminating by swapping the WASM. This is the repo's durable-lock pattern
+   (function-level, like the test-path penalty), not a ranking fixture.
+
+**Latent risk surfaced, not yet fixed:** the shared module-level parser is
+benign on 0.7.2 but is a *class* of bug — any future grammar that reintroduces
+scanner-state leakage would silently return non-determinism. A defensive fix
+(fresh parser per file, or `parser.reset()` between files in `swift.js`) is
+cheap insurance and worth considering as a follow-up; the new guard tests are
+the tripwire that would catch a regression.
+
+**Consequences for Tiers A/B:** raw strings are fully fixed by 0.7.2, so Tier
+A's `raw_string_literal` classification bucket is **moot** — the remaining
+partial-parse cases reduce to `#if` between enum cases / class members and
+`send(())`. Tier B's fixture work shrinks accordingly.
