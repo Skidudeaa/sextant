@@ -415,12 +415,22 @@ the **real extractor** against both grammars:
    discriminating by swapping the WASM. This is the repo's durable-lock pattern
    (function-level, like the test-path penalty), not a ranking fixture.
 
-**Latent risk surfaced, not yet fixed:** the shared module-level parser is
-benign on 0.7.2 but is a *class* of bug — any future grammar that reintroduces
-scanner-state leakage would silently return non-determinism. A defensive fix
-(fresh parser per file, or `parser.reset()` between files in `swift.js`) is
-cheap insurance and worth considering as a follow-up; the new guard tests are
-the tripwire that would catch a regression.
+**Latent risk surfaced — and why there is no cheap app-side guard.** The
+non-determinism is benign on 0.7.2 but is a *class* of bug: a future grammar
+that reintroduces scanner-state leakage would silently return non-determinism.
+The obvious mitigation — isolate per-file parsing in `swift.js` — was
+**investigated and empirically rejected**: on 0.7.1 the leak survives below the
+parser instance. `parser.reset()` before each parse does **not** clear it
+(still order-dependent), and a *fresh* `new Parser()` per parse does **not**
+isolate it either — a brand-new parser instance inherits the poisoned state
+from whatever parsed before it, because the state lives in the shared
+`Language`/WASM module, not the parser object. So there is no cheap app-level
+fix; **the grammar is the only effective remedy.** The defense we actually
+have is the version stamp + the guard tests: the `swift.js` parser is pinned to
+a grammar proven order-independent (0.7.2), and the "grammar 0.7.2 guards"
+tests fail loudly if a future bump regresses parse correctness. (A genuine
+app-side fix would require reloading the `Language` per file — far too
+expensive — which is why it's out of scope.)
 
 **Consequences for Tiers A/B:** raw strings are fully fixed by 0.7.2, so Tier
 A's `raw_string_literal` classification bucket is **moot** — the remaining
