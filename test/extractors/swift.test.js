@@ -314,4 +314,52 @@ class AppDelegate: UIResponder, UIApplicationDelegate {}`;
       assert.equal(swift.hasAtMain(code), false);
     });
   });
+
+  // --- Grammar 0.7.2 capability guards ---
+  // WHY: the 0.7.1 -> 0.7.2 tree-sitter-swift bump (SCANNER_VERSION "3") is
+  // justified by Swift parsing that NO existing eval fixture exercises — the JS
+  // self-eval has no Swift, and the Vapor corpus has no #if-gated declarations,
+  // so both report exact parity across the bump. These function-level tests are
+  // the durable guard for what 0.7.2 actually fixed.
+  // Empirically (probe in docs/plans/2026-05-30-003-...): on 0.7.1 these cases
+  // produced partial-parse errors AND were non-deterministic under parser reuse
+  // (the shared module-level parser leaked external-scanner state between
+  // files, so a file's parse could depend on the previously-parsed file).
+  // 0.7.2 parses them cleanly and order-independently. If a future grammar bump
+  // regresses either, filesParseErrors returns to 1 and these fail loudly.
+  describe("conditional compilation + raw strings (grammar 0.7.2 guards)", () => {
+    it("top-level #if-wrapped type parses clean and extracts the inner decl", () => {
+      if (!parserReady) return;
+      swift.resetCounters();
+      const code = "#if canImport(UIKit)\nimport UIKit\npublic struct PlatformPicker { public let id: Int }\n#endif\n";
+      const decls = swift.extractDeclarations(code, "Platform.swift");
+      assert.equal(swift.getCounters().filesParseErrors, 0,
+        "0.7.2 must parse a top-level #if block without a partial-parse error");
+      assert.ok(decls.some(d => d.name === "PlatformPicker" && d.kind === "struct"),
+        "the struct inside the #if block must be extracted");
+    });
+
+    it("#if DEBUG inside a function body parses clean", () => {
+      if (!parserReady) return;
+      swift.resetCounters();
+      const code = "public func run() {\n  let x = 1\n#if DEBUG\n  print(x)\n#endif\n}\n";
+      swift.extractDeclarations(code, "Run.swift");
+      assert.equal(swift.getCounters().filesParseErrors, 0,
+        "0.7.2 must parse a function-body #if without a partial-parse error");
+    });
+
+    it("back-to-back raw strings do not corrupt each other (0.7.1 carryover regression)", () => {
+      if (!parserReady) return;
+      // 0.7.1 leaked external-scanner state: the 2nd raw string parsed on the
+      // shared module parser failed even though the 1st succeeded. 0.7.2 is
+      // order-independent — both files parse clean and the trailing decl extracts.
+      swift.resetCounters();
+      swift.extractDeclarations('let a = #"first \\d+ x"#\n', "A.swift");
+      const decls = swift.extractDeclarations('let b = #"second \\d+ x"#\nstruct AfterRaw { let n: Int }\n', "B.swift");
+      assert.equal(swift.getCounters().filesParseErrors, 0,
+        "0.7.2 must parse two raw-string files back-to-back without error");
+      assert.ok(decls.some(d => d.name === "AfterRaw"),
+        "a decl following a raw string must still be extracted");
+    });
+  });
 });

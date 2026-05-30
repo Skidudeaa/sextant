@@ -6,10 +6,23 @@ install-time downloads, native compilation, or large npm dependencies.
 ## tree-sitter-swift.wasm
 
 - **Source**: https://github.com/alex-pinkus/tree-sitter-swift
-- **Version**: 0.7.1 (release tag `0.7.1-pypi`)
+- **Version**: 0.7.2 (release tag `0.7.2-pypi`)
 - **License**: MIT (see upstream LICENSE)
 - **Provenance**: Downloaded directly from the upstream GitHub release at
-  https://github.com/alex-pinkus/tree-sitter-swift/releases/download/0.7.1-pypi/tree-sitter-swift.wasm
+  https://github.com/alex-pinkus/tree-sitter-swift/releases/download/0.7.2-pypi/tree-sitter-swift.wasm
+- **SHA-256**: `91996dbc308beb0590e8379a41ddb3f5cdeb29f9c79d4002a59e1c627037c754`
+- **ABI**: version 15 (same as 0.7.1 — `web-tree-sitter` 0.26.x loads it
+  unchanged; the bump is a drop-in, verified by direct load).
+- **What 0.7.2 fixed (vs 0.7.1)**: raw-string / raw-regex literals
+  (`#"...\d..."#`) and conditional-compilation directives (`#if`/`#elseif`/
+  `#else`/`#endif`) at top level and inside function bodies now parse without
+  `hasError`. 0.7.1 also had an order-dependent quirk where the *second*
+  raw-string parsed on a reused parser instance failed; 0.7.2 clears it.
+- **What 0.7.2 still does NOT handle**: `#if` *between enum cases or class
+  members* (fixed upstream by PR #583, merged after the 0.7.2 release — no
+  released WASM yet), and empty-tuple expressions like `subject.send(())`.
+  These remain partial-parse cases; see
+  `docs/plans/2026-05-30-003-feat-swift-parser-diagnostics-plan.md` (Tier B).
 - **Note**: The `tree-sitter-wasms@0.1.13` npm package bundles a Swift WASM
   with the same version tag, but it's compiled against an older tree-sitter
   ABI that does NOT load with `web-tree-sitter` 0.26.x. Always pull from the
