@@ -20,6 +20,21 @@ function normalizePath(p) {
   return String(p).replace(/^\.\//, "");
 }
 
+// WHY: per-case nDCG lift is surfaced as a first-class metric (liftNDCG) so a
+// graph-injection regression on a single query can't hide behind the aggregate
+// graphLiftNDCG. Round to 2dp for display/comparison stability — the hard
+// negative-lift floor lives in scripts/compare-vapor-eval.js (Gate 3), which
+// recomputes lift from the raw per-case ndcg fields.
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// WHY: informational floor used only to print a PASS/breach line in the
+// self-eval/CLI summary. The load-bearing hard gate is compare-vapor-eval.js
+// Gate 3; eval-retrieve.js keeps its exit semantics = case pass/fail so
+// self-eval and other corpora are unperturbed.
+const NEGATIVE_LIFT_FLOOR = -0.05;
+
 // WHY: The eval dataset and harness script themselves contain query terms,
 // and rawCode2026-1-25.md is a large code dump. All would pollute results
 // with self-referential matches. Filter them out before scoring.
@@ -307,6 +322,12 @@ function evaluateCase(caseRun) {
     pass = gUsefulness >= minUsefulness && hitQuality;
   }
 
+  // WHY: per-case nDCG lift, surfaced as a first-class field so a single-query
+  // graph-injection regression is visible (and gate-able by
+  // compare-vapor-eval.js) instead of being averaged away in graphLiftNDCG.
+  // Additive: does not affect meanMRR/meanNDCG/graphLiftNDCG or any pass/fail.
+  const liftNDCG = round2((gNDCG ?? 0) - (ngNDCG ?? 0));
+
   return {
     id: evalCase.id,
     category: evalCase.category,
@@ -314,6 +335,7 @@ function evaluateCase(caseRun) {
     isNegative,
     k,
     pass,
+    liftNDCG,
     withGraph: {
       precision: gPrecision,
       recall: gRecall,
@@ -375,6 +397,12 @@ function computeAggregates(allMetrics) {
     graphLiftDirection: graphLiftNDCG > 0.01 ? "positive" : graphLiftNDCG < -0.01 ? "negative" : "neutral",
     failedIds: allMetrics.filter((m) => !m.pass).map((m) => m.id),
     passedIds: allMetrics.filter((m) => m.pass).map((m) => m.id),
+    // WHY: ids whose per-case nDCG lift dips below the informational floor.
+    // Informational only here (exit code stays case-pass/fail); the hard gate
+    // is compare-vapor-eval.js Gate 3.
+    liftFloorBreaches: allMetrics
+      .filter((m) => !m.isNegative && (m.liftNDCG ?? 0) < NEGATIVE_LIFT_FLOOR)
+      .map((m) => ({ id: m.id, liftNDCG: m.liftNDCG })),
   };
 }
 
@@ -452,7 +480,7 @@ function printCaseResult(metrics, { verbose = false, hits = [] } = {}) {
     lines.push(`  ${viz.dim("Graph ON:")}  ${formatFiles(gTopFiles)}`);
     lines.push(`  ${viz.dim("Graph OFF:")} ${formatFiles(ngTopFiles)}`);
 
-    // Graph lift for this case
+    // Graph lift for this case (precision)
     const gPrecision = gp ?? 0;
     const ngPrecision = metrics.withoutGraph.precision ?? 0;
     const lift = gPrecision - ngPrecision;
@@ -460,7 +488,18 @@ function printCaseResult(metrics, { verbose = false, hits = [] } = {}) {
       const liftStr = lift > 0
         ? viz.c(`+${lift.toFixed(2)}`, viz.colors.green)
         : viz.c(`${lift.toFixed(2)}`, viz.colors.red);
-      lines.push(`  ${viz.dim("Lift:")}      ${liftStr}`);
+      lines.push(`  ${viz.dim("Lift P@k:")}  ${liftStr}`);
+    }
+
+    // Per-case nDCG lift — red when negative so an injection regression on a
+    // single query is loud at the case level, not buried in the aggregate.
+    const liftN = metrics.liftNDCG ?? 0;
+    if (Math.abs(liftN) > 0.001) {
+      const floorTag = liftN < NEGATIVE_LIFT_FLOOR ? viz.c("  ⚠ below floor", viz.colors.red) : "";
+      const liftNStr = liftN > 0
+        ? viz.c(`+${liftN.toFixed(2)}`, viz.colors.green)
+        : viz.c(`${liftN.toFixed(2)}`, viz.colors.red);
+      lines.push(`  ${viz.dim("Lift nDCG:")} ${liftNStr}${floorTag}`);
     }
 
     // Verbose: show top hits with signals
@@ -515,6 +554,24 @@ function printSummary(agg) {
       : viz.dim(`${pLiftVal.toFixed(3)}`);
   lines.push(`  ${viz.dim("Graph Lift P@k:")}    ${pLiftStr}`);
   lines.push(`  ${viz.dim("Graph Lift nDCG:")}   ${liftDisplay}`);
+
+  // Per-case nDCG-lift floor: surfaces any single query whose injection lift
+  // dipped below the floor, so a regression can't hide behind the mean.
+  const breaches = agg.liftFloorBreaches || [];
+  if (breaches.length === 0) {
+    lines.push(
+      `  ${viz.dim("Per-case nDCG lift floor:")} ` +
+        viz.c(`PASS`, viz.colors.green) +
+        viz.dim(` (floor ${NEGATIVE_LIFT_FLOOR}, no case below)`)
+    );
+  } else {
+    const list = breaches.map((b) => `${b.id} (${b.liftNDCG.toFixed(2)})`).join("  ");
+    lines.push(
+      `  ${viz.dim("Per-case nDCG lift floor:")} ` +
+        viz.c(`${breaches.length} below floor`, viz.colors.red) +
+        viz.dim(`  ${list}`)
+    );
+  }
   lines.push("");
 
   if (agg.passedIds.length) {
@@ -624,7 +681,20 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e?.stack || e?.message || String(e));
-  process.exitCode = 1;
-});
+// WHY: only auto-run when invoked as a script. When required as a module
+// (unit tests), export the pure helpers so liftNDCG can be asserted directly
+// without spinning up the retrieve pipeline or an indexed corpus.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e?.stack || e?.message || String(e));
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  evaluateCase,
+  computeAggregates,
+  computeNDCG,
+  round2,
+  NEGATIVE_LIFT_FLOOR,
+};

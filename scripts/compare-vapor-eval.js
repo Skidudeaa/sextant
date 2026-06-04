@@ -21,6 +21,18 @@ const fs = require("fs");
 const MRR_DELTA_FAIL_THRESHOLD = -0.05;
 const STARRED_PATHOLOGICAL_LIFT = ["vapor-uri-001", "vapor-init-001", "vapor-svc-001"];
 
+// Gate 3: per-case negative-lift floor. Any case whose graph-injection nDCG
+// lift (withGraph.ndcg - withoutGraph.ndcg) drops below this floor is a
+// regression — the graph layer made that query *worse* than no graph at all.
+const NEGATIVE_LIFT_FLOOR = -0.05;
+
+// Accepted, bounded debt: graph injection of the broadly-conforming "Codable"
+// protocol name displaces the canonical ResponseCodable.swift def. Known,
+// understood, tracked as a scoring follow-up; bounded here so it CANNOT
+// silently worsen. Current committed lift is -0.315 (> -0.32 ⇒ passes);
+// any worsening past -0.32 trips Gate 3.
+const ACCEPTED_NEGATIVE_LIFT_DEBT = { "vapor-codable-001": -0.32 };
+
 function loadJson(path) {
   if (!fs.existsSync(path)) {
     console.error(`compare-vapor-eval: file not found: ${path}`);
@@ -103,6 +115,36 @@ function main() {
   for (const base of baseline.cases || []) {
     if (!current.cases?.some((c) => c.id === base.id)) {
       warnings.push(`case ${base.id} present in baseline but not in current (removed?)`);
+    }
+  }
+
+  // Gate 3: per-case negative-lift floor.
+  // Skips cases without a computable lift (hook diffs are graph-only — no
+  // withoutGraph.ndcg), exactly as the soft starred-lift signal does. For
+  // CLI diffs, any case below the floor fails UNLESS it is allowlisted as
+  // accepted debt — and even then it fails if it worsened past its bound.
+  for (const cur of current.cases || []) {
+    if (!cur.withGraph || !cur.withoutGraph) continue;
+    const g = cur.withGraph.ndcg;
+    const ng = cur.withoutGraph.ndcg;
+    if (typeof g !== "number" || typeof ng !== "number") continue;
+    const lift = g - ng;
+    if (lift >= NEGATIVE_LIFT_FLOOR) continue;
+
+    if (Object.prototype.hasOwnProperty.call(ACCEPTED_NEGATIVE_LIFT_DEBT, cur.id)) {
+      const bound = ACCEPTED_NEGATIVE_LIFT_DEBT[cur.id];
+      if (lift < bound) {
+        failures.push(
+          `[${cur.id}] nDCG lift ${lift.toFixed(4)} worsened past accepted-debt bound ${bound} ` +
+            `(graph injection degraded the canonical def beyond the tracked allowance)`
+        );
+      }
+      // else: within accepted debt — passes, no failure.
+    } else {
+      failures.push(
+        `[${cur.id}] nDCG lift ${lift.toFixed(4)} below negative-lift floor ${NEGATIVE_LIFT_FLOOR} ` +
+          `(NEW graph-injection regression — graph made this query worse than no-graph)`
+      );
     }
   }
 
