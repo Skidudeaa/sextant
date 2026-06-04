@@ -189,6 +189,107 @@ describe("freshness.checkFreshness: pre-NodeNext resolver scans → stale", () =
   });
 });
 
+// ─── contentChanged matrix (T1.2 follow-up) ─────────────────────────────────
+//
+// checkFreshness now returns a REASON-INDEPENDENT `contentChanged` boolean.  The
+// load-bearing case is the last one: a scanner_version mismatch that COINCIDES
+// with a moved HEAD must still report contentChanged=true even though `reason`
+// (single-valued, version-first) stays "scanner_version_changed".  That is what
+// stops a routine sextant upgrade from masking a checkout's content move.
+describe("freshness.checkFreshness: contentChanged (T1.2 follow-up)", () => {
+  let dir;
+  before(() => { dir = makeRepo("contentchanged"); });
+  after(() => { if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("fresh repo → contentChanged false", async () => {
+    const db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+    await graph.persistDb(dir);
+
+    const result = await freshness.checkFreshness(dir);
+    assert.equal(result.fresh, true);
+    assert.equal(result.contentChanged, false);
+  });
+
+  it("HEAD moved → contentChanged true (reason head_changed)", async () => {
+    const db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+    await graph.persistDb(dir);
+
+    gitCommitFile(dir, "moved.js", "module.exports = 9;\n", "moved");
+
+    const result = await freshness.checkFreshness(dir);
+    assert.equal(result.fresh, false);
+    assert.equal(result.reason, "head_changed");
+    assert.equal(result.contentChanged, true);
+  });
+
+  it("dirty working tree (untracked file) → contentChanged true (reason status_changed)", async () => {
+    const db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+    await graph.persistDb(dir);
+
+    fs.writeFileSync(path.join(dir, "dirty.js"), "x");
+
+    const result = await freshness.checkFreshness(dir);
+    assert.equal(result.fresh, false);
+    assert.equal(result.reason, "status_changed");
+    assert.equal(result.contentChanged, true);
+
+    fs.unlinkSync(path.join(dir, "dirty.js"));
+  });
+
+  it("scanner_version mismatch + HEAD SAME → contentChanged false (cried-wolf preserved)", async () => {
+    const db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+    // Pure version bump: stored scanner_version differs, but HEAD/status match.
+    graph.setMetaValue(db, freshness.META_SCANNER_VERSION, "0");
+    await graph.persistDb(dir);
+
+    const result = await freshness.checkFreshness(dir);
+    assert.equal(result.fresh, false);
+    assert.equal(result.reason, "scanner_version_changed");
+    // KEY: a pure version bump did NOT touch files → contentChanged must be
+    // false so the suppressive path stays off (the cried-wolf guard).
+    assert.equal(result.contentChanged, false);
+  });
+
+  it("scanner_version mismatch + HEAD MOVED → contentChanged TRUE, reason still scanner_version_changed (masking closed)", async () => {
+    const db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+    // Simulate the coincidence the gap describes: an older scanner wrote this
+    // graph.db (version mismatch) AND the repo has since been checked out to a
+    // new HEAD (content move).  `reason` is single-valued and version-first, so
+    // it reports scanner_version_changed — but contentChanged must surface the
+    // real content move so hook-refresh can still suppress + drop phantoms.
+    graph.setMetaValue(db, freshness.META_SCANNER_VERSION, "0");
+    await graph.persistDb(dir);
+
+    gitCommitFile(dir, "coincident.js", "module.exports = 42;\n", "coincident");
+
+    const result = await freshness.checkFreshness(dir);
+    assert.equal(result.fresh, false);
+    // Reason ordering is UNCHANGED — version still wins (cli.js depends on it).
+    assert.equal(result.reason, "scanner_version_changed");
+    // THE KEY new assertion: the API no longer masks the content change.
+    assert.equal(result.contentChanged, true);
+  });
+
+  it("no_scan_record and db_load_failed paths report contentChanged true (degrade-don't-guess)", async () => {
+    // A fresh graph.db with no recorded scan-state can't be verified against a
+    // baseline → conservative contentChanged true.
+    const noScanDir = makeRepo("contentchanged-noscan");
+    try {
+      await graph.loadDb(noScanDir);
+      const r = await freshness.checkFreshness(noScanDir);
+      assert.equal(r.reason, "no_scan_record");
+      assert.equal(r.contentChanged, true);
+    } finally {
+      fs.rmSync(noScanDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("freshness.enqueueRescan: atomic single-flight", () => {
   let dir;
   let restoreShim;

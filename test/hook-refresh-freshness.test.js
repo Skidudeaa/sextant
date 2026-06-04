@@ -276,6 +276,92 @@ describe("hook-refresh freshness (T1.2) — version-stale does NOT suppress", ()
   });
 });
 
+// ─── (iv) version+content COINCIDENCE suppresses (masking closed) ───────────
+//
+// The T1.2 follow-up: a sextant upgrade (scanner_version bump) coinciding with a
+// checkout that moved/deleted files.  checkFreshness reports a single-valued
+// reason="scanner_version_changed" (version-first ordering) — the OLD reason-list
+// derivation (reason in {head_changed, status_changed}) therefore computed
+// contentStale=FALSE and skipped suppression + phantom-drop that turn, leaking a
+// graph path the checkout may have moved.  hook-refresh now keys contentStale on
+// freshness.contentChanged (reason-independent), so this turn correctly suppresses.
+describe("hook-refresh freshness (T1.2 follow-up) — version+content coincidence suppresses", () => {
+  let dir, restoreShim;
+  before(async () => {
+    restoreShim = installSextantShim();
+    dir = await buildFixture("coincide");
+    // Stamp version-stale (records fresh HEAD/status, then mangles scanner_version)
+    // ...
+    await setScanState(dir, "version");
+    // ...AND diverge HEAD AFTER recording → both a version mismatch AND a content
+    // move are true this turn.  reason stays scanner_version_changed; contentChanged
+    // is true.
+    gitCommitFile(dir, "coincident.js", "module.exports = 7;\n");
+  });
+  after(() => {
+    if (restoreShim) restoreShim();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("shows the STALE marker even though reason is scanner_version_changed (masking closed)", () => {
+    const { stdout, events } = runHook(dir, "where is resolveImportPath defined");
+    assert.ok(stdout.includes("<codebase-retrieval>"), `expected a block, got:\n${stdout}`);
+    // FAIL-PRE (old reason-list derivation): reason=scanner_version_changed →
+    // contentStale=false → NO marker.  PASS-POST (contentChanged derivation): the
+    // coincident HEAD move is surfaced → marker present.
+    assert.match(stdout, MARKER_RE,
+      `version+content coincidence MUST surface the stale marker, got:\n${stdout}`);
+
+    // The single-valued reason is unchanged (version still wins the ordering) —
+    // this is what made the old derivation mask the content move.
+    const staleHit = events.find((e) => e.name === "retrieval.stale_hit");
+    assert.ok(staleHit, "expected a retrieval.stale_hit on the coincidence turn");
+    assert.equal(staleHit.reason, "scanner_version_changed");
+    // Observability: contentChanged is recorded so the audit can distinguish this
+    // masking case from a pure version bump.
+    assert.equal(staleHit.contentChanged, true);
+  });
+});
+
+// ─── (v) version+content coincidence ALSO drops the graph-only phantom ──────
+describe("hook-refresh freshness (T1.2 follow-up) — coincidence drops the phantom", () => {
+  let dir, restoreShim;
+  before(async () => {
+    restoreShim = installSextantShim();
+    dir = await buildFixture("coincide-phantom");
+    // A graph-only phantom exporting the queried symbol, absent on disk.
+    const db = await graph.loadDb(dir);
+    graph.upsertFile(db, { relPath: "lib/deleted_ghost.js", type: "js", sizeBytes: 100, mtimeMs: 1 });
+    graph.replaceExports(db, "lib/deleted_ghost.js", [
+      { name: "resolveImportPath", kind: "named" },
+    ]);
+    await graph.persistDb(dir);
+    // Version-stale AND a content move → coincidence.
+    await setScanState(dir, "version");
+    gitCommitFile(dir, "coincident.js", "module.exports = 8;\n");
+    assert.equal(fs.existsSync(path.join(dir, "lib/deleted_ghost.js")), false);
+    assert.equal(fs.existsSync(path.join(dir, "lib/resolveImportPath.js")), true);
+  });
+  after(() => {
+    if (restoreShim) restoreShim();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("drops the on-disk-absent phantom on the coincidence turn (the leak the old derivation allowed)", () => {
+    const { stdout } = runHook(dir, "where is resolveImportPath defined");
+    assert.ok(stdout.includes("<codebase-retrieval>"), `expected a block, got:\n${stdout}`);
+    assert.match(stdout, MARKER_RE, "coincidence turn must carry the stale marker");
+    assert.ok(
+      stdout.includes("lib/resolveImportPath.js"),
+      `the still-present exporter must remain, got:\n${stdout}`
+    );
+    assert.ok(
+      !stdout.includes("lib/deleted_ghost.js"),
+      `the phantom MUST be dropped on the coincidence turn (was leaked pre-fix), got:\n${stdout}`
+    );
+  });
+});
+
 // ─── telemetry aggregation: retrieval.stale_hit ────────────────────────────
 
 describe("telemetry summarize — retrieval stale aggregation (T1.2)", () => {

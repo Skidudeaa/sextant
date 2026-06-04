@@ -36,6 +36,20 @@ const BIN = path.resolve(__dirname, "..", "bin", "intel.js");
 async function buildFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-hook-telemetry-"));
   fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
+  // WHY write the real source file: this fixture has no recorded scan-state, so
+  // checkFreshness returns no_scan_record. Under the T1.2 follow-up, an
+  // unverifiable graph (no_scan_record / db_load_failed) reports
+  // contentChanged:true (degrade-don't-guess), which makes the hook treat the
+  // turn as content-stale and run the existsSync phantom-drop. A graph entry
+  // that points at a never-written file would be (correctly) dropped as a
+  // phantom — so the fixture must put the exporter on disk to be realistic. The
+  // assertions below (graph_merged injection) are unchanged; this only makes the
+  // graph entry correspond to a file that genuinely exists.
+  fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "lib", "resolveImportPath.js"),
+    "function resolveImportPath(spec) { return spec; }\nmodule.exports = { resolveImportPath };\n"
+  );
 
   const db = await graph.loadDb(dir);
   graph.upsertFile(db, {

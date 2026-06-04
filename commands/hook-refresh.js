@@ -226,14 +226,20 @@ async function run() {
   // scanner_version_changed / schema_version_changed mean the CODE moved on, not
   // the files — the graph's paths are still valid, and gating on them would tax
   // every routine sextant upgrade, re-introducing the cried-wolf alarm the
-  // freshness redesign deliberately deleted ("freshness != age").  So the loud,
-  // structure-suppressing path fires ONLY on head_changed / status_changed; a
-  // bare version bump records the stale_hit + triggers a rescan but leaves
-  // ranking and output untouched.
+  // freshness redesign deliberately deleted ("freshness != age").
+  //
+  // WHY gate on freshness.contentChanged (NOT on the `reason` value): `reason` is
+  // single-valued and version mismatches win the ordering FIRST. So when a sextant
+  // upgrade (scanner_version bump) coincides with a checkout that moved/deleted
+  // files, reason="scanner_version_changed" MASKS the real content move — the old
+  // reason-list check (reason in {head_changed, status_changed}) computed
+  // contentStale=FALSE that turn and leaked phantom graph paths until the next
+  // turn self-healed. checkFreshness now exposes contentChanged, computed from the
+  // HEAD/status delta INDEPENDENT of which reason fired, so a coincident
+  // version+content turn is correctly content-stale. A PURE version bump still has
+  // contentChanged=false → no suppression (the cried-wolf guard is preserved).
   const stale = freshness.fresh === false;
-  const contentStale =
-    stale &&
-    (freshness.reason === "head_changed" || freshness.reason === "status_changed");
+  const contentStale = stale && freshness.contentChanged === true;
 
   if (stale) {
     // Mirror the static-summary path: record the stale read and trigger the
@@ -241,7 +247,14 @@ async function run() {
     // Both recordEvent and enqueueRescan are defined to never throw, but guard
     // anyway — the hook must never throw on the hot path.
     try {
-      recordEvent(root, "retrieval.stale_hit", { reason: freshness.reason });
+      // contentChanged is included for observability so the audit can split
+      // "version bump that ALSO moved files" (the masking case T1.2 closes)
+      // from a pure version bump. telemetry.js aggregation keys on `reason`
+      // only and ignores extra fields, so this is additive.
+      recordEvent(root, "retrieval.stale_hit", {
+        reason: freshness.reason,
+        contentChanged: freshness.contentChanged === true,
+      });
     } catch {}
     try {
       require("../lib/freshness").enqueueRescan(root);
