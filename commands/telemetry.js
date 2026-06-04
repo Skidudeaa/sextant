@@ -76,6 +76,14 @@ function summarize(events) {
   const injectedBySource = new Map();
   let emptyFallback = 0;
 
+  // T1.2 retrieval freshness-gate counters.  retrievalStaleHits is the
+  // retrieval lane's own stale count (distinct from freshness.stale_hit, which
+  // is the static-summary path); the reason breakdown distinguishes the
+  // suppressive content reasons (head_changed / status_changed) from the
+  // benign version bumps (scanner_version_changed / schema_version_changed).
+  let retrievalStaleHits = 0;
+  const retrievalStaleByReason = new Map();
+
   for (const e of events) {
     const name = e.name || "(unknown)";
     byName.set(name, (byName.get(name) || 0) + 1);
@@ -111,6 +119,12 @@ function summarize(events) {
 
     if (name === "retrieval.empty_fallback") {
       emptyFallback++;
+    }
+
+    if (name === "retrieval.stale_hit") {
+      retrievalStaleHits++;
+      const reason = e.reason || "(unknown)";
+      retrievalStaleByReason.set(reason, (retrievalStaleByReason.get(reason) || 0) + 1);
     }
   }
 
@@ -171,6 +185,15 @@ function summarize(events) {
       emptyFallback,
       emptyInjectionRate: classifiedRetrieve ? emptyFallback / classifiedRetrieve : null,
       injectedBySource: Object.fromEntries(injectedBySource),
+      // T1.2 freshness gate on the retrieval lane: staleHits is the count of
+      // retrieve-classified turns where the gate fired; staleRate normalizes it
+      // against retrieve-classified prompts (a rising rate flags churn the
+      // watcher isn't keeping up with); staleReasons splits content reasons
+      // (head_changed / status_changed → structure suppressed) from version
+      // bumps (scanner/schema_version_changed → rescan only, output unchanged).
+      staleHits: retrievalStaleHits,
+      staleRate: classifiedRetrieve ? retrievalStaleHits / classifiedRetrieve : null,
+      staleReasons: Object.fromEntries(retrievalStaleByReason),
     },
   };
 }
@@ -237,6 +260,15 @@ function printSummary(rootAbs, sum) {
     lines.push(
       `  empty_fallback: ${r.emptyFallback}  (${fmtPct(r.emptyFallback, r.classifiedRetrieve)} of retrieve-classified)`
     );
+    lines.push(
+      `  stale_hit:      ${r.staleHits}  (${fmtPct(r.staleHits, r.classifiedRetrieve)} of retrieve-classified)`
+    );
+    if (Object.keys(r.staleReasons).length) {
+      lines.push("  stale reasons (retrieval):");
+      for (const [reason, c] of Object.entries(r.staleReasons).sort((a, b) => b[1] - a[1])) {
+        lines.push(`    - ${reason.padEnd(28)} ${c}  (${fmtPct(c, r.staleHits)})`);
+      }
+    }
     if (Object.keys(r.injectedBySource).length) {
       lines.push("  injected source:");
       for (const [src, c] of Object.entries(r.injectedBySource).sort((a, b) => b[1] - a[1])) {

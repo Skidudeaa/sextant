@@ -204,14 +204,88 @@ async function run() {
     }
   })();
 
+  // FRESHNESS GATE (T1.2): run checkFreshness CONCURRENTLY with graph+zoekt so
+  // it adds no latency — it only reads graph.db meta (cached) + git rev-parse +
+  // git status, the same signals applyFreshnessGate uses on the static-summary
+  // path.  Resolve defensively: the hook must NEVER throw, so any rejection
+  // degrades to fresh (the un-gated v1 behavior).
+  const freshnessPromise = require("../lib/freshness").checkFreshness(root);
+
   await Promise.all([graphPromise, zoektPromise]);
 
-  // 4. Merge
+  let freshness = { fresh: true };
+  try {
+    freshness = await freshnessPromise;
+  } catch {
+    // checkFreshness rejected — treat as fresh, never block the hook.
+  }
+
+  // WHY contentStale (not bare stale) keys the suppressive path: only a CONTENT
+  // change (HEAD moved via commit/checkout/rebase, or git-status moved via an
+  // edit) can relocate or delete files and invalidate the graph's stored paths.
+  // scanner_version_changed / schema_version_changed mean the CODE moved on, not
+  // the files — the graph's paths are still valid, and gating on them would tax
+  // every routine sextant upgrade, re-introducing the cried-wolf alarm the
+  // freshness redesign deliberately deleted ("freshness != age").  So the loud,
+  // structure-suppressing path fires ONLY on head_changed / status_changed; a
+  // bare version bump records the stale_hit + triggers a rescan but leaves
+  // ranking and output untouched.
+  const stale = freshness.fresh === false;
+  const contentStale =
+    stale &&
+    (freshness.reason === "head_changed" || freshness.reason === "status_changed");
+
+  if (stale) {
+    // Mirror the static-summary path: record the stale read and trigger the
+    // single-flight async rescan so a code prompt also refreshes the index.
+    // Both recordEvent and enqueueRescan are defined to never throw, but guard
+    // anyway — the hook must never throw on the hot path.
+    try {
+      recordEvent(root, "retrieval.stale_hit", { reason: freshness.reason });
+    } catch {}
+    try {
+      require("../lib/freshness").enqueueRescan(root);
+    } catch {}
+  }
+
+  // 4. Merge — pass contentStale so the merge strips structural authority
+  // (graph boost, fusion bonus, def floor) and lets live text dominate.
   let merged;
   try {
-    merged = mergeResults(graphResults, zoektHits, { queryTerms: classification.terms });
+    merged = mergeResults(graphResults, zoektHits, {
+      queryTerms: classification.terms,
+      stale: contentStale,
+    });
   } catch {
     merged = { files: [] };
+  }
+
+  // CONTENT-STALE PHANTOM DROP (T1.2): a graph-only file (graphSignal != null,
+  // zoektHit == null) that no longer exists on disk is a post-checkout phantom
+  // — the graph remembers a path the repo no longer has.  Drop it so we never
+  // assert a structure that points at a moved/deleted file.  A file with a live
+  // zoektHit was just found by text search → it exists → keep it.  We only do
+  // this on contentStale because that's the only signal that files can have
+  // moved; on fresh/version-stale the graph paths are trustworthy.  If this
+  // empties merged.files, the empty-output branch below correctly falls through
+  // to empty_fallback + static summary.
+  if (contentStale && merged && Array.isArray(merged.files)) {
+    merged.files = merged.files.filter((entry) => {
+      if (!entry || entry.graphSignal == null || entry.zoektHit != null) return true;
+      // WHY repo-relative join: merge entries store the path form graph-retrieve
+      // emits, which is repo-relative (e.g. "lib/graph.js"), never absolute.
+      // Guard anyway so an unexpected absolute path isn't double-joined into a
+      // bogus location and wrongly dropped.
+      const rel = String(entry.path || "");
+      if (!rel || path.isAbsolute(rel)) return true;
+      try {
+        return fs.existsSync(path.join(root, rel));
+      } catch {
+        // existsSync shouldn't throw, but if it does, keep the file rather than
+        // silently drop a possibly-valid result.
+        return true;
+      }
+    });
   }
 
   // 5. Format
@@ -288,8 +362,18 @@ async function run() {
     fileCount: mergedFiles.length,
   });
 
+  // CONTENT-STALE MARKER (T1.2): on a content-stale turn with non-empty output,
+  // prepend one honest line INSIDE the block so Claude knows the structural
+  // ranking was suppressed and these are live text matches only.  We do NOT
+  // prepend on fresh or version-only-stale turns (the cried-wolf guard — a
+  // routine scanner/schema bump must stay invisible).  Prepended to the
+  // already-stripped `safe` body so the marker text itself can't smuggle XML.
   const safe = stripUnsafeXmlTags(output);
-  process.stdout.write(`<codebase-retrieval>\n${safe}\n</codebase-retrieval>`);
+  const STALE_MARKER =
+    "⚠ index stale: repo changed since last scan — showing live text matches only, " +
+    "structural ranking suppressed; rescan triggered.\n";
+  const body = contentStale ? STALE_MARKER + safe : safe;
+  process.stdout.write(`<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
   await statusLinePromise;
 }
 

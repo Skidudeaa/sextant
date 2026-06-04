@@ -592,3 +592,110 @@ describe("mergeResults — test-path penalty (Python/Go filename conventions)", 
     assert.equal(fused("pkg/latest.py"), 100, "trailing 'test' without _ not penalized");
   });
 });
+
+// ─── Content-stale gating (T1.2 freshness-gate) ────────────────────────────
+//
+// WHY: After a checkout/edit the hook must stop asserting graph structure that
+// may point at moved/deleted files.  When the caller passes { stale: true }
+// (content change detected), mergeResults neutralizes the three structural
+// levers — GRAPH_BOOST (1.4→1), FUSION_BONUS (1.2→1), and the DEF_SCORE_FLOOR
+// — so a graph-only "definition" contributes its RAW score and live text
+// (zoekt) evidence dominates.  The DEFAULT path (no stale opt) MUST be
+// byte-identical to today: that is the eval no-op guarantee (eval-hook.js calls
+// mergeResults WITHOUT stale, so both eval harnesses are structurally
+// unaffected).
+
+describe("mergeResults — content-stale gating (T1.2)", () => {
+  it("stale:true drops the DEF_SCORE_FLOOR — graph-only def keeps RAW score", () => {
+    // A graph-only exported_symbol def.  Fresh, it would be floored to
+    // 600 + 100*1.4 = 740 (see the canonical-def-floor describe above).
+    // Stale, the floor is skipped AND the 1.4x graph boost is neutralized,
+    // so the def contributes its RAW graph score: 100 * 1 = 100.
+    const graphResults = {
+      files: [
+        { path: "lib/graph.js", hitType: "exported_symbol", matchedTerms: ["loadDb"], fanIn: 5, score: 100 },
+      ],
+    };
+    const result = mergeResults(graphResults, [], { stale: true });
+    assert.equal(result.files[0].path, "lib/graph.js");
+    // FAIL-PRE: before the merge change, stale:true still floored → 740.
+    assert.equal(result.files[0].fusedScore, 100,
+      `stale def must keep raw graph score (100), got ${result.files[0].fusedScore}`);
+    // The graph signal label is preserved (provenance unchanged) — only the
+    // SCORE is de-authoritized.
+    assert.equal(result.files[0].graphSignal, "exported_symbol");
+  });
+
+  it("stale:true lets a higher text-only hit OUTRANK a graph-only def", () => {
+    // The headline behavior: with structure suppressed, a live zoekt hit that
+    // text-search just confirmed exists can now outrank a graph-only def whose
+    // file may have moved/been deleted.  Fresh, the def's 740 floor would bury
+    // the 500 text hit; stale, the def is raw 100 < text 500.
+    const graphResults = {
+      files: [
+        { path: "lib/graph.js", hitType: "exported_symbol", matchedTerms: ["loadDb"], fanIn: 5, score: 100 },
+      ],
+    };
+    const zoektHits = [
+      { path: "lib/live_text.js", lineNumber: 7, line: "loadDb mentioned here", score: 500 },
+    ];
+    // FRESH: def wins (740 > 500) — proves the suppression is what flips it.
+    const fresh = mergeResults(graphResults, zoektHits, { queryTerms: ["loadDb"] });
+    assert.equal(fresh.files[0].path, "lib/graph.js",
+      `fresh: floored def (740) must outrank text hit (500), got ${fresh.files[0].path}`);
+    // STALE: text hit wins (500 > raw 100).
+    const result = mergeResults(graphResults, zoektHits, { queryTerms: ["loadDb"], stale: true });
+    assert.equal(result.files[0].path, "lib/live_text.js",
+      `stale: live text hit (500) must outrank de-authoritized def (100), got ${result.files[0].path}`);
+  });
+
+  it("stale:true neutralizes the fusion bonus (graph+zoekt corroboration)", () => {
+    // A path_match file in BOTH graph and zoekt earns the 1.2x fusion bonus
+    // when fresh.  Stale, both graphBoost and fusionBonus are 1, so the file
+    // is exactly graphScore(raw) + zoektScore with no multiplier.
+    const line = "alpha beta gamma"; // no def-site/exact-symbol trigger
+    const graphResults = {
+      files: [
+        { path: "a.js", hitType: "path_match", matchedTerms: ["alpha"], fanIn: 0, score: 100 },
+      ],
+    };
+    const zoektHits = [{ path: "a.js", lineNumber: 1, line, score: 500 }];
+    const stale = mergeResults(graphResults, zoektHits, { queryTerms: ["alpha"], stale: true });
+    // raw graph 100 + zoekt 500 = 600, NO fusion bonus, NO graph boost.
+    assert.equal(stale.files[0].fusedScore, 600,
+      `stale fused = raw graph + zoekt, no multipliers, got ${stale.files[0].fusedScore}`);
+    // Contrast fresh: (100*1.4 + 500) * 1.2 = 768.
+    const fresh = mergeResults(graphResults, zoektHits, { queryTerms: ["alpha"] });
+    assert.equal(fresh.files[0].fusedScore, 768);
+  });
+
+  it("graph-only files still APPEAR under stale:true (just de-authoritized)", () => {
+    // De-authoritizing the score must NOT drop a graph-only file — the
+    // existsSync-drop (in the hook) is the only thing that removes phantoms.
+    const graphResults = {
+      files: [
+        { path: "lib/graph.js", hitType: "exported_symbol", matchedTerms: ["loadDb"], fanIn: 5, score: 100 },
+      ],
+    };
+    const result = mergeResults(graphResults, [], { stale: true });
+    assert.equal(result.files.length, 1);
+    assert.equal(result.files[0].path, "lib/graph.js");
+  });
+
+  it("NO-OP GUARANTEE: omitting stale (and stale:false) is byte-identical to today", () => {
+    // The eval no-op: eval-hook.js calls mergeResults(g, z, { queryTerms })
+    // with NO stale key.  Assert the default still floors the def (740) — the
+    // same value the canonical-def-floor describe asserts.  stale:false must
+    // also be identical to the absent case.
+    const graphResults = {
+      files: [
+        { path: "lib/graph.js", hitType: "exported_symbol", matchedTerms: ["loadDb"], fanIn: 5, score: 100 },
+      ],
+    };
+    const absent = mergeResults(graphResults, []);
+    const falseStale = mergeResults(graphResults, [], { stale: false });
+    assert.equal(absent.files[0].fusedScore, 740, "default path must still floor the def to 740");
+    assert.equal(falseStale.files[0].fusedScore, 740, "stale:false must match the absent case");
+    assert.equal(absent.files[0].graphSignal, "exported_symbol");
+  });
+});
