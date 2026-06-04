@@ -68,6 +68,14 @@ function summarize(events) {
   let firstTs = null;
   let lastTs = null;
 
+  // T1.3 retrieval-pipeline counters.  classifiedTotal is the denominator for
+  // fire-rate; classifiedRetrieve is the denominator for empty-injection rate.
+  let classifiedTotal = 0;
+  let classifiedRetrieve = 0;
+  let injectedTotal = 0;
+  const injectedBySource = new Map();
+  let emptyFallback = 0;
+
   for (const e of events) {
     const name = e.name || "(unknown)";
     byName.set(name, (byName.get(name) || 0) + 1);
@@ -88,6 +96,21 @@ function summarize(events) {
       scansByTrigger.get(trigger).push(e.durationMs);
       if (e.success) scanSuccessCount++;
       else scanFailureCount++;
+    }
+
+    if (name === "retrieval.classified") {
+      classifiedTotal++;
+      if (e.retrieve === true) classifiedRetrieve++;
+    }
+
+    if (name === "retrieval.injected") {
+      injectedTotal++;
+      const source = e.source || "(unknown)";
+      injectedBySource.set(source, (injectedBySource.get(source) || 0) + 1);
+    }
+
+    if (name === "retrieval.empty_fallback") {
+      emptyFallback++;
     }
   }
 
@@ -134,6 +157,20 @@ function summarize(events) {
       byTrigger: Object.fromEntries(
         Array.from(scansByTrigger.entries()).map(([k, v]) => [k, scanStats(v)])
       ),
+    },
+    // T1.3 retrieval pipeline: the denominator that lets later retrieval
+    // changes prove they worked.  fireRate = classified-as-retrieve / total
+    // classified prompts; emptyInjectionRate = empty-fallbacks / classified-
+    // as-retrieve (a rising rate flags an NL-recall regression like A4);
+    // injectedBySource = graph_merged vs text_only provenance breakdown.
+    retrieval: {
+      classifiedTotal,
+      classifiedRetrieve,
+      fireRate: classifiedTotal ? classifiedRetrieve / classifiedTotal : null,
+      injected: injectedTotal,
+      emptyFallback,
+      emptyInjectionRate: classifiedRetrieve ? emptyFallback / classifiedRetrieve : null,
+      injectedBySource: Object.fromEntries(injectedBySource),
     },
   };
 }
@@ -182,6 +219,29 @@ function printSummary(rootAbs, sum) {
       lines.push(
         `  by trigger=${trigger}: n=${stats.count}, p50=${fmtMs(stats.p50)}, p95=${fmtMs(stats.p95)}, p99=${fmtMs(stats.p99)}`
       );
+    }
+  }
+
+  lines.push("");
+  lines.push("Retrieval pipeline");
+  const r = sum.retrieval;
+  if (r.classifiedTotal === 0) {
+    lines.push(`  No retrieval.classified events recorded yet.`);
+  } else {
+    lines.push(
+      `  classified:     ${r.classifiedTotal}  (${r.classifiedRetrieve} retrieve, fire-rate ${fmtPct(r.classifiedRetrieve, r.classifiedTotal)})`
+    );
+    lines.push(
+      `  injected:       ${r.injected}`
+    );
+    lines.push(
+      `  empty_fallback: ${r.emptyFallback}  (${fmtPct(r.emptyFallback, r.classifiedRetrieve)} of retrieve-classified)`
+    );
+    if (Object.keys(r.injectedBySource).length) {
+      lines.push("  injected source:");
+      for (const [src, c] of Object.entries(r.injectedBySource).sort((a, b) => b[1] - a[1])) {
+        lines.push(`    - ${src.padEnd(28)} ${c}  (${fmtPct(c, r.injected)})`);
+      }
     }
   }
 

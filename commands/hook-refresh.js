@@ -7,6 +7,7 @@ const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, applyFreshnessGate 
 const { shouldRetrieve, hasIdentifierShape } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
 const { formatRetrieval } = require("../lib/format-retrieval");
+const { recordEvent } = require("../lib/telemetry");
 
 // ARCHITECTURE: Query-aware UserPromptSubmit hook.
 //
@@ -126,10 +127,26 @@ async function run() {
   try {
     classification = shouldRetrieve(prompt);
   } catch {
-    // Classifier failed — fall back to static summary
+    // Classifier failed — fall back to static summary.  No telemetry here:
+    // the classifier threw, so there's no classification decision to record;
+    // this is the degraded path, distinct from a deliberate retrieve:false.
     await injectStaticSummary(root, data);
     return;
   }
+
+  // TELEMETRY (T1.3): record the classifier decision for BOTH branches —
+  // this is the denominator that makes classifier fire-rate and empty-
+  // injection rate measurable. Emitted exactly once per classified prompt,
+  // before either branch diverges, so it covers retrieve:true and
+  // retrieve:false symmetrically. recordEvent never throws (lib/telemetry.js
+  // swallows all I/O errors), so it's safe on the hook hot path.  We
+  // deliberately do NOT emit any freshness/stale signal here — that lane is
+  // owned by the freshness gate (T1.2).
+  recordEvent(root, "retrieval.classified", {
+    retrieve: classification.retrieve === true,
+    confidence: typeof classification.confidence === "number" ? classification.confidence : 0,
+    termCount: Array.isArray(classification.terms) ? classification.terms.length : 0,
+  });
 
   if (!classification.retrieve) {
     // Non-code prompt — inject static summary if changed
@@ -207,7 +224,13 @@ async function run() {
   }
 
   if (!output || !output.trim()) {
-    // No results from either source — fall back to static summary
+    // No results from either source — fall back to static summary.
+    // TELEMETRY (T1.3): this is the empty-injection numerator — a prompt the
+    // classifier flagged for retrieval (retrieve:true) that yielded nothing,
+    // so the static summary is shown instead. Pairing this count against the
+    // retrieval.classified{retrieve:true} count gives the empty-injection rate
+    // that surfaces NL-recall regressions (cf. the A4 gap).
+    recordEvent(root, "retrieval.empty_fallback", {});
     await injectStaticSummary(root, data);
     await statusLinePromise;
     return;
@@ -245,6 +268,25 @@ async function run() {
     const markerPath = path.join(root, ".planning", "intel", ".last_retrieval");
     fs.writeFileSync(markerPath, `${fileCount}\n${Math.floor(Date.now() / 1000)}\n`);
   } catch {}
+
+  // TELEMETRY (T1.3): a non-empty <codebase-retrieval> block is being
+  // injected this turn (not a dedupe skip, not a static fallback). Record the
+  // injection with its provenance.
+  //
+  // SOURCE-LABEL RULE: inspect the FINAL merged+ranked files. mergeResults
+  // tags each result with `graphSignal` — a non-null hit-type string
+  // (exported_symbol / swift_decl_type / reexport_chain / path_match) when the
+  // file came from the graph lane, and null when it was zoekt/text-only. If
+  // ANY injected file carries a non-null graphSignal, the graph lane
+  // contributed to what we're showing → 'graph_merged'; otherwise every file
+  // is a pure text hit → 'text_only'. This mirrors merge-results.js, where
+  // graphSignal is the single provenance marker on a merged entry.
+  const mergedFiles = (merged && Array.isArray(merged.files)) ? merged.files : [];
+  const fromGraph = mergedFiles.some((f) => f && f.graphSignal != null);
+  recordEvent(root, "retrieval.injected", {
+    source: fromGraph ? "graph_merged" : "text_only",
+    fileCount: mergedFiles.length,
+  });
 
   const safe = stripUnsafeXmlTags(output);
   process.stdout.write(`<codebase-retrieval>\n${safe}\n</codebase-retrieval>`);
