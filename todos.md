@@ -76,9 +76,10 @@ review-found honesty-leak cluster is on branch `feat/hookpath-honesty-and-swift-
 - [x] [007 T1.4] package.json `scripts` → Commands block (xs) — SHIPPED on branch
   `feat/manifest-commands-block` (`224f6c2`); `commandsFromPackageScripts`, `### Commands` after
   Signals, lifecycle-first, N-cap 8, fresh-body-only. Unit 720/720, self-eval byte-identical.
-- [ ] [007 T1.4 cont.] AGENTS.md / CLAUDE.md / .cursorrules presence line (xs, inside detectSignals,
-  high line-order) + `.env.example` required-env keys (small, keys-only regex, route through
-  gitignoreFilter) — the rest of the declared-manifest continuation of T1.1.
+- [x] [007 T1.4 cont.] AGENTS.md/CLAUDE.md/.cursorrules presence (`Conventions:` in Signals) +
+  `.env.example` required-env keys (keys-only, git-ls-files tracked-gated for freshness honesty) —
+  SHIPPED (`7dfde15`) on `feat/manifest-commands-block`. Declared-manifest cluster COMPLETE. Unit
+  724/724, self-eval byte-identical, secret-value-never-leaks locked.
 - [ ] [007 tier-1] Makefile Commands block, schema-file anchors, resolution-by-kind breakdown,
   public-API outline (cheap surfacing of already-graph-resident data). See doc for per-item gates.
 - [ ] [007 tier-1, SCHEMA_VERSION] Co-change "also changed with" lane in sextant_explain — supersedes
