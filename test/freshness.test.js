@@ -288,6 +288,25 @@ describe("freshness.checkFreshness: contentChanged (T1.2 follow-up)", () => {
       fs.rmSync(noScanDir, { recursive: true, force: true });
     }
   });
+
+  it("db_load_failed (unreadable graph.db) reports contentChanged true — guards the T1.2 corrupt-db path", async () => {
+    // The branch the test above NAMED but never exercised. Force graph.loadDb to
+    // throw by replacing graph.db with a DIRECTORY (readFileSync → EISDIR). The
+    // contract is load-bearing: on a corrupt db the hook's content-stale path
+    // must engage (contentChanged true → structural suppression), not silently
+    // treat the turn as fresh and trust an unverifiable graph.
+    const dir = makeRepo("contentchanged-dbfail");
+    try {
+      const dbPath = graph.graphDbPath(dir);
+      fs.mkdirSync(dbPath, { recursive: true }); // a directory where a file is expected
+      const r = await freshness.checkFreshness(dir);
+      assert.equal(r.reason, "db_load_failed");
+      assert.equal(r.fresh, false);
+      assert.equal(r.contentChanged, true); // FAIL-pre if this branch drops contentChanged
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("freshness.enqueueRescan: atomic single-flight", () => {
