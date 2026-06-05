@@ -394,3 +394,79 @@ describe("telemetry summarize — retrieval stale aggregation (T1.2)", () => {
     assert.deepEqual(r.staleReasons, {});
   });
 });
+
+// ─── (iv) the STALE marker survives the per-session dedupe (T1.2 leak fix) ──
+//
+// The honesty bug: the dedupe hash was computed on the formatted body BEFORE the
+// STALE marker is prepended, so a content-stale turn whose surviving body matched
+// a PRIOR fresh turn in the same session hit the early-return and NEVER emitted
+// the marker — Claude silently kept the prior, fresh-framed (un-marked) block.
+// Two compounding fixes guarantee the contract: textOnly strips graph provenance
+// on the stale turn (so its body differs), AND the hash is namespaced by freshness
+// state ("fresh:"/"stale:") so a stale turn can never dedupe against a fresh one.
+//
+// FAIL-pre (HEAD without these fixes): turn 2's body == turn 1's body, hash
+// collides, the marker prepend is unreachable → turn 2 emits NOTHING.
+describe("hook-refresh freshness (T1.2) — STALE marker survives same-session dedupe", () => {
+  let dir, restoreShim;
+  before(async () => {
+    restoreShim = installSextantShim();
+    dir = await buildFixture("dedupe");
+    await setScanState(dir, "fresh");
+  });
+  after(() => {
+    if (restoreShim) restoreShim();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("turn 1 fresh (no marker), turn 2 content-stale STILL emits the marker (not deduped away)", () => {
+    const q = "where is resolveImportPath defined";
+    // Turn 1 — fresh: a normal block, no marker, writes the session dedupe hash.
+    const t1 = runHook(dir, q);
+    assert.ok(t1.stdout.includes("<codebase-retrieval>"), `turn1 expected a block, got:\n${t1.stdout}`);
+    assert.doesNotMatch(t1.stdout, MARKER_RE, "turn1 (fresh) must not carry the marker");
+
+    // Diverge HEAD → turn 2 is content-stale, same session + same query.
+    gitCommitFile(dir, "unrelated.js", "module.exports = 9;\n");
+
+    const t2 = runHook(dir, q);
+    assert.ok(
+      t2.stdout.includes("<codebase-retrieval>"),
+      `turn2 (content-stale) must NOT be deduped away — it must re-emit the block, got:\n${t2.stdout}`
+    );
+    assert.match(
+      t2.stdout,
+      MARKER_RE,
+      `turn2 (content-stale) MUST carry the STALE marker the whole feature exists to deliver, got:\n${t2.stdout}`
+    );
+  });
+});
+
+// ─── (v) within-state dedupe still works (no regression from the namespace) ─
+describe("hook-refresh freshness (T1.2) — identical same-state turns still dedupe", () => {
+  let dir, restoreShim;
+  before(async () => {
+    restoreShim = installSextantShim();
+    dir = await buildFixture("dedupe-same");
+    await setScanState(dir, "fresh");
+    // Both turns are content-stale and identical → the second SHOULD dedupe.
+    gitCommitFile(dir, "unrelated.js", "module.exports = 10;\n");
+  });
+  after(() => {
+    if (restoreShim) restoreShim();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("a second identical content-stale turn is deduped (emits nothing) — namespacing didn't break within-state dedupe", () => {
+    const q = "where is resolveImportPath defined";
+    const t1 = runHook(dir, q);
+    assert.ok(t1.stdout.includes("<codebase-retrieval>"), "turn1 stale block expected");
+    assert.match(t1.stdout, MARKER_RE, "turn1 stale marker expected");
+
+    const t2 = runHook(dir, q);
+    assert.ok(
+      !t2.stdout.includes("<codebase-retrieval>"),
+      `an identical same-state turn must dedupe to silence, got:\n${t2.stdout}`
+    );
+  });
+});

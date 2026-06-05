@@ -302,10 +302,18 @@ async function run() {
   }
 
   // 5. Format
+  // WHY textOnly on contentStale (T1.2 honesty leak fix): a content-stale turn
+  // prepends the STALE marker ("structural ranking suppressed; live text matches
+  // only") — but the formatter would otherwise still render graph-derived
+  // provenance ("exports X", "defines X", "fan-in: N") on each surviving line,
+  // directly contradicting the marker under the exact header that disclaims
+  // structure. textOnly strips every graph label + fan-in, leaving only the live
+  // zoekt excerpt, so the block is honest about what it is. Fresh/version-only
+  // turns are unaffected (contentStale=false → byte-identical output).
   const maxChars = classification.confidence >= 0.7 ? 1000 : 600;
   let output = "";
   try {
-    output = formatRetrieval(merged, { maxChars });
+    output = formatRetrieval(merged, { maxChars, textOnly: contentStale });
   } catch {
     output = "";
   }
@@ -333,7 +341,19 @@ async function run() {
     `.last_injected_hash.retrieval.${sessionKey}`
   );
 
-  const h = crypto.createHash("sha256").update(output).digest("hex");
+  // WHY the contentStale prefix (T1.2 honesty leak fix): the STALE marker is
+  // prepended to the body AFTER this point (see below), so hashing `output`
+  // alone means a content-stale turn whose surviving text-only body is
+  // byte-identical to a PRIOR fresh turn in the same session would hash-match,
+  // hit the early-return, and NEVER emit the marker — Claude silently keeps the
+  // prior un-marked, fresh-framed block. Folding contentStale into the hash
+  // input puts fresh and stale turns in disjoint hash namespaces so a stale turn
+  // can never dedupe away against a fresh one (and vice-versa). Within a single
+  // freshness state, identical bodies still dedupe as before.
+  const h = crypto
+    .createHash("sha256")
+    .update((contentStale ? "stale:" : "fresh:") + output)
+    .digest("hex");
   const last = tryReadFile(cachePath);
 
   if (last === h) {
