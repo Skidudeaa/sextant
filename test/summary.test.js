@@ -347,3 +347,87 @@ describe("summary ### Commands block (007 T1.4)", () => {
     assert.ok(!md.includes("### Commands"), "must not emit an empty Commands block");
   });
 });
+
+// ─── Convention-file presence in Signals (007 T1.4) ────────────────────────
+
+describe("detectSignals conventions (007 T1.4)", () => {
+  const { detectSignals } = require("../lib/summary");
+
+  it("flags present convention files inside Signals (FAIL-pre: no Conventions signal)", () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-conv-"));
+    try {
+      fs.writeFileSync(path.join(d, "AGENTS.md"), "x");
+      fs.writeFileSync(path.join(d, "CLAUDE.md"), "x");
+      const { signals } = detectSignals(d);
+      assert.ok(
+        signals.includes("Conventions: AGENTS.md, CLAUDE.md"),
+        `expected a Conventions signal; got ${JSON.stringify(signals)}`
+      );
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("no Conventions signal when none present (degrade quietly)", () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-conv-none-"));
+    try {
+      const { signals } = detectSignals(d);
+      assert.ok(!signals.some((s) => s.startsWith("Conventions:")), JSON.stringify(signals));
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── Required env keys from a tracked .env.example (007 T1.4) ───────────────
+
+describe("requiredEnvKeys + ### Required env (007 T1.4)", () => {
+  const { execSync } = require("child_process");
+  const { requiredEnvKeys } = require("../lib/summary");
+  let tmpDir, db;
+
+  before(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-summary-env-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+    execSync("git init -q", { cwd: tmpDir });
+    execSync('git config user.email "t@e.com"', { cwd: tmpDir });
+    execSync('git config user.name "T"', { cwd: tmpDir });
+    execSync("git config commit.gpgsign false", { cwd: tmpDir });
+    db = await graphMod.loadDb(tmpDir);
+  });
+  after(() => { if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it("surfaces keys from a TRACKED template, never the value; ignores an UNTRACKED template", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, ".env.example"),
+      "# config\nexport JWT_SECRET=supersekret\nDATABASE_URL=postgres://localhost/db\nPORT=3000\n# comment\n"
+    );
+    execSync("git add .env.example", { cwd: tmpDir });
+    execSync("git commit -q -m env", { cwd: tmpDir });
+    // An UNTRACKED template must NOT surface — the freshness-honesty guard:
+    // only tracked files move the git-status fingerprint the gate watches.
+    fs.writeFileSync(path.join(tmpDir, ".env.sample"), "UNTRACKED_KEY=zzz\n");
+
+    const keys = requiredEnvKeys(tmpDir);
+    assert.deepEqual(keys, ["JWT_SECRET", "DATABASE_URL", "PORT"]);
+    assert.ok(!keys.includes("UNTRACKED_KEY"), "untracked template must not surface");
+
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Required env"), `expected a Required env block; got:\n${md}`);
+    assert.ok(md.includes("`JWT_SECRET`"), md);
+    assert.ok(md.includes("`DATABASE_URL`"), md);
+    // SECURITY: the value is structurally never read.
+    assert.ok(!md.includes("supersekret"), "the secret VALUE must NEVER appear in the summary");
+  });
+
+  it("returns [] outside a git repo / with no tracked template (degrade quietly)", () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-noenv-"));
+    try {
+      fs.writeFileSync(path.join(d, ".env.example"), "X=1\n"); // present but NOT git-tracked
+      assert.deepEqual(requiredEnvKeys(d), []);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+});
