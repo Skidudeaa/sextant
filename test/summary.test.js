@@ -266,3 +266,84 @@ describe("summary XML escaping", () => {
     }
   });
 });
+
+// ─── Commands block from package.json scripts (007 T1.4) ───────────────────
+
+describe("commandsFromPackageScripts (007 T1.4)", () => {
+  const { commandsFromPackageScripts } = require("../lib/summary");
+
+  it("returns [] for missing/malformed scripts (degrade quietly)", () => {
+    assert.deepEqual(commandsFromPackageScripts(null), []);
+    assert.deepEqual(commandsFromPackageScripts({ name: "x" }), []);
+    assert.deepEqual(commandsFromPackageScripts({ scripts: [] }), []);
+    assert.deepEqual(commandsFromPackageScripts({ scripts: { test: "" } }), []); // blank command dropped
+    assert.deepEqual(commandsFromPackageScripts({ scripts: { test: 42 } }), []); // non-string dropped
+  });
+
+  it("sorts canonical lifecycle names first, ties keep declaration order", () => {
+    const cmds = commandsFromPackageScripts({
+      scripts: { "z:custom": "z", build: "tsc", test: "node --test", "a:custom": "a", lint: "eslint ." },
+    });
+    const names = cmds.map((c) => c.name);
+    // build/test/lint are lifecycle → ahead of the custom scripts; custom scripts
+    // keep their declaration order (z:custom before a:custom).
+    assert.deepEqual(names, ["build", "test", "lint", "z:custom", "a:custom"]);
+  });
+});
+
+describe("summary ### Commands block (007 T1.4)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-summary-cmds-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+    db = await graphMod.loadDb(tmpDir);
+  });
+  after(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("surfaces package.json scripts as a Commands block (FAIL-pre: no such block)", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "package.json"),
+      JSON.stringify({
+        name: "demo",
+        scripts: { build: "tsc -p .", test: "node --test", lint: "eslint ." },
+      })
+    );
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    // FAIL-pre: there is no "### Commands" block at all (pkg.scripts discarded).
+    assert.ok(md.includes("### Commands"), `expected a Commands block; got:\n${md}`);
+    assert.ok(md.includes("`build` — tsc -p ."), md);
+    assert.ok(md.includes("`test` — node --test"), md);
+    assert.ok(md.includes("`lint` — eslint ."), md);
+    // Placed high (right after Signals, before Module types) so it survives the clamp.
+    const cmdIdx = md.indexOf("### Commands");
+    const typesIdx = md.indexOf("### Module types");
+    if (typesIdx !== -1) assert.ok(cmdIdx < typesIdx, "Commands must precede Module types");
+  });
+
+  it("N-caps long script lists and truncates long command bodies", () => {
+    const scripts = {};
+    for (let i = 0; i < 12; i++) scripts[`task${i}`] = `echo running a fairly long command number ${i} with extra words`;
+    fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ name: "many", scripts }));
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Commands"));
+    assert.ok(/…and 4 more/.test(md), `expected "…and 4 more" (12 scripts, cap 8); got:\n${md}`);
+    // No single command line should be excessively long (truncated to ~50 chars).
+    const cmdLines = md.split("\n").filter((l) => /^- `task\d+` —/.test(l));
+    assert.ok(cmdLines.length === 8, `expected 8 command lines, got ${cmdLines.length}`);
+    for (const l of cmdLines) assert.ok(l.length < 80, `command line too long: ${l}`);
+  });
+
+  it("no Commands block when package.json has no scripts (degrade quietly)", () => {
+    fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ name: "noscripts" }));
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(!md.includes("### Commands"), "must not emit an empty Commands block");
+  });
+});
