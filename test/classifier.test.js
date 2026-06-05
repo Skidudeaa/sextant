@@ -246,6 +246,19 @@ describe("shouldRetrieve — early exits", () => {
     assert.equal(shouldRetrieve("test").retrieve, false);
   });
 
+  it("bare comment marker → skip (all-caps initialism must not fire retrieval)", () => {
+    // FAIL-pre: hasIdentifierShape("TODO") is true via the initialism rule, so
+    // a lone marker scored +3 → retrieve:true and fired a wasted round-trip.
+    for (const m of ["TODO", "FIXME", "HACK", "XXX", "NOTE", "WIP", "TBD"]) {
+      assert.equal(shouldRetrieve(m).retrieve, false, `${m} should not retrieve`);
+    }
+    // Trailing colon is the common note form.
+    assert.equal(shouldRetrieve("TODO:").retrieve, false);
+    assert.equal(shouldRetrieve("fixme").retrieve, false);
+    // Guard: a marker WITH a real target is still a normal query (not over-suppressed).
+    assert.equal(shouldRetrieve("find the TODO in parser.js").retrieve, true);
+  });
+
   it("single identifier word → retrieve", () => {
     // NOTE: Single camelCase word IS an identifier — should trigger retrieval
     const r = shouldRetrieve("rerankFiles");
