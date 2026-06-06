@@ -63,6 +63,7 @@ function checkClaudeHooks(root) {
     exists: true,
     sessionStart: hasSextantHook(data, "SessionStart"),
     userPromptSubmit: hasSextantHook(data, "UserPromptSubmit"),
+    postToolUse: hasSextantHook(data, "PostToolUse"),
   };
 }
 
@@ -79,10 +80,11 @@ function printStatus(root, mcp, hooks) {
   }
   if (!hooks.exists) {
     lines.push(`  ⚠ .claude/settings.json not found — Claude Code hooks NOT configured`);
-  } else if (!hooks.sessionStart || !hooks.userPromptSubmit) {
+  } else if (!hooks.sessionStart || !hooks.userPromptSubmit || !hooks.postToolUse) {
     const missing = [];
     if (!hooks.sessionStart) missing.push("SessionStart");
     if (!hooks.userPromptSubmit) missing.push("UserPromptSubmit");
+    if (!hooks.postToolUse) missing.push("PostToolUse");
     lines.push(`  ⚠ Missing Claude Code hook(s): ${missing.join(", ")}`);
   } else {
     lines.push(`  ✓ Claude Code hooks configured`);
@@ -90,12 +92,13 @@ function printStatus(root, mcp, hooks) {
   lines.push("");
   lines.push("Next:");
   lines.push("  sextant scan --force        # build the dependency graph");
-  if (!hooks.exists || !hooks.sessionStart || !hooks.userPromptSubmit) {
+  if (!hooks.exists || !hooks.sessionStart || !hooks.userPromptSubmit || !hooks.postToolUse) {
     lines.push("");
     lines.push("To wire the Claude Code hooks, add to .claude/settings.json:");
     lines.push('  "hooks": {');
     lines.push('    "SessionStart":     [{ "matcher": "*", "hooks": [{ "type": "command", "command": "sextant hook sessionstart" }] }],');
-    lines.push('    "UserPromptSubmit": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "sextant hook refresh"       }] }]');
+    lines.push('    "UserPromptSubmit": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "sextant hook refresh"       }] }],');
+    lines.push('    "PostToolUse":      [{ "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "sextant hook posttooluse" }] }]');
     lines.push("  }");
   }
   process.stdout.write(lines.join("\n") + "\n");

@@ -84,6 +84,16 @@ function summarize(events) {
   let retrievalStaleHits = 0;
   const retrievalStaleByReason = new Map();
 
+  // 009 #1 outcome substrate.  path_hit = the agent opened/edited a file
+  // retrieval surfaced (attributed by the signal that surfaced it); path_miss =
+  // it opened a file we did NOT surface (after an injection).  openPrecision =
+  // hits / (hits + misses).  HONEST FRAMING: this is precision-flavored and
+  // baseline-pending — there is no injection-OFF counterfactual yet, so it is a
+  // wired-loop signal, not a proven-benefit number.
+  let pathHits = 0;
+  let pathMisses = 0;
+  const pathHitsBySource = new Map();
+
   for (const e of events) {
     const name = e.name || "(unknown)";
     byName.set(name, (byName.get(name) || 0) + 1);
@@ -125,6 +135,16 @@ function summarize(events) {
       retrievalStaleHits++;
       const reason = e.reason || "(unknown)";
       retrievalStaleByReason.set(reason, (retrievalStaleByReason.get(reason) || 0) + 1);
+    }
+
+    if (name === "retrieval.path_hit") {
+      pathHits++;
+      const source = e.source || "(unknown)";
+      pathHitsBySource.set(source, (pathHitsBySource.get(source) || 0) + 1);
+    }
+
+    if (name === "retrieval.path_miss") {
+      pathMisses++;
     }
   }
 
@@ -194,6 +214,13 @@ function summarize(events) {
       staleHits: retrievalStaleHits,
       staleRate: classifiedRetrieve ? retrievalStaleHits / classifiedRetrieve : null,
       staleReasons: Object.fromEntries(retrievalStaleByReason),
+      // 009 #1 outcome substrate: did the agent open/edit what we surfaced?
+      // openPrecision is precision-flavored + baseline-pending (no injection-OFF
+      // arm yet) — a wired-loop signal, not a proven-benefit number.
+      pathHits,
+      pathMisses,
+      openPrecision: pathHits + pathMisses ? pathHits / (pathHits + pathMisses) : null,
+      pathHitsBySource: Object.fromEntries(pathHitsBySource),
     },
   };
 }
@@ -277,6 +304,35 @@ function printSummary(rootAbs, sum) {
     }
   }
 
+  // 009 #1 outcome substrate — did the agent open what we surfaced?
+  // WHY outside the classifiedTotal branch (VH-1): path_hit/path_miss out-volume
+  // classified events, so a rotation can push the lone classified event into
+  // .old and leave a current window that is all path events. Gating this on
+  // classifiedTotal hid open-precision from the default audit EXACTLY when volume
+  // was high. Render it whenever there are scored opens, independent of classified.
+  if (r.pathHits + r.pathMisses > 0) {
+    // WHY the full caveat (VH-2): "open-precision: 7%" invites a "retrieval is
+    // 93% wrong" misread. It is NOT that — misses include opens of files we never
+    // surfaced (precision-flavored, not coverage), AND there is no injection-OFF
+    // counterfactual yet. Both halves must travel to the surface that's read.
+    lines.push("");
+    lines.push("Outcome substrate (did the agent open what we surfaced?)");
+    lines.push(
+      `  open-precision: ${fmtPct(r.pathHits, r.pathHits + r.pathMisses)}  ` +
+      `(${r.pathHits} hit / ${r.pathHits + r.pathMisses} scored opens)`
+    );
+    lines.push(
+      `  caveat: baseline pending (no injection-OFF arm yet) AND precision-flavored — ` +
+      `misses include opens of files we never surfaced, NOT coverage; a low % is not "retrieval is wrong."`
+    );
+    if (Object.keys(r.pathHitsBySource).length) {
+      lines.push("  path_hit by source:");
+      for (const [src, c] of Object.entries(r.pathHitsBySource).sort((a, b) => b[1] - a[1])) {
+        lines.push(`    - ${src.padEnd(28)} ${c}  (${fmtPct(c, r.pathHits)})`);
+      }
+    }
+  }
+
   lines.push("");
   lines.push("All event types");
   for (const [name, count] of Object.entries(sum.byName).sort((a, b) => b[1] - a[1])) {
@@ -313,4 +369,4 @@ async function run(ctx) {
   process.stdout.write(printSummary(root, summary) + "\n");
 }
 
-module.exports = { run, summarize, percentile };
+module.exports = { run, summarize, percentile, printSummary };

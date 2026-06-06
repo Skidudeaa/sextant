@@ -20,7 +20,11 @@ const COMMANDS_DIR = path.join(__dirname, "..", "commands");
 // Hooks legitimately use process.cwd() — Claude Code sets cwd on invocation
 // and the hook commands don't accept CLI flags. Anything else using cwd is
 // the bug shape we're guarding against.
-const HOOK_FILES = new Set(["hook-refresh.js", "hook-sessionstart.js"]);
+const HOOK_FILES = new Set([
+  "hook-refresh.js",
+  "hook-sessionstart.js",
+  "hook-posttooluse.js",
+]);
 
 describe("command conventions", () => {
   it("non-hook commands must not use process.cwd() to resolve their root", () => {

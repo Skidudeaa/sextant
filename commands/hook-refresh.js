@@ -6,8 +6,26 @@ const { deriveSessionKey } = require("../lib/session");
 const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, applyFreshnessGate } = require("../lib/cli");
 const { shouldRetrieve, hasIdentifierShape } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
-const { formatRetrieval } = require("../lib/format-retrieval");
+const { formatRetrievalDetailed } = require("../lib/format-retrieval");
 const { recordEvent } = require("../lib/telemetry");
+
+// OUTCOME SUBSTRATE (009 #1): build the {path, source} set persisted per session
+// so a later PostToolUse hook can score whether the agent opened/edited what
+// retrieval surfaced. source = the signal that SURFACED the file (graphSignal:
+// exported_symbol / swift_decl_type / reexport_chain / path_match, or text_only
+// for a zoekt/text-only hit) so opens are attributable PER SIGNAL — a single
+// un-attributable aggregate was the explicit 009 correction. We record the
+// RETRIEVAL reason (why it entered the set), independent of the content-stale
+// display strip (that strip governs what Claude SEES; this governs what we
+// SURFACED). Exported for unit testing the attribution without a live hook run.
+function buildInjectedPaths(includedFiles) {
+  const out = [];
+  for (const f of includedFiles || []) {
+    if (!f || typeof f.path !== "string") continue;
+    out.push({ path: f.path, source: f.graphSignal || "text_only" });
+  }
+  return out;
+}
 
 // ARCHITECTURE: Query-aware UserPromptSubmit hook.
 //
@@ -312,10 +330,17 @@ async function run() {
   // turns are unaffected (contentStale=false → byte-identical output).
   const maxChars = classification.confidence >= 0.7 ? 1000 : 600;
   let output = "";
+  // injectedFiles = the subset actually RENDERED into the block (the prefix kept
+  // before the maxChars cap), so the persisted outcome set can't claim a file the
+  // cap truncated out.  See formatRetrievalDetailed.
+  let injectedFiles = [];
   try {
-    output = formatRetrieval(merged, { maxChars, textOnly: contentStale });
+    const detailed = formatRetrievalDetailed(merged, { maxChars, textOnly: contentStale });
+    output = detailed.text;
+    injectedFiles = detailed.files;
   } catch {
     output = "";
+    injectedFiles = [];
   }
 
   if (!output || !output.trim()) {
@@ -376,6 +401,30 @@ async function run() {
     fs.writeFileSync(markerPath, `${fileCount}\n${Math.floor(Date.now() / 1000)}\n`);
   } catch {}
 
+  // OUTCOME SUBSTRATE (009 #1): persist the per-session set of injected paths
+  // (each tagged with the signal that surfaced it) so the PostToolUse hook can
+  // later score whether the agent opened/edited what we surfaced. Per-session
+  // file, OVERWRITTEN each injection so a subsequent open is always compared
+  // against the MOST RECENT surfaced set. Separate namespace from the dedupe-hash
+  // file (.last_injected_hash.*) and the statusline marker (.last_retrieval).
+  // Best-effort; a failed write just means that turn's opens go unscored.
+  try {
+    const injPathsFile = path.join(
+      root,
+      ".planning",
+      "intel",
+      `.last_injected_paths.retrieval.${sessionKey}`
+    );
+    fs.writeFileSync(
+      injPathsFile,
+      JSON.stringify({
+        ts: Date.now(),
+        stale: contentStale === true,
+        paths: buildInjectedPaths(injectedFiles),
+      })
+    );
+  } catch {}
+
   // TELEMETRY (T1.3): a non-empty <codebase-retrieval> block is being
   // injected this turn (not a dedupe skip, not a static fallback). Record the
   // injection with its provenance.
@@ -410,4 +459,4 @@ async function run() {
   await statusLinePromise;
 }
 
-module.exports = { run };
+module.exports = { run, buildInjectedPaths };

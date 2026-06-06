@@ -117,10 +117,17 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
       - `freshness.stale_hit { reason, rescanState }` — every stale read
       - `freshness.blackout_turn { reason }` — every minimal-body emission
       - `scan.completed { durationMs, success, trigger, pruneMissing, forceReindex, error? }` — every scan exit (success or failure); `trigger` is `freshness_gate` or `manual` based on the `SEXTANT_RESCAN_TRIGGER` env var
+      - `retrieval.classified { retrieve, confidence, termCount }` / `retrieval.injected { source, fileCount }` / `retrieval.empty_fallback {}` / `retrieval.stale_hit { reason, contentChanged }` — the T1.3/T1.2 hook-pipeline counters (fire-rate, empty-injection rate, provenance, retrieval-lane stale rate)
+      - `retrieval.path_hit { source, tool }` / `retrieval.path_miss { tool }` — the 009 #1 outcome substrate: did the agent open/edit a file retrieval surfaced? Emitted by the PostToolUse hook (component 14). `source` attributes the hit to the signal that surfaced the file (exported_symbol / swift_decl_type / reexport_chain / path_match / text_only) so opens are measurable per-signal
     - Bounded growth: rotates to `.old` past `TELEMETRY_MAX_BYTES` (1 MiB)
     - Never throws; failures are silently absorbed (telemetry must never break the hook)
-    - Audit surface: `sextant telemetry [--json | --tail N] [--include-old]` — prints stale rate, stale-reason breakdown, scan duration percentiles (p50/p95/p99) split by trigger, success rate, event counts by name, observation window
+    - Audit surface: `sextant telemetry [--json | --tail N] [--include-old]` — prints stale rate, stale-reason breakdown, scan duration percentiles (p50/p95/p99) split by trigger, success rate, retrieval fire/empty-injection rates, **open-precision (path_hit / scored opens) + per-source breakdown**, event counts by name, observation window
     - Dataset feeds the future Option-5 adaptive sync/async decision (per-repo p95 scan duration drives whether sync rescan is safe)
+
+14. **Outcome substrate** (`commands/hook-posttooluse.js`) — the PostToolUse half of the benefit-proof loop (009 #1)
+    - The retrieval hook persists the per-session set of injected paths (each tagged with the signal that surfaced it) to `.planning/intel/.last_injected_paths.retrieval.<sessionKey>`. This hook fires after a file-targeting tool (Read/Edit/Write/MultiEdit/NotebookEdit), normalizes the touched path to repo-relative, and emits `retrieval.path_hit { source }` if it's in the most-recent injected set, else `retrieval.path_miss`. Turns "did the agent use what we surfaced?" from unanswerable into a logged open-rate
+    - **Out-of-band**: writes NOTHING to stdout (a PostToolUse hook's stdout can reach the transcript/context) → zero context-budget cost. Never throws
+    - **v1 = "loop wired, baseline pending"**: open-precision is a correlation with no counterfactual (the agent often opens the canonical file regardless of injection). The per-turn injection-OFF holdback arm that makes it a real benefit number is the explicit follow-up; this ships the loop + the per-source attribution it needs. `path_miss` includes opens of unrelated files (after an injection) — precision-flavored, not coverage
 
 ### Visibility Model (CRITICAL — read this)
 
@@ -153,20 +160,21 @@ When something needs action: `◆ 60% · 5 files · ⏸ off  ⚠ run: sextant wa
 `bin/intel.js` is a slim ~110-line dispatcher. All command logic lives in `commands/*.js`:
 - Each file exports `{ run }` where `run` is `async function run(ctx)`
 - `ctx = { argv, roots, root }` — commands import `flag(argv, name)` and `hasFlag(argv, name)` from `lib/cli.js`, calling them with `process.argv`
-- Hook commands (`hook-sessionstart.js`, `hook-refresh.js`) bypass `rootsFromArgs` and use `process.cwd()`
+- Hook commands (`hook-sessionstart.js`, `hook-refresh.js`, `hook-posttooluse.js`) bypass `rootsFromArgs` and use `process.cwd()` (whitelisted in `test/command-conventions.test.js`)
 - `scan.js` handles both `scan` and `rescan` (checks `ctx.argv[0]` for `pruneMissing`)
 - Shared utilities in `lib/cli.js`: `stripUnsafeXmlTags`, `getWatcherStatus`, `renderBanner`, `renderStatusLine`, `readStdinJson`, etc.
 - `sextant mcp` launches the MCP server (`mcp/server.js`) over stdio for Claude Code integration
 
 ### Injection into Claude Code
 
-Two hooks are automatically wired into `.claude/settings.json` by `sextant init` (merging into any existing settings, preserving other MCP servers and hook entries):
+Three hooks are automatically wired into `.claude/settings.json` by `sextant init` (merging into any existing settings, preserving other MCP servers and hook entries). The merge is idempotent and self-deploying — `intel.init` runs on every prompt, so an existing install picks up a newly-added hook without a manual re-init:
 - **SessionStart**: `sextant hook sessionstart` — injects static summary + auto-starts watcher (unchanged)
 - **UserPromptSubmit**: `sextant hook refresh` — query-aware retrieval pipeline:
   1. Classifies prompt via `shouldRetrieve()` (<1ms)
   2. If code-relevant: runs graph retrieval + Zoekt HTTP search in parallel (35-70ms)
-  3. Merges results, formats as compact markdown, dedupes via SHA-256, injects as `<codebase-retrieval>`
+  3. Merges results, formats as compact markdown, dedupes via SHA-256, injects as `<codebase-retrieval>`; persists the injected `{path, source}` set for the outcome substrate
   4. If not code-relevant or no results: falls back to static summary injection as `<codebase-intelligence>` (v1 behavior)
+- **PostToolUse** (matcher `Read|Edit|Write|MultiEdit|NotebookEdit`): `sextant hook posttooluse` — the 009 #1 outcome substrate (component 14). Scores whether the agent opened/edited a file retrieval surfaced, emitting `retrieval.path_hit`/`path_miss`. Out-of-band (no stdout), never throws.
 
 The legacy `tools/codebase_intel/refresh.js` standalone script has been removed. All installs use `sextant hook refresh`.
 
@@ -183,6 +191,7 @@ All state lives in `.planning/intel/` (never committed):
 - `.watcher_last_file` — last file the watcher processed
 - `.last_injected_hash.summary.*` — per-session dedupe hashes for static summary injection
 - `.last_injected_hash.retrieval.*` — per-session dedupe hashes for query-aware retrieval injection
+- `.last_injected_paths.retrieval.*` — per-session set of injected `{path, source}` (009 #1 outcome substrate); the PostToolUse hook scores file-opens against it. Overwritten each injection (compared against the most-recent surfaced set)
 - `index.json.migrated` — legacy index.json renamed after one-time migration to graph.db
 
 ## Key Design Decisions

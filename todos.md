@@ -17,12 +17,19 @@ that makes every eval-invisible orientation signal below provable instead of fai
 > Composite scores from the 24-agent workflow; this ordering supersedes 006/007 priority where
 > they overlap.
 
-- [ ] [009 #1 — THE UNLOCK · composite 48] **Outcome-telemetry substrate.** PostToolUse hook
-  matches `tool_input.file_path` against the per-session last-injected set → `retrieval.path_hit`/
-  `path_miss` to the T1.3 JSONL sink; `sextant telemetry` reports injected-path open-rate. Record
-  `{path, source}` NOT bare relpaths (else per-signal attribution collapses). Needs a per-turn
-  injection-OFF holdback arm to be a real benefit number — ship v1 as "loop wired, baseline
-  pending," not "benefit proven." The denominator for every eval-invisible signal below. ~M
+- [x] [009 #1 v1 — THE UNLOCK · composite 48] **Outcome-telemetry substrate (loop wired).**
+  SHIPPED: PostToolUse hook (`commands/hook-posttooluse.js`) matches `tool_input.file_path` against
+  the per-session injected set (`.last_injected_paths.retrieval.<session>`, written by hook-refresh
+  via `formatRetrievalDetailed`) → `retrieval.path_hit{source}`/`path_miss` to the T1.3 JSONL sink;
+  `sextant telemetry` reports open-precision + per-source breakdown. `{path, source}` recorded
+  (source = surfacing signal, attribution holds). Out-of-band (no stdout), never throws,
+  self-deploying via `intel.init` (idempotent merge, anti-clobber). Unit 739/739, self-eval
+  byte-identical (off the CLI path), 5/5 integration.
+- [ ] [009 #1 FOLLOW-UP — makes it a benefit number] **Injection-OFF holdback arm.** Per-turn A/B:
+  randomly suppress injection for a holdback fraction and tag the session/turn, so open-precision
+  gains a counterfactual baseline (injected-on open-rate vs injected-off). Until then open-precision
+  is precision-flavored + correlational (the agent often opens the canonical file regardless).
+  Pairs with 009 #12 (offline session-trajectory: orientation-latency on real JSONL).
 - [ ] [009 #2 · composite 45] **Schema/contract anchors** — `schema.prisma`/`*.graphql`/`*.proto`/
   `openapi`/`schema.sql` `### Schema` block. NEW fast-glob pass (these exts aren't in `isIndexable`)
   — the most expensive of the cheap tier; migration-dir anchors are a SEPARATE readdir op (adjacent

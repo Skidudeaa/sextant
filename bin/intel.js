@@ -19,6 +19,7 @@ Usage:
   sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old]
   sextant hook sessionstart
   sextant hook refresh
+  sextant hook posttooluse
   sextant inject
   sextant retrieve <query>
   sextant zoekt <index|serve|search>
@@ -63,6 +64,11 @@ const commandMap = {
     }
     if (sub === "refresh") {
       const { run } = require("../commands/hook-refresh");
+      await run();
+      return;
+    }
+    if (sub === "posttooluse") {
+      const { run } = require("../commands/hook-posttooluse");
       await run();
       return;
     }

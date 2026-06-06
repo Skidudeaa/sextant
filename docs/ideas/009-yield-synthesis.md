@@ -71,7 +71,7 @@ shipped since.
 
 | # | Composite | Move | Effort | Novelty | Class |
 |---|-----------|------|--------|---------|-------|
-| 1 | **48** | Outcome-telemetry substrate (injected-path open-rate) | M | new | maintainer→unlocks all |
+| 1 | **48** | Outcome-telemetry substrate (injected-path open-rate) · **v1 SHIPPED** | M | new | maintainer→unlocks all |
 | 2 | 45 | Schema/contract file anchors | S | re-ranked | agent-visible |
 | 3 | 45 | Co-change "also changed with" lane | M | re-ranked | agent-visible |
 | 4 | 43 | Resolution-by-kind provenance breakdown | S | re-ranked | supervisor-visible |
@@ -90,8 +90,15 @@ shipped since.
 
 ## Tier 1 — the unlock + the cheap provable wins
 
-### 1. Outcome-telemetry substrate · composite 48 · **THE UNLOCK**
+### 1. Outcome-telemetry substrate · composite 48 · **THE UNLOCK** · ✅ v1 SHIPPED
 *Lenses converged: compounding-ceiling, agent-pain, supervisor-adoption, shipped-seam (4/5).*
+
+> **v1 shipped** (`commands/hook-posttooluse.js` + the injected-set write in `hook-refresh.js`
+> via `formatRetrievalDetailed` + `commands/telemetry.js` open-precision aggregation + self-wiring
+> in `lib/intel.js`). Both corrections below were honored: per-file `{path, source}` attribution
+> (source = the surfacing signal, independent of the content-stale display strip), and the framing
+> is "loop wired, baseline pending" — **open-precision is not yet a benefit number**. The
+> injection-OFF holdback arm (the counterfactual that makes it one) is the tracked follow-up.
 
 A **PostToolUse hook** matches `tool_input.file_path` against the per-session last-injected set,
 emitting `retrieval.path_hit` / `retrieval.path_miss` to the JSONL sink T1.3 already built;
