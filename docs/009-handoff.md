@@ -1,10 +1,17 @@
 ---
 title: Session handoff — after 009 #1 (outcome-telemetry substrate v1)
 date: 2026-06-06
-status: handoff
+status: superseded
+superseded_by: docs/011-handoff.md
 branch_state: main @ 8255023 (pushed, clean, == origin/main)
 companion: docs/ideas/009-yield-synthesis.md, todos.md, CLAUDE.md
 ---
+
+> **⚠ SUPERSEDED by [docs/011-handoff.md](011-handoff.md).** The "THE NEXT MOVE"
+> below (the injection-OFF holdback arm) is **DONE** — shipped with the offline
+> trajectory harness on `feat/benefit-proof-trajectory-holdback`. Retrieval's
+> benefit is now proven (1.98× open-rate lift; see `docs/010-benefit-proof.md`).
+> This file is kept for history; read 011 for current state.
 
 # Handoff — Next Session
 

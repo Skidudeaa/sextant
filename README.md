@@ -1,6 +1,11 @@
 # sextant
 
-Health-aware codebase intelligence that keeps LLM coding agents oriented.
+**A small, honest map of your repo — injected into your coding agent before it guesses.**
+
+Most "codebase intelligence" tools can't tell you whether they help. Sextant can:
+on real Claude Code sessions, the files it surfaces for a query get opened **~2×
+more often than chance** — measured on real agent behavior, adversarially verified,
+caveats and all. ([the proof ↓](#does-it-actually-work-the-proof))
 
 ## The Problem
 
@@ -9,6 +14,44 @@ the wrong starting files, miss blast radius, and invent modules that don't exist
 More retrieval makes this faster, not rarer. Sextant solves it differently: it
 builds a small, honest map of your repository and injects it into Claude Code
 sessions before the first prompt -- so the model starts oriented, not guessing.
+
+And it refuses to lie. When the index goes stale (you switched branches, files
+moved), sextant doesn't ship confident-but-wrong structure — it withholds the
+structural claims and says so. Drift is loud; the tool never amplifies the
+hallucination it exists to prevent.
+
+## Does it actually work? (the proof)
+
+Every codebase-intelligence tool claims to help. Almost none measure it. Sextant's
+offline benefit harness replays **real Claude Code session transcripts** and asks
+the only question that matters: when sextant surfaced a file, *did the agent open
+it?* — scored against a permutation null (would a random plausible repo file have
+been opened just as often?).
+
+**On 74 real sessions across 7 repos (4,216 file-opens):**
+
+| Signal | Raw open-rate | Chance baseline | **Lift** |
+|--------|--------------|-----------------|----------|
+| **Query-aware retrieval** | 6.8% | 3.4% | **1.98×** |
+| Static summary (recent-changes etc.) | 19.3% | 14.4% | 1.34× |
+
+The files sextant surfaces for a query are opened **~2× more than chance**, and
+when one is opened it lands early (median first-touch rank 2). The static summary
+*looks* more useful (19.3% raw) but most of that is the **correlation trap** —
+"recent changes" lists the files you're already editing, which the agent opens
+anyway. Query-relevance carries ~1.5× more genuine signal than recency.
+
+This isn't a vanity number. A 6-agent adversarial workflow rebuilt the measurement
+from scratch and attacked six validity threats; two "refutations" were themselves
+overturned on reproduction (one "fairer" baseline was drawing from already-opened
+files — biased by construction). **Honest caveat:** the permutation null controls
+for "plausible repo files" but not for "the agent would've opened the canonical
+file anyway" — so this is *strong correlation*, not yet *proven causation*. The
+[injection-OFF holdback arm](#measuring-benefit) is the causal upgrade, shipped
+and accruing.
+
+Reproduce it yourself: `sextant eval-trajectory`. Full method + caveats:
+[docs/010-benefit-proof.md](docs/010-benefit-proof.md).
 
 ## How It Works
 
@@ -147,6 +190,7 @@ There is no channel that both the user and Claude see simultaneously.
 
 ## Features
 
+- **Benefit proof, not just no-regression** -- `sextant eval-trajectory` replays real session history to measure whether the agent opened what sextant surfaced (permutation-null open-rate lift); the injection-OFF holdback arm makes it causal over time
 - **Health-gated scoring** -- graph boosts disabled when import resolution drops below 90%
 - **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; an atomic single-flight rescan is enqueued in the background
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
@@ -177,11 +221,13 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |
 | `sextant inject` | Print the current `<codebase-intelligence>` body to stdout (freshness-gated, same contract as the hooks) |
 | `sextant update --file <relPath>` | Re-extract a single file and update the graph (used by the watcher; useful for ad-hoc reindex) |
-| `sextant telemetry [--json \| --tail N] [--include-old]` | Audit the freshness-gate dataset: stale rate, stale-reason breakdown, scan duration percentiles |
+| `sextant telemetry [--json \| --tail N] [--include-old]` | Audit the dataset: stale rate, scan percentiles, open-precision + per-arm holdback `benefitDelta` |
+| `sextant eval-trajectory [--json] [--repo <name>] [--size-matched]` | Replay real session history → retrieval open-rate lift vs a permutation null (the benefit proof) |
 | `sextant zoekt <index\|serve\|search>` | Manage Zoekt code search (optional) |
 | `sextant mcp` | Start the MCP server (stdio, used by Claude Code) |
 | `sextant hook sessionstart` | SessionStart hook entry point |
-| `sextant hook refresh` | UserPromptSubmit hook entry point |
+| `sextant hook refresh` | UserPromptSubmit hook entry point (retrieval + holdback arm) |
+| `sextant hook posttooluse` | PostToolUse hook — scores whether the agent opened what was surfaced |
 
 ## Configuration
 
@@ -235,19 +281,48 @@ The central orchestrator is `lib/intel.js` (highest fan-in in the project). Key 
 
 See [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) for the guiding principles (orientation over intelligence, drift must be loud, degrade don't guess).
 
+## Measuring benefit
+
+Sextant carries two kinds of evidence, deliberately kept distinct:
+
+1. **Offline fixture evals** (MRR / nDCG / graphLiftNDCG) prove *no-regression* — a
+   scoring change can't silently bury a canonical definition. See [Eval Results](#eval-results).
+2. **Real-behavior benefit** (`sextant eval-trajectory` + the holdback arm) proves
+   the tool *helps* — the [1.98× open-rate lift](#does-it-actually-work-the-proof)
+   above, on real sessions. This is the honest answer to "but does it actually work?"
+
+### The holdback arm — turning correlation into causation
+
+The 1.98× lift is strong correlation, not proven causation (the agent might open
+the canonical file regardless). The fix is a clean A/B: on a configurable fraction
+of turns, sextant **withholds** the retrieval block (still falling back to the
+static summary, so the agent keeps orientation) and tags the turn `holdback`. The
+PostToolUse hook scores opens on both arms; `sextant telemetry` then reports:
+
+```
+  by arm (injection-OFF holdback):
+    - armed      open-precision XX%
+    - holdback   open-precision YY%
+  BENEFIT DELTA (armed − holdback): ZZ pts — the causal open-rate lift the injection buys
+```
+
+Default-off (`SEXTANT_HOLDBACK_PCT` unset → byte-identical to normal behavior). Opt
+in on a repo to earn the causal baseline. See [docs/010-benefit-proof.md](docs/010-benefit-proof.md).
+
 ## Eval Results
 
-21/21 self-eval queries pass on the sextant repo itself: MRR 0.908, nDCG 0.916. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.755, nDCG 0.741, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
+21/21 self-eval queries pass on the sextant repo itself: MRR 0.900, nDCG 0.920, graph lift +0.012. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.755, nDCG 0.741, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
 
 ### Running the eval suite
 
 These all run from a clean clone in under a minute (Vapor benchmark excluded — it's manual-trigger only):
 
 ```bash
-npm run test:unit                                                                                         # 620 pass, 8 skipped, 0 fail
-npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.908, nDCG 0.916
+npm run test:unit                                                                                         # 763 pass on a clean run (a few spawn-based tests can flake under full-suite concurrency; they pass in isolation / on re-run)
+npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.900, nDCG 0.920
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture
+sextant eval-trajectory                                                                                   # real-behavior benefit lift (reads ~/.claude/projects)
 ```
 
 The Vapor benchmark clones `vapor/vapor` at a pinned tag, scans, and diffs against the committed baseline (~1–3 min):
@@ -275,6 +350,8 @@ All state lives in `.planning/intel/` (add `.planning/` to `.gitignore`):
 | `.watcher_heartbeat` | Watcher alive signal (mtime checked by status line) |
 | `.watcher_last_file` | Last file the watcher processed |
 | `.last_injected_hash.*` | Per-session context deduplication (SHA-256) |
+| `.last_injected_paths.retrieval.*` | Per-session surfaced `{path, source, arm}` set — scored by the PostToolUse hook for the benefit loop |
+| `telemetry.jsonl` (+ `.old`) | Append-only events: freshness, retrieval, open-precision / holdback (rotates past 1 MiB) |
 
 ## Requirements
 

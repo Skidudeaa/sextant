@@ -16,7 +16,7 @@ It is **not** a semantic code understanding engine, LSP, vector database, or IDE
 npm install          # install dependencies (chokidar, fast-glob, sql.js, @babel/parser)
 npm link             # make `sextant` globally available (`codebase-intel` still works as alias)
 npm test             # unit tests (node:test) + 5 bash integration scripts + eval harness
-npm run test:unit    # unit tests (628 in 148 suites, ~9s)
+npm run test:unit    # unit tests (763 in 197 suites, ~12s)
 npm run test:eval    # just the 21-query eval harness
 ```
 
@@ -245,7 +245,7 @@ Current metrics on HEAD (chronology lives in `CHANGELOG.md`, not here):
 
 | Corpus | Path | MRR | nDCG | Pass | graphLiftNDCG |
 |--------|------|-----|------|------|----------------|
-| Self-eval (JS) | CLI | 0.908 | 0.916 | 21/21 | +0.008 (neutral) |
+| Self-eval (JS) | CLI | 0.900 | 0.920 | 21/21 | +0.012 (neutral) |
 | Vapor 4.121.4 (`fixtures/vapor-baseline.json`) | CLI | 0.811 | 0.800 | 15/15 | +0.086 |
 | Vapor 4.121.4 (`fixtures/vapor-hook-baseline.json`) | hook | 0.755 | 0.741 | 13/15 | n/a |
 
@@ -282,7 +282,7 @@ Test-path penalty extended to Swift conventions (`lib/merge-results.js:fileTypeP
 **Graph lift, and the metric that hid it (issue #2, resolved).** `graphLiftNDCG` = mean nDCG(graph ON) − mean nDCG(graph OFF). The graph-OFF arm in `scripts/eval-retrieve.js:runCase` uses `retrieve(..., { noGraph: true })`, which forces the *entire* graph lane off — injection (export-graph / swift-decl / re-export chain), related-expansion, and rerank boosts. **This is deliberate and load-bearing.** The prior implementation toggled only `rerankMinResolutionPct: 101`, which disabled reranking but left injection running in *both* arms (injection is gated by `graphAvailable`, not `useGraphBoost` — `lib/retrieve.js:650`). On Swift, where the graph's primary value-add is injecting a canonical decl rg/zoekt never reached (not reranking fan-in), that made the metric structurally blind to the graph layer: it reported 0.000 on Vapor while the graph was in fact taking `URI.swift` from out-of-top-3 to rank 1.
 
 With the corrected metric:
-- **Self-eval corpus**: graphLiftNDCG ≈ neutral (+0.008). Genuinely no headroom — this small JS repo's defs are already surfaced by rg + zoekt + def-site scoring; nothing for injection to rescue.
+- **Self-eval corpus**: graphLiftNDCG ≈ neutral (+0.012). Genuinely no headroom — this small JS repo's defs are already surfaced by rg + zoekt + def-site scoring; nothing for injection to rescue.
 - **Vapor 4.121.4 (committed reproducible fixture)**: graphLiftNDCG **+0.086 (positive)**. Driven by injection-dependent queries — `vapor-uri-001 'URI'` lifts +1.000 (nDCG 0.000 → 1.000; canonical `URI.swift` is buried by `URITests.swift` text frequency without the graph), `vapor-ext-001` +0.610. The genuinely-neutral starred queries are neutral for understood reasons: `vapor-svc-001 'Service'` is already nDCG 1.0 graph-OFF (text scoring saturates, no headroom); `vapor-init-001 'public init'` is nDCG 0.0 both ways — `init` matches 182 declarations with no disambiguating signal (pre-existing acceptable debt). Per-corpus condition: **graph lift is positive when rg/zoekt text frequency buries a canonical decl behind its own test/consumer files; neutral when text scoring already surfaces the def or no signal can disambiguate.**
 
 The hook fast path's merge layer (`lib/merge-results.js:lineLevelAdjustment`) matches query terms **case-sensitively** — `{ caseSensitive: true }` is threaded into `scoring.computeEnhancedSignals`, and the def-site guard compares `String(t) === defSym`. So a consumer line like Swift's `let uri = URI(...)`, where `extractSymbolDef` returns the variable `uri`, does NOT inherit the def-site stack against query `URI` (the type) — which is what keeps `URI.swift` ahead of `URITests.swift` on the hook path. Locked by `test/merge-results.test.js` ("case-sensitive symbol matching (Swift bug-2)"). Resolved in `522741f`; before that the layer lowercased terms, the `uri !== URI` distinction was dead code, and the consumer line falsely earned the +65% def-site stack.

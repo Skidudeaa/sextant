@@ -4,12 +4,15 @@ Roadmaps: `docs/ideas/006-next-targets-roadmap.md` (functional targets),
 `docs/ideas/007-signal-expansion-menu.md` (new target-codebase signals),
 `docs/ideas/008-iteration-review-findings.md` (review audit + ranked actions),
 `docs/ideas/009-yield-synthesis.md` (re-ranked yield, benefit-proof first — supersedes the
-priority ordering in 006/007 where they overlap). All shipped clusters are merged to `main`
-(`origin/main == d24ab53`, clean): T1.1/T1.2/T1.3 + step-4 honest-hook-path cluster, the 008
-honesty-leak cluster (`feat/hookpath-honesty-and-swift-labels`, **merged**), and the 007
-declared-manifest cluster — Commands / Conventions / Required-env (`feat/manifest-commands-block`,
-**merged**). Next up (009): the **outcome-telemetry substrate** — the benefit-proof denominator
-that makes every eval-invisible orientation signal below provable instead of faith-shipped.
+priority ordering in 006/007 where they overlap). Merged-to-`main` clusters: T1.1/T1.2/T1.3 +
+step-4 honest-hook-path, the 008 honesty-leak cluster, the 007 declared-manifest cluster, and the
+009 #1 v1 outcome substrate. **✅ BENEFIT MEASURED (2026-06-06):** the 009 #1 holdback arm + #12
+offline trajectory harness shipped on `feat/benefit-proof-trajectory-holdback` (pushed, **not yet
+merged**) → query-aware retrieval has **1.98× open-rate lift** on 74 real sessions
+(`docs/010-benefit-proof.md`; reproduce with `sextant eval-trajectory`). The unlock is complete —
+every eval-invisible signal below is now provable. **Next: merge that branch** (the holdback arm
+only runs while this repo is on it — npm-link), then the cheap manifest-seam wins (#6/#2/#7/#4).
+Current handoff: `docs/011-handoff.md`.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 

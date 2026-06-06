@@ -1,6 +1,6 @@
 ---
 name: Sextant
-last_updated: 2026-05-30
+last_updated: 2026-06-06
 ---
 
 # Sextant Strategy
@@ -21,6 +21,7 @@ We win by injecting a small, honest, health-gated map at the two moments that ma
 
 ## Key metrics
 
+- **Real-session open-rate lift** — on replayed Claude Code session history, how much more often the agent opens a file sextant surfaced for a query vs a permutation-null baseline of plausible same-repo files. This is the only metric measured on *real agent behavior* rather than an offline fixture; everything else proves no-regression, this proves benefit. _Current:_ **1.98×** (6.8% vs 3.4%, 74 sessions). _Measured:_ `sextant eval-trajectory`; the per-turn injection-OFF holdback arm (`SEXTANT_HOLDBACK_PCT` → `benefitDelta` in `sextant telemetry`) upgrades it from correlation to causation. (lagging, north-star)
 - **Hook-path retrieval MRR** — Mean Reciprocal Rank of the canonical definition file on the UserPromptSubmit hook path across the committed Vapor fixture; regresses if scoring, merge logic, or def-over-barrel ranking degrades. _Measured:_ `scripts/eval-hook.js` vs `fixtures/vapor-hook-baseline.json`. (leading)
 - **graphLiftNDCG** — mean nDCG with the graph lane ON minus OFF (`noGraph` total-off) on the Vapor fixture; positive means graph injection is rescuing definitions that rg/zoekt text frequency buries; regresses toward zero if injection breaks. _Measured:_ `scripts/eval-retrieve.js --json` vs `fixtures/vapor-baseline.json`. (leading)
 - **Import resolution rate** — percentage of import specifiers the resolver maps to a real file; below 90% the graph-boost lane disables entirely, so this gates whether orientation activates at all. _Measured:_ `sextant health` / statusline / `graph.db` meta, per-repo. (leading)
@@ -52,6 +53,12 @@ _Why it serves the approach:_ Degrade-don't-guess requires recording and surfaci
 Lower the friction of installing, running, and diagnosing Sextant across projects — `sextant init`, cooperative watcher/scan coexistence, the statusline action slot, `doctor` hints — so injection actually fires at the session boundary where it matters most.
 
 _Why it serves the approach:_ The approach wins at session boundaries; a tool that isn't running when the session starts provides no orientation at all, no matter how good the retrieval.
+
+### Benefit measurement
+
+Keep the outcome substrate honest and load-bearing: the offline trajectory harness (`sextant eval-trajectory`, permutation-null open-rate lift) and the per-turn injection-OFF holdback arm (`benefitDelta`). Every eval-invisible orientation signal (schema anchors, Makefile commands, public-API outline, co-change, blast-radius) must be measurable here before it ships on faith.
+
+_Why it serves the approach:_ For most of its life sextant could prove no-regression but never benefit — the structural hollow-verification trap. This track converts kill-on-no-fixture from a brake into an accelerator: a signal that moves no offline scoreboard can still earn its place by lifting real open-rate.
 
 ## Not working on
 

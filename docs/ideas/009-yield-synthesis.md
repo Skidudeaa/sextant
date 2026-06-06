@@ -21,6 +21,19 @@ companion: docs/ideas/006-next-targets-roadmap.md, docs/ideas/007-signal-expansi
 > Every flip-the-backlog correction in this doc was re-verified by hand against the source after
 > the workflow (file:line cited). Nothing here ships on workflow-faith.
 
+## ✅ UPDATE 2026-06-06 — the unlock is complete, benefit is PROVEN
+
+The #1 outcome-telemetry substrate is **fully shipped** (loop + per-source attribution +
+the injection-OFF holdback arm) and the #12 offline session-trajectory harness shipped
+alongside it (`sextant eval-trajectory`). Together they answered the doc's central
+question: **sextant's query-aware retrieval has 1.98× open-rate lift over a permutation
+null on 74 real sessions** (measured, correlational — the holdback arm is the causal upgrade)
+— adversarially verified by a 6-agent reproduction. The
+"hollow-verification trap" called out below is now closed: kill-on-no-fixture is an
+accelerator, not a brake. Verified report: `docs/010-benefit-proof.md`. Everything in
+Tiers 1–3 below is now *provable* (per-source coverage today; causal `benefitDelta` as
+the holdback arm accrues). Current next steps live in `docs/011-handoff.md`.
+
 ## Where we're headed (the through-line)
 
 The last six weeks are **one campaign with one thesis**, not a feature grab-bag:
@@ -71,7 +84,7 @@ shipped since.
 
 | # | Composite | Move | Effort | Novelty | Class |
 |---|-----------|------|--------|---------|-------|
-| 1 | **48** | Outcome-telemetry substrate (injected-path open-rate) · **v1 SHIPPED** | M | new | maintainer→unlocks all |
+| 1 | **48** | Outcome-telemetry substrate + holdback arm · **✅ SHIPPED (1.98× measured)** | M | new | maintainer→unlocks all |
 | 2 | 45 | Schema/contract file anchors | S | re-ranked | agent-visible |
 | 3 | 45 | Co-change "also changed with" lane | M | re-ranked | agent-visible |
 | 4 | 43 | Resolution-by-kind provenance breakdown | S | re-ranked | supervisor-visible |
@@ -82,7 +95,7 @@ shipped since.
 | 9 | 42 | Ownership "who-to-ask" lane | S | new | supervisor-visible |
 | 10 | 41 | Extend freshness gate to CLI/MCP `retrieve()` | S–M | re-ranked | agent-visible |
 | 11 | 41 | Symbol-level blast radius | L | re-ranked | agent-visible |
-| 12 | 36 | Session-trajectory harness (offline JSONL) | M | re-ranked | unproven |
+| 12 | 36 | Session-trajectory harness (offline JSONL) · **✅ SHIPPED** (`eval-trajectory`) | M | re-ranked | measured |
 | 13 | 36 | Monorepo package-context line | S | re-ranked | agent-visible |
 | 14 | 30 | Live multi-turn freshness repro | M | **killed** | already exists |
 
@@ -90,7 +103,7 @@ shipped since.
 
 ## Tier 1 — the unlock + the cheap provable wins
 
-### 1. Outcome-telemetry substrate · composite 48 · **THE UNLOCK** · ✅ v1 SHIPPED
+### 1. Outcome-telemetry substrate · composite 48 · **THE UNLOCK** · ✅ FULLY SHIPPED (loop + holdback arm; 1.98× measured)
 *Lenses converged: compounding-ceiling, agent-pain, supervisor-adoption, shipped-seam (4/5).*
 
 > **v1 shipped** (`commands/hook-posttooluse.js` + the injected-set write in `hook-refresh.js`
@@ -285,7 +298,10 @@ story.
   marker mid-session), and (b) the **static-summary lane's** multi-turn freshness (only the
   retrieval lane is locked). Scope future work to those two; the retrieval-lane dedupe is done.
 
-- **Session-trajectory harness (composite 36 — DOWNGRADED, headline metric degenerate).** The
+- **Session-trajectory harness (composite 36 — ✅ SHIPPED 2026-06-06 as `sextant eval-trajectory`).**
+  Reframed exactly as recommended below: led with permutation-null open-rate lift + orientation-latency,
+  kept hallucinated-path as a tripwire only. Delivered the 1.98× headline. Original downgrade rationale
+  (kept for the record): The
   pitched headline — hallucinated-path rate — is **~0 in real sessions** (across 101 Reads in the
   dogfooded transcripts, zero targeted an absent path; the agent Globs/LS before Reading). The
   instrument reads 0.000 before *and* after sextant — structurally blind, the same trap as issue #2.
@@ -310,8 +326,9 @@ a structural fact producible without inference, or an honest withholding.
 
 ## Recommended sequencing
 
-0. **Outcome-telemetry substrate (#1)** — `{path, source}` tagging + a per-turn holdback arm. *The
-   unlock. Do this first, or everything below ships on faith.*
+0. ~~**Outcome-telemetry substrate (#1)** — `{path, source}` tagging + a per-turn holdback arm.~~
+   **✅ DONE** (+ offline `eval-trajectory`, #12). The unlock is complete; everything below is now
+   provable, not faith-shipped.
 1. **Cheap manifest-seam continuation** — schema anchors (#2), Makefile (#7), public-API (#6),
    resolution-by-kind (#4) — now *provable* via #1.
 2. **Honesty completeness** — extend the gate to CLI/MCP `retrieve()` (#10) + loud statusline (#5).
