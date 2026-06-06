@@ -2,12 +2,56 @@
 
 Roadmaps: `docs/ideas/006-next-targets-roadmap.md` (functional targets),
 `docs/ideas/007-signal-expansion-menu.md` (new target-codebase signals),
-`docs/ideas/008-iteration-review-findings.md` (review audit + ranked actions). The Tier-1
-honest-hook-path cluster + step 4 are merged to `main` (origin/main == 6b03f0b). The
-review-found honesty-leak cluster is on branch `feat/hookpath-honesty-and-swift-labels`
-(**PR #5, open**). Next up: 007 declared-manifest cluster (package.json scripts → Commands).
+`docs/ideas/008-iteration-review-findings.md` (review audit + ranked actions),
+`docs/ideas/009-yield-synthesis.md` (re-ranked yield, benefit-proof first — supersedes the
+priority ordering in 006/007 where they overlap). All shipped clusters are merged to `main`
+(`origin/main == d24ab53`, clean): T1.1/T1.2/T1.3 + step-4 honest-hook-path cluster, the 008
+honesty-leak cluster (`feat/hookpath-honesty-and-swift-labels`, **merged**), and the 007
+declared-manifest cluster — Commands / Conventions / Required-env (`feat/manifest-commands-block`,
+**merged**). Next up (009): the **outcome-telemetry substrate** — the benefit-proof denominator
+that makes every eval-invisible orientation signal below provable instead of faith-shipped.
 
-## Active — review-found (branch `feat/hookpath-honesty-and-swift-labels`, remaining)
+## Active — 009 yield synthesis (re-ranked, benefit-proof first)
+
+> Each item's load-bearing correction was re-verified against live code (file:line in 009).
+> Composite scores from the 24-agent workflow; this ordering supersedes 006/007 priority where
+> they overlap.
+
+- [ ] [009 #1 — THE UNLOCK · composite 48] **Outcome-telemetry substrate.** PostToolUse hook
+  matches `tool_input.file_path` against the per-session last-injected set → `retrieval.path_hit`/
+  `path_miss` to the T1.3 JSONL sink; `sextant telemetry` reports injected-path open-rate. Record
+  `{path, source}` NOT bare relpaths (else per-signal attribution collapses). Needs a per-turn
+  injection-OFF holdback arm to be a real benefit number — ship v1 as "loop wired, baseline
+  pending," not "benefit proven." The denominator for every eval-invisible signal below. ~M
+- [ ] [009 #2 · composite 45] **Schema/contract anchors** — `schema.prisma`/`*.graphql`/`*.proto`/
+  `openapi`/`schema.sql` `### Schema` block. NEW fast-glob pass (these exts aren't in `isIndexable`)
+  — the most expensive of the cheap tier; migration-dir anchors are a SEPARATE readdir op (adjacent
+  follow-up, NOT "one pass two signals"). Placement ABOVE Recent-changes (clamp guard). ~S
+- [ ] [009 #4 · composite 43] **Resolution-by-kind breakdown** — new `GROUP BY imports.kind`
+  (`computeResolutionStats` returns no per-kind data today). NOT lockable on any existing fixture
+  (all are single-kind/100%) — needs a NEW fixture with an unhonored tsconfig-paths import. Kind set
+  `relative|local|tsconfig|workspace|root|unresolved` (drop asset/external — `is_external=1`). ~S
+- [ ] [009 #5 · composite 43 — needs policy] **Loud statusline staleness** — gate STRICTLY on
+  `freshness.contentChanged` (never version bumps). Kills only the content-stale SLICE (version/
+  check_failed blackouts stay green — that's honest). Write the sentinel at BOTH injection sites
+  (retrieval hook AND static-summary `applyFreshnessGate`), or SessionStart blackout never flips the
+  glyph. (Refines the old "[Tier 3 / Review #13]" item below.) ~S
+- [ ] [009 #6 · composite 42] **Public-API outline** — `graph.queryExports` (`graph.js:428`) already
+  exists; one call site in `writeSummaryMarkdown`. FAIL-pre must anchor on the HOTSPOT block
+  (`bin/intel.js` has zero exports), NOT the entry-point row. Benefit-proof deferred to #1. ~XS
+- [ ] [009 #7 · composite 42] **Makefile → Commands block** — second producer into the shipped
+  `### Commands` renderer. Specify the dual-source merge contract (polyglot repos have both
+  package.json scripts AND a Makefile; dedupe/prefix, N-cap-8 contention) — that, not phantom
+  targets, is the real decision. Prefer a `build|test|lint|run` allowlist over a blocklist. ~S
+- [ ] [009 #9 · composite 42 — new axis] **Ownership "who-to-ask"** — CODEOWNERS (verbatim) +
+  git-recency fallback in `sextant_explain`. NOT a philosophy-blessed axis (must earn its place).
+  Label MUST read `recent-author`, NEVER `owner` (proxy ≠ authority — degrade-don't-guess). ~S
+- [ ] [009 #10 · composite 41] **Extend freshness gate to CLI/MCP `retrieve()`** — `retrieve.js` +
+  MCP `sextant_search` have ZERO freshness refs (CLAUDE.md claims "every injection point" — false).
+  NOT a `textOnly` flag-reuse job: `retrieve()` returns structured JSON, needs new field-suppression
+  on the JSON shape in TWO places (API-shape decision). Reclassify small → small-to-medium. ~S-M
+
+## Active — review-found (008 deferred items; branch `feat/hookpath-honesty-and-swift-labels` merged)
 
 - [ ] [Review #5 — NEEDS DECISION] Swift partial-parse signal in the summary. Bare-count
   `ALERT: SWIFT FACTS INCOMPLETE` on any `filesParseErrors>0` would cry wolf on EVERY real
@@ -44,21 +88,35 @@ review-found honesty-leak cluster is on branch `feat/hookpath-honesty-and-swift-
 - [ ] [T2.2] Classifier calcification guard — lock CURRENT classifier verdicts as a
   no-regression suite (extend `test/classifier.test.js`); quarantine prompt "merge results
   scoring" (empirically retrieve:false) as an explicit xfail product decision for Amo. ~0.5-1d
-- [ ] [T2.1] Symbol-level blast radius — capture imported-symbol names (parsed then discarded in
-  js_ast_imports.js / python_ast.py); INDEXED import_symbols table (SCHEMA_VERSION bump);
-  findSymbolImporters; surface in sextant_explain + 1-line hook note. Fixture on a Python
-  from-import edge; make `*` namespace fallback LOUD; symbol-coverage health metric in doctor.
-  Pairs with 007 cross-package fan-in (symbol → file → package altitudes). ~2-3d
-- [ ] [T2.3 revise] Wire swift_relations into sextant_related — MCP/deliberate path ONLY (10s
-  budget), NOT the <50ms hook lane (conformer injection displaces canonical def). findRelationsByTarget
-  has zero callers; symbol-keyed branch is a contract change; ground eval on a real "what implements
-  Middleware" conformer-set query. ~1-2d
+- [ ] [T2.1 · 009 #11 — sequence AFTER swift_relations pathfinder] Symbol-level blast radius —
+  capture imported-symbol names. CORRECTION (009, verified): JS side is NOT parse-then-discard —
+  `js_ast_imports.js` reads only `node.source.value`, NEVER `node.specifiers`; the names must be
+  ADDED to the Babel walk, not threaded through. Only the PYTHON half is genuinely parse-then-discard
+  (`python_ast.py:237-244` → `python.js:normalizeImports` folds it). INDEXED import_symbols table
+  (SCHEMA_VERSION bump); findSymbolImporters; surface in sextant_explain + 1-line hook note. Fixture
+  on a Python from-import edge; make `*` namespace fallback LOUD; symbol-coverage health metric in
+  doctor (gate acceptance on it). "Sharpens def-vs-consumer scoring" = unproven hypothesis, not a
+  shipped benefit. De-risk via T2.3/009-#8 FIRST (cheap relation-altitude pathfinder). ~L (2-3d+)
+- [ ] [T2.3 revise · 009 #8 · composite 42 — CHEAP PATHFINDER, do before T2.1] Wire swift_relations
+  into an MCP conformance consumer — MCP/deliberate path ONLY (10s budget), NOT the <50ms hook lane
+  (conformer injection displaces canonical def). `findRelationsByTarget` (`graph.js:908`) has ZERO
+  production callers (verified — all in test/graph-swift.test.js). CORRECTION (009): NOT "empty
+  results pre" (text path already returns ~49 Middleware-named files) — the win is the STRUCTURED
+  answer (kind+confidence, keyed by conforming TYPE) + recall of non-name-matching conformers
+  (Authenticator.swift). Prove via MCP-handler unit test (FAIL-pre: tool absent), NOT graphLiftNDCG
+  (tool isn't eval-scored). symbol-keyed branch / new `sextant_relations` tool is a contract change
+  (sextant_related is file-keyed). Validates the relation-altitude pattern BEFORE the heavy T2.1
+  schema bump — no benefit here = kill signal for the trilogy. ~1-2d
 - [ ] [T2.4 kill-on-no-fixture] Two-token NL recall — REVIEW VERDICT: inert on every existing
   corpus (25/27 realistic 2-token queries already resolve via phrase/AND; the AND-zero cases float
   a test file). Drop unless a real dogfooded 2-token miss appears on a NEW repo.
-- [ ] [T2.5 revise] Session-trajectory harness — `sextant eval-trajectory` over session JSONL;
-  LEAD with hallucinated-path rate (baseline-free); demote surfaced-then-opened to a correlational
-  stat. ~1d
+- [ ] [T2.5 revise · 009 #12 · composite 36 — DOWNGRADED, metric reframed] Session-trajectory
+  harness — `sextant eval-trajectory` over session JSONL. CORRECTION (009): hallucinated-path rate
+  is DEGENERATE (~0 in real sessions — the agent Globs/LS before Reading; reads 0.000 before AND
+  after sextant, same blindness as issue #2). Do NOT lead with it — reframe around ORIENTATION
+  LATENCY / first-touch precision (did the agent open the injected file first vs after N exploratory
+  reads — a populated distribution); keep hallucinated-path as a tripwire (alert if >0). Offline
+  complement to the live #1 substrate (replay = before-merge proof; live = in-field). ~M
 - [ ] [Tier 3] test-to-code map — gated on the Review #4 shared `isTestPath` predicate; then filter
   neighbors().dependents through it; "no test files import this" note, NOT a coverage-gap label.
   (007 co-change lane likely supersedes this — tests co-change with impl 8x but rarely import it.)
@@ -66,10 +124,11 @@ review-found honesty-leak cluster is on branch `feat/hookpath-honesty-and-swift-
   swift_declarations.start_line.
 - [ ] [Tier 3] function-level localization eval tier — startLine plumbing graph-retrieve→merge→format
   is now DONE (shipped with the swift-decl label); remaining work is `recallDefLine@k`.
-- [ ] [Tier 3 / Review #13 — needs policy] Loud staleness on `scripts/statusline-command.sh` (the
-  bash script). Gate STRICTLY on git-derived `freshness.contentChanged`, NEVER version bumps
-  (cried-wolf guard). During content-stale the statusline shows green while Claude's injection is
-  blacked out — contradictory state.
+- [ ] [Tier 3 / Review #13 — SUPERSEDED by 009 #5 above] Loud staleness on
+  `scripts/statusline-command.sh`. See the 009-#5 item (top section) for the verified scope: kills
+  only the content-stale SLICE; sentinel must be written at BOTH the retrieval hook AND the
+  static-summary `applyFreshnessGate` site (the SessionStart blackout — the most common one — lives
+  there, not in the refresh hook).
 
 ## Active — signal expansion 007 (new target-codebase signals)
 
@@ -80,11 +139,20 @@ review-found honesty-leak cluster is on branch `feat/hookpath-honesty-and-swift-
   `.env.example` required-env keys (keys-only, git-ls-files tracked-gated for freshness honesty) —
   SHIPPED (`7dfde15`) on `feat/manifest-commands-block`. Declared-manifest cluster COMPLETE. Unit
   724/724, self-eval byte-identical, secret-value-never-leaks locked.
-- [ ] [007 tier-1] Makefile Commands block, schema-file anchors, resolution-by-kind breakdown,
-  public-API outline (cheap surfacing of already-graph-resident data). See doc for per-item gates.
-- [ ] [007 tier-1, SCHEMA_VERSION] Co-change "also changed with" lane in sextant_explain — supersedes
-  idea-005 test-to-code; freshness-clean (ages on new commits only); pin a FROZEN commit range,
-  assert relationship + MIN_SUPPORT not magnitude, cap mega-commit transaction size.
+- [ ] [007 tier-1] Makefile Commands / schema anchors / resolution-by-kind / public-API outline —
+  now broken out individually with verified corrections in the **009 section above** (#7/#2/#4/#6).
+  NOTE: "cheap surfacing of already-graph-resident data" is only true for public-API
+  (`queryExports` exists); schema anchors = NEW glob pass, resolution-by-kind = NEW `GROUP BY` not
+  lockable on any existing fixture. See `docs/ideas/009` for per-item gates.
+- [ ] [007 tier-1 · 009 #3 · composite 45 — NEW FACT-CLASS] Co-change "also changed with" lane in
+  sextant_explain — behavioral blast radius the import graph structurally cannot see (route+test,
+  schema+migration, config+cross-lang consumer). Supersedes idea-005 test-to-code. CORRECTION (009,
+  verified): SCHEMA_VERSION bump is NOT mandatory — `getRecentGitFiles` is render-time/git-only
+  (`summary.js:380`, `cli.js:237`, never persists), so a live-computed lane is freshness-clean with
+  NO bump. Bump required ONLY if you materialize pairs into graph.db for the <50ms hook path —
+  decide storage first (live-compute = simplest/HEAD-fresh; materialized = hook-fast-path). Hard half
+  is the discipline, not the recovery: pin a FROZEN commit range, assert relationship + MIN_SUPPORT
+  + count==1-vs-absent (NEVER magnitude — counts drift), cap mega-commit transaction size. ~M
 - [ ] [007 tier-1, monorepo] Workspace package map → cross-package fan-in — the T2.1 package altitude;
   count cross-package edges regardless of `kind` (relative cross-package edges must not be dropped);
   new monorepo fixture required.
