@@ -88,6 +88,9 @@ describe("telemetry — open-precision split by arm + benefitDelta", () => {
     assert.equal(s.retrieval.openPrecisionByArm.holdback, 0.25);
     // benefit = armed − holdback = 0.50
     assert.equal(s.retrieval.benefitDelta, 0.5);
+    // raw per-arm counts (the volume gate the holdback-benefit cron reads)
+    assert.deepEqual(s.retrieval.armCounts.armed, { hits: 3, misses: 1, scored: 4 });
+    assert.deepEqual(s.retrieval.armCounts.holdback, { hits: 1, misses: 3, scored: 4 });
   });
   it("benefitDelta is null with no holdback arm (default install)", () => {
     const events = [

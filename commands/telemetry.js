@@ -237,8 +237,22 @@ function summarize(events) {
       // have data (a holdback-disabled install only ever has the armed arm).
       openPrecisionByArm: armPrecision(pathHitsByArm, pathMissesByArm),
       benefitDelta: benefitDelta(pathHitsByArm, pathMissesByArm),
+      // Raw per-arm scored-open counts so a consumer (e.g. the holdback-benefit
+      // cron) can gate on VOLUME, not just read a rate that's unstable at low n.
+      armCounts: armCounts(pathHitsByArm, pathMissesByArm),
     },
   };
+}
+
+// Per-arm scored-open counts: { armed: {hits, misses, scored}, holdback: {...} }.
+function armCounts(hitsByArm, missesByArm) {
+  const out = {};
+  for (const arm of new Set([...hitsByArm.keys(), ...missesByArm.keys()])) {
+    const hits = hitsByArm.get(arm) || 0;
+    const misses = missesByArm.get(arm) || 0;
+    out[arm] = { hits, misses, scored: hits + misses };
+  }
+  return out;
 }
 
 // openPrecision per arm: { armed: 0.x|null, holdback: 0.x|null }.
