@@ -7,12 +7,12 @@ Roadmaps: `docs/ideas/006-next-targets-roadmap.md` (functional targets),
 priority ordering in 006/007 where they overlap). Merged-to-`main` clusters: T1.1/T1.2/T1.3 +
 step-4 honest-hook-path, the 008 honesty-leak cluster, the 007 declared-manifest cluster, and the
 009 #1 v1 outcome substrate. **✅ BENEFIT MEASURED (2026-06-06):** the 009 #1 holdback arm + #12
-offline trajectory harness shipped on `feat/benefit-proof-trajectory-holdback` (pushed, **not yet
-merged**) → query-aware retrieval has **1.98× open-rate lift** on 74 real sessions
-(`docs/010-benefit-proof.md`; reproduce with `sextant eval-trajectory`). The unlock is complete —
-every eval-invisible signal below is now provable. **Next: merge that branch** (the holdback arm
-only runs while this repo is on it — npm-link), then the cheap manifest-seam wins (#6/#2/#7/#4).
-Current handoff: `docs/011-handoff.md`.
+offline trajectory harness — **merged to `main` @ `5d1d709`** → query-aware retrieval has **1.98×
+open-rate lift** on 74 real sessions (`docs/010-benefit-proof.md`; reproduce with
+`sextant eval-trajectory`). The unlock is complete — every eval-invisible signal below is now
+provable, and the 20% holdback dogfood accrues automatically. **Next: the cheap manifest-seam wins
+(#6/#2/#7/#4)**; highest-leverage retrieval lever is **precision** (exported_symbol 4.3% vs
+text_only 14% opens). Current handoff: `docs/011-handoff.md`.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 

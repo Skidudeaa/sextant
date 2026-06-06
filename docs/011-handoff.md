@@ -2,7 +2,7 @@
 title: Session handoff — after the benefit-proof shipment (trajectory + holdback)
 date: 2026-06-06
 status: handoff
-branch_state: feat/benefit-proof-trajectory-holdback @ pushed (NOT merged to main)
+branch_state: main @ 5d1d709 (merged + pushed; feature branch deleted)
 supersedes: docs/009-handoff.md
 companion: docs/010-benefit-proof.md, docs/ideas/009-yield-synthesis.md, todos.md, CLAUDE.md §15
 ---
@@ -21,8 +21,9 @@ retrieval has **1.98× open-rate lift** over a permutation null on 74 real sessi
 - **`sextant eval-trajectory`** (offline replay) — proof you can run today.
 - **Injection-OFF holdback arm** — the causal upgrade, **enabled at 20%** on this repo.
 
-All on branch `feat/benefit-proof-trajectory-holdback` (pushed, **not merged**). The
-single most important next action is **merge it** — see landmines.
+**✅ Merged to `main` @ `5d1d709`** (fast-forward; feature branch deleted) — so the
+holdback arm + `eval-trajectory` are now durable on the npm-linked checkout and the
+20% dogfood accrues permanently. The benefit baseline is now just a waiting game.
 
 ## State (verified this session)
 
@@ -49,16 +50,20 @@ single most important next action is **merge it** — see landmines.
 | `scripts/check-holdback-benefit.sh` (new) | local cron: READY when holdback ≥30 scored + `benefitDelta` non-null |
 | `docs/010-benefit-proof.md` (new) | the verified report |
 
-## THE NEXT MOVE — merge the branch
+## THE NEXT MOVE — the cheap manifest-seam wins (now provable)
 
-**Why it's load-bearing:** the global `sextant` is npm-linked to `/root/sextant`, so
-it runs **whatever branch is checked out**. The holdback arm + trajectory code only
-execute while this repo is on `feat/benefit-proof-trajectory-holdback`. If anyone
-`git checkout main` here before merging, the holdback arm silently stops accruing and
-`sextant eval-trajectory` disappears. **Merge the PR to make it permanent.**
+The unlock is merged and the dogfood is accruing on its own (`sextant telemetry` /
+`~/sextant-benefit.log` will show the first armed−holdback `benefitDelta` after a few
+sessions — no action needed to make that happen). So the active work is the 009 ladder's
+cheap manifest-seam wins, each now measurable in `eval-trajectory`'s per-source coverage:
+start with **Public-API outline (#6, XS)**, then schema anchors (#2), Makefile (#7),
+resolution-by-kind (#4). See the ladder below.
 
-After merge, the dogfood baseline accrues automatically; check `sextant telemetry`
-(or `~/sextant-benefit.log`) in a few sessions for the first armed−holdback `benefitDelta`.
+**Highest-leverage lever from the benefit data:** retrieval **precision**.
+`exported_symbol` injections earn opens at only 4.3% vs `text_only` 14% (`eval-trajectory`
+per-source); sextant surfaces ~4 files, the agent opens <1. Tightening the surfaced set
+(fewer, higher-confidence files) is the biggest retrieval improvement available, and now
+has a real metric to optimize against.
 
 ## The 009 ladder — now PROVABLE (was the whole point of the unlock)
 
@@ -83,7 +88,8 @@ with a metric to optimize against.
 
 ## Landmines / gotchas carried forward
 
-- **Holdback runs only while on this branch** (npm-link). Merge to make it durable.
+- **Holdback now lives on `main`** (merged) — durable on the npm-linked checkout. (Pre-merge
+  it only ran on the feature branch; that risk is closed.)
 - **`eval-trajectory` corpus is a rolling ~14-day window** — a crontab entry
   (`find ~/.claude/projects … -mtime +14 -delete`) prunes old transcripts nightly. The
   1.98× is the *frozen 74-session anchor*; the live command recomputes over recent
