@@ -25,11 +25,21 @@ that makes every eval-invisible orientation signal below provable instead of fai
   (source = surfacing signal, attribution holds). Out-of-band (no stdout), never throws,
   self-deploying via `intel.init` (idempotent merge, anti-clobber). Unit 739/739, self-eval
   byte-identical (off the CLI path), 5/5 integration.
-- [ ] [009 #1 FOLLOW-UP — makes it a benefit number] **Injection-OFF holdback arm.** Per-turn A/B:
-  randomly suppress injection for a holdback fraction and tag the session/turn, so open-precision
-  gains a counterfactual baseline (injected-on open-rate vs injected-off). Until then open-precision
-  is precision-flavored + correlational (the agent often opens the canonical file regardless).
-  Pairs with 009 #12 (offline session-trajectory: orientation-latency on real JSONL).
+- [x] [009 #1 FOLLOW-UP — makes it a benefit number] **Injection-OFF holdback arm.** SHIPPED:
+  `decideArm` in `hook-refresh.js` (default-off via `SEXTANT_HOLDBACK_PCT`; force via
+  `SEXTANT_HOLDBACK_FORCE`/stdin `_holdbackForce`); holdback turn withholds the block + persists the
+  set tagged `arm:holdback` + fires `retrieval.holdback` + falls back to the static summary;
+  PostToolUse stamps `arm` on path_hit/miss; `sextant telemetry` splits open-precision by arm →
+  `benefitDelta` (armed − holdback). Never holds back on content-stale turns. Unit + spawn
+  integration tests (`test/hook-holdback.test.js`, 12 cases). NEXT (Amo's call): enable on a
+  dogfooding repo (`SEXTANT_HOLDBACK_PCT=20`) to accumulate the causal baseline.
+- [x] [009 #12 — offline complement, the proof-TODAY half] **Trajectory benefit harness.** SHIPPED:
+  `lib/trajectory.js` + `sextant eval-trajectory` replays real session JSONL → retrieval **1.98×
+  open-rate lift** over a permutation-null (74 sessions, 7 repos, 4216 opens); static summary only
+  1.34× (the recency correlation trap); median first-touch rank 2. Verified by a 6-agent adversarial
+  reproduction — both "refuted" verdicts overturned on reproduction. Full writeup + caveats:
+  `docs/010-benefit-proof.md`. Reframed off the degenerate hallucinated-path metric (009 correction)
+  toward orientation-latency + permutation-null lift.
 - [ ] [009 #2 · composite 45] **Schema/contract anchors** — `schema.prisma`/`*.graphql`/`*.proto`/
   `openapi`/`schema.sql` `### Schema` block. NEW fast-glob pass (these exts aren't in `isIndexable`)
   — the most expensive of the cheap tier; migration-dir anchors are a SEPARATE readdir op (adjacent

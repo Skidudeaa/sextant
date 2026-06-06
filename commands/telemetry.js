@@ -93,6 +93,13 @@ function summarize(events) {
   let pathHits = 0;
   let pathMisses = 0;
   const pathHitsBySource = new Map();
+  // HOLDBACK ARM (009 #1 follow-up): split hits/misses by arm so open-precision
+  // gains a counterfactual. armed = the <codebase-retrieval> block was shown;
+  // holdback = it was withheld (the agent oriented WITHOUT our injection). The
+  // armed−holdback open-precision DELTA is the actual benefit number — until
+  // holdback events exist, openPrecision stays correlational (baseline pending).
+  const pathHitsByArm = new Map();
+  const pathMissesByArm = new Map();
 
   for (const e of events) {
     const name = e.name || "(unknown)";
@@ -141,10 +148,14 @@ function summarize(events) {
       pathHits++;
       const source = e.source || "(unknown)";
       pathHitsBySource.set(source, (pathHitsBySource.get(source) || 0) + 1);
+      const arm = e.arm || "armed"; // legacy events w/o arm were effectively armed
+      pathHitsByArm.set(arm, (pathHitsByArm.get(arm) || 0) + 1);
     }
 
     if (name === "retrieval.path_miss") {
       pathMisses++;
+      const arm = e.arm || "armed";
+      pathMissesByArm.set(arm, (pathMissesByArm.get(arm) || 0) + 1);
     }
   }
 
@@ -215,14 +226,40 @@ function summarize(events) {
       staleRate: classifiedRetrieve ? retrievalStaleHits / classifiedRetrieve : null,
       staleReasons: Object.fromEntries(retrievalStaleByReason),
       // 009 #1 outcome substrate: did the agent open/edit what we surfaced?
-      // openPrecision is precision-flavored + baseline-pending (no injection-OFF
-      // arm yet) — a wired-loop signal, not a proven-benefit number.
+      // openPrecision is precision-flavored + baseline-pending UNLESS holdback
+      // events exist — then openPrecisionByArm + benefitDelta make it causal.
       pathHits,
       pathMisses,
       openPrecision: pathHits + pathMisses ? pathHits / (pathHits + pathMisses) : null,
       pathHitsBySource: Object.fromEntries(pathHitsBySource),
+      // HOLDBACK ARM split. benefitDelta = armed openPrecision − holdback
+      // openPrecision: the causal lift the injection buys. null until BOTH arms
+      // have data (a holdback-disabled install only ever has the armed arm).
+      openPrecisionByArm: armPrecision(pathHitsByArm, pathMissesByArm),
+      benefitDelta: benefitDelta(pathHitsByArm, pathMissesByArm),
     },
   };
+}
+
+// openPrecision per arm: { armed: 0.x|null, holdback: 0.x|null }.
+function armPrecision(hitsByArm, missesByArm) {
+  const out = {};
+  for (const arm of new Set([...hitsByArm.keys(), ...missesByArm.keys()])) {
+    const h = hitsByArm.get(arm) || 0;
+    const m = missesByArm.get(arm) || 0;
+    out[arm] = h + m ? h / (h + m) : null;
+  }
+  return out;
+}
+
+// The benefit number: armed − holdback open-precision. null unless both arms
+// have a defined precision (needs holdback turns, i.e. SEXTANT_HOLDBACK_PCT > 0).
+function benefitDelta(hitsByArm, missesByArm) {
+  const p = armPrecision(hitsByArm, missesByArm);
+  if (typeof p.armed === "number" && typeof p.holdback === "number") {
+    return +(p.armed - p.holdback).toFixed(4);
+  }
+  return null;
 }
 
 function printSummary(rootAbs, sum) {
@@ -321,14 +358,42 @@ function printSummary(rootAbs, sum) {
       `  open-precision: ${fmtPct(r.pathHits, r.pathHits + r.pathMisses)}  ` +
       `(${r.pathHits} hit / ${r.pathHits + r.pathMisses} scored opens)`
     );
-    lines.push(
-      `  caveat: baseline pending (no injection-OFF arm yet) AND precision-flavored — ` +
-      `misses include opens of files we never surfaced, NOT coverage; a low % is not "retrieval is wrong."`
-    );
+    // The "baseline pending" half of the caveat is only honest UNTIL a holdback
+    // arm provides the counterfactual; once benefitDelta exists, drop it and keep
+    // only the precision-flavored half (still load-bearing — VH-2).
+    if (r.benefitDelta == null) {
+      lines.push(
+        `  caveat: baseline pending (no injection-OFF arm yet) AND precision-flavored — ` +
+        `misses include opens of files we never surfaced, NOT coverage; a low % is not "retrieval is wrong."`
+      );
+    } else {
+      lines.push(
+        `  caveat: precision-flavored — misses include opens of files we never surfaced, ` +
+        `NOT coverage; a low % is not "retrieval is wrong." (counterfactual present → see BENEFIT DELTA)`
+      );
+    }
     if (Object.keys(r.pathHitsBySource).length) {
       lines.push("  path_hit by source:");
       for (const [src, c] of Object.entries(r.pathHitsBySource).sort((a, b) => b[1] - a[1])) {
         lines.push(`    - ${src.padEnd(28)} ${c}  (${fmtPct(c, r.pathHits)})`);
+      }
+    }
+    // HOLDBACK ARM split (009 #1 follow-up): only meaningful once a holdback arm
+    // has run (SEXTANT_HOLDBACK_PCT > 0). The armed−holdback delta is the causal
+    // benefit number; until then only the armed arm has data and benefitDelta is null.
+    const arms = r.openPrecisionByArm || {};
+    const armKeys = Object.keys(arms);
+    if (armKeys.length > 1 || (armKeys.length === 1 && armKeys[0] !== "armed")) {
+      lines.push("  by arm (injection-OFF holdback):");
+      for (const arm of ["armed", "holdback"]) {
+        if (arms[arm] == null && !(arm in arms)) continue;
+        lines.push(`    - ${arm.padEnd(10)} open-precision ${arms[arm] == null ? "n/a" : (arms[arm] * 100).toFixed(1) + "%"}`);
+      }
+      if (r.benefitDelta != null) {
+        lines.push(
+          `  BENEFIT DELTA (armed − holdback): ${(r.benefitDelta * 100).toFixed(1)} pts` +
+          ` — the causal open-rate lift the injection buys (counterfactual present).`
+        );
       }
     }
   }

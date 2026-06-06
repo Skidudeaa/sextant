@@ -27,6 +27,43 @@ function buildInjectedPaths(includedFiles) {
   return out;
 }
 
+// HOLDBACK ARM (009 #1 follow-up — the counterfactual that turns open-precision
+// from a correlation into a benefit number). On a "holdback" turn we still RUN
+// retrieval and still PERSIST the set we would have surfaced (tagged arm:holdback),
+// but we do NOT emit the <codebase-retrieval> block — so the PostToolUse hook
+// scores the agent's opens WITHOUT our injection. armed-vs-holdback open-rate IS
+// the benefit signal (`sextant telemetry`).
+//
+// DEFAULT-OFF: SEXTANT_HOLDBACK_PCT unset/0 → always "armed" → byte-identical to
+// pre-holdback behavior, so a normal install is never degraded. You opt in by
+// setting the env var on a dogfooding repo to earn the baseline.
+//
+// DETERMINISM FOR TESTS: SEXTANT_HOLDBACK_FORCE=armed|holdback (or the stdin
+// payload field _holdbackForce) hard-pins the decision so a test can exercise
+// either branch without relying on Math.random. The hook is plain Node, so
+// Math.random in prod is fine (it would break only the workflow-script harness).
+//
+// STALE INTERACTION: holdback governs the GRAPH-AUTHORITY contribution, which a
+// content-stale turn already suppresses (textOnly + STALE marker). So we never
+// hold back on a content-stale turn — that would conflate "we withheld" with
+// "the index was stale"; such turns are always armed.
+function decideArm(data, contentStale, env = process.env) {
+  if (contentStale) return "armed";
+  const force =
+    (env && env.SEXTANT_HOLDBACK_FORCE) ||
+    (data && typeof data._holdbackForce === "string" ? data._holdbackForce : "");
+  if (force === "armed" || force === "holdback") return force;
+  const pct = parseInt((env && env.SEXTANT_HOLDBACK_PCT) || "0", 10);
+  if (!Number.isFinite(pct) || pct <= 0) return "armed"; // default-off
+  return Math.random() * 100 < pct ? "holdback" : "armed";
+}
+
+function persistInjectedSet(injPathsFile, payload) {
+  try {
+    fs.writeFileSync(injPathsFile, JSON.stringify(payload));
+  } catch {}
+}
+
 // ARCHITECTURE: Query-aware UserPromptSubmit hook.
 //
 // Flow:
@@ -356,8 +393,37 @@ async function run() {
     return;
   }
 
-  // 6. Dedupe and inject
+  // ARM DECISION (009 #1 follow-up): now that output is non-empty we have a real
+  // injection that COULD be withheld. Decide armed vs holdback. See decideArm.
   const sessionKey = deriveSessionKey(data);
+  const injPathsFile = path.join(
+    root,
+    ".planning",
+    "intel",
+    `.last_injected_paths.retrieval.${sessionKey}`
+  );
+  const arm = decideArm(data, contentStale);
+
+  if (arm === "holdback") {
+    // Counterfactual turn: persist what we WOULD have surfaced (tagged holdback)
+    // so the PostToolUse hook scores the agent's opens with NO injection this
+    // turn, then show the STATIC summary so the agent still has SOME orientation
+    // (the arm withholds the graph-authority CONTRIBUTION, not "sextant entirely").
+    // We do NOT emit <codebase-retrieval>, do NOT record retrieval.injected
+    // (nothing was injected), and do NOT touch the dedupe hash (no block shown).
+    persistInjectedSet(injPathsFile, {
+      ts: Date.now(),
+      stale: contentStale === true,
+      arm: "holdback",
+      paths: buildInjectedPaths(injectedFiles),
+    });
+    recordEvent(root, "retrieval.holdback", { fileCount: injectedFiles.length });
+    await injectStaticSummary(root, data);
+    await statusLinePromise;
+    return;
+  }
+
+  // 6. Dedupe and inject (ARMED path)
   const cachePath = path.join(
     root,
     ".planning",
@@ -408,22 +474,12 @@ async function run() {
   // against the MOST RECENT surfaced set. Separate namespace from the dedupe-hash
   // file (.last_injected_hash.*) and the statusline marker (.last_retrieval).
   // Best-effort; a failed write just means that turn's opens go unscored.
-  try {
-    const injPathsFile = path.join(
-      root,
-      ".planning",
-      "intel",
-      `.last_injected_paths.retrieval.${sessionKey}`
-    );
-    fs.writeFileSync(
-      injPathsFile,
-      JSON.stringify({
-        ts: Date.now(),
-        stale: contentStale === true,
-        paths: buildInjectedPaths(injectedFiles),
-      })
-    );
-  } catch {}
+  persistInjectedSet(injPathsFile, {
+    ts: Date.now(),
+    stale: contentStale === true,
+    arm: "armed",
+    paths: buildInjectedPaths(injectedFiles),
+  });
 
   // TELEMETRY (T1.3): a non-empty <codebase-retrieval> block is being
   // injected this turn (not a dedupe skip, not a static fallback). Record the
@@ -459,4 +515,4 @@ async function run() {
   await statusLinePromise;
 }
 
-module.exports = { run, buildInjectedPaths };
+module.exports = { run, buildInjectedPaths, decideArm };

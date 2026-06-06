@@ -118,16 +118,23 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
       - `freshness.blackout_turn { reason }` — every minimal-body emission
       - `scan.completed { durationMs, success, trigger, pruneMissing, forceReindex, error? }` — every scan exit (success or failure); `trigger` is `freshness_gate` or `manual` based on the `SEXTANT_RESCAN_TRIGGER` env var
       - `retrieval.classified { retrieve, confidence, termCount }` / `retrieval.injected { source, fileCount }` / `retrieval.empty_fallback {}` / `retrieval.stale_hit { reason, contentChanged }` — the T1.3/T1.2 hook-pipeline counters (fire-rate, empty-injection rate, provenance, retrieval-lane stale rate)
-      - `retrieval.path_hit { source, tool }` / `retrieval.path_miss { tool }` — the 009 #1 outcome substrate: did the agent open/edit a file retrieval surfaced? Emitted by the PostToolUse hook (component 14). `source` attributes the hit to the signal that surfaced the file (exported_symbol / swift_decl_type / reexport_chain / path_match / text_only) so opens are measurable per-signal
+      - `retrieval.path_hit { source, tool, arm }` / `retrieval.path_miss { tool, arm }` — the 009 #1 outcome substrate: did the agent open/edit a file retrieval surfaced? Emitted by the PostToolUse hook (component 14). `source` attributes the hit to the signal that surfaced the file (exported_symbol / swift_decl_type / reexport_chain / path_match / text_only) so opens are measurable per-signal. `arm` (armed|holdback) is the 009 #1 follow-up counterfactual tag (component 15a)
+      - `retrieval.holdback { fileCount }` — the holdback arm withheld a retrieval block this turn (the agent oriented WITHOUT injection); the baseline arm of the armed-vs-holdback A/B
     - Bounded growth: rotates to `.old` past `TELEMETRY_MAX_BYTES` (1 MiB)
     - Never throws; failures are silently absorbed (telemetry must never break the hook)
-    - Audit surface: `sextant telemetry [--json | --tail N] [--include-old]` — prints stale rate, stale-reason breakdown, scan duration percentiles (p50/p95/p99) split by trigger, success rate, retrieval fire/empty-injection rates, **open-precision (path_hit / scored opens) + per-source breakdown**, event counts by name, observation window
+    - Audit surface: `sextant telemetry [--json | --tail N] [--include-old]` — prints stale rate, stale-reason breakdown, scan duration percentiles (p50/p95/p99) split by trigger, success rate, retrieval fire/empty-injection rates, **open-precision (path_hit / scored opens) + per-source breakdown + per-arm split with `benefitDelta` (armed − holdback open-precision = the causal lift, null until a holdback arm runs)**, event counts by name, observation window
     - Dataset feeds the future Option-5 adaptive sync/async decision (per-repo p95 scan duration drives whether sync rescan is safe)
 
 14. **Outcome substrate** (`commands/hook-posttooluse.js`) — the PostToolUse half of the benefit-proof loop (009 #1)
     - The retrieval hook persists the per-session set of injected paths (each tagged with the signal that surfaced it) to `.planning/intel/.last_injected_paths.retrieval.<sessionKey>`. This hook fires after a file-targeting tool (Read/Edit/Write/MultiEdit/NotebookEdit), normalizes the touched path to repo-relative, and emits `retrieval.path_hit { source }` if it's in the most-recent injected set, else `retrieval.path_miss`. Turns "did the agent use what we surfaced?" from unanswerable into a logged open-rate
     - **Out-of-band**: writes NOTHING to stdout (a PostToolUse hook's stdout can reach the transcript/context) → zero context-budget cost. Never throws
     - **v1 = "loop wired, baseline pending"**: open-precision is a correlation with no counterfactual (the agent often opens the canonical file regardless of injection). The per-turn injection-OFF holdback arm that makes it a real benefit number is the explicit follow-up; this ships the loop + the per-source attribution it needs. `path_miss` includes opens of unrelated files (after an injection) — precision-flavored, not coverage
+
+15. **Benefit-proof instruments** (009 #1 + #12) — the answer to "does sextant actually help the agent?", measured on real behavior instead of fixture proxies. Two complementary instruments; the verified result lives in `docs/010-benefit-proof.md` (retrieval **1.98× open-rate lift** over a permutation-null on 74 real sessions; static summary only 1.34× = the recency correlation trap; median first-touch rank 2). Both are correlational until the holdback arm accumulates.
+
+    a. **Injection-OFF holdback arm** (`commands/hook-refresh.js:decideArm`) — the per-turn A/B counterfactual that turns open-precision into a *causal* benefit number. On a `holdback` turn the hook still RUNS retrieval and PERSISTS the set it would have surfaced (tagged `arm:"holdback"`), but does NOT emit the `<codebase-retrieval>` block — it falls back to the static summary so the agent keeps SOME orientation (the arm withholds the graph-authority *contribution*, not sextant entirely). The PostToolUse hook stamps `arm` on every `path_hit`/`path_miss`; `sextant telemetry` splits open-precision by arm → `benefitDelta` = armed − holdback. **Default-off**: `SEXTANT_HOLDBACK_PCT` unset/0 → always armed → byte-identical to pre-holdback behavior (a normal install is never degraded). Opt in by setting the env var on a dogfooding repo to earn the baseline. **Never holds back on a content-stale turn** (the graph authority is already suppressed; withholding there conflates "we withheld" with "index stale"). Tests force armed-vs-holdback via `SEXTANT_HOLDBACK_FORCE` / stdin `_holdbackForce` (deterministic; the hook is plain Node so `Math.random` is fine in prod).
+
+    b. **Offline trajectory replay** (`lib/trajectory.js`, `sextant eval-trajectory`) — replays real Claude Code session transcripts (`~/.claude/projects/**/*.jsonl`), finds every turn where sextant injected files (`<codebase-retrieval>` / `<codebase-intelligence>` in `attachment` records), and scores whether the agent then OPENED them (matching repo-relative + basename against subsequent Read/Edit/Write `tool_use`). The headline is the **permutation-null LIFT** (actual coverage vs coverage of a plausible random same-repo surfaced set), not raw coverage — raw coverage is uninterpretable (the agent opens central files anyway). Reports lift (retrieval + static contrast), orientation-latency (first-touch rank distribution), and per-source coverage. Excludes nested `subagents/`/`workflows/` transcripts (they inherit injected context but aren't real orientation). Verified by a 6-agent adversarial reproduction (see `docs/010-benefit-proof.md`). This is the *before-merge* proof; the holdback arm is the *in-field* proof.
 
 ### Visibility Model (CRITICAL — read this)
 
@@ -164,6 +171,7 @@ When something needs action: `◆ 60% · 5 files · ⏸ off  ⚠ run: sextant wa
 - `scan.js` handles both `scan` and `rescan` (checks `ctx.argv[0]` for `pruneMissing`)
 - Shared utilities in `lib/cli.js`: `stripUnsafeXmlTags`, `getWatcherStatus`, `renderBanner`, `renderStatusLine`, `readStdinJson`, etc.
 - `sextant mcp` launches the MCP server (`mcp/server.js`) over stdio for Claude Code integration
+- `sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]` — the offline benefit-proof harness (component 15b); replays real session transcripts and reports retrieval open-rate lift vs a permutation null. Reads `~/.claude/projects` by default, NOT a repo root
 
 ### Injection into Claude Code
 
@@ -172,7 +180,7 @@ Three hooks are automatically wired into `.claude/settings.json` by `sextant ini
 - **UserPromptSubmit**: `sextant hook refresh` — query-aware retrieval pipeline:
   1. Classifies prompt via `shouldRetrieve()` (<1ms)
   2. If code-relevant: runs graph retrieval + Zoekt HTTP search in parallel (35-70ms)
-  3. Merges results, formats as compact markdown, dedupes via SHA-256, injects as `<codebase-retrieval>`; persists the injected `{path, source}` set for the outcome substrate
+  3. Merges results, formats as compact markdown, dedupes via SHA-256, injects as `<codebase-retrieval>`; persists the injected `{path, source}` set (tagged `arm`) for the outcome substrate. On a `holdback` turn (009 #1 follow-up, default-off via `SEXTANT_HOLDBACK_PCT`) the block is withheld and the static summary shown instead — the counterfactual baseline (component 15a)
   4. If not code-relevant or no results: falls back to static summary injection as `<codebase-intelligence>` (v1 behavior)
 - **PostToolUse** (matcher `Read|Edit|Write|MultiEdit|NotebookEdit`): `sextant hook posttooluse` — the 009 #1 outcome substrate (component 14). Scores whether the agent opened/edited a file retrieval surfaced, emitting `retrieval.path_hit`/`path_miss`. Out-of-band (no stdout), never throws.
 
@@ -191,7 +199,7 @@ All state lives in `.planning/intel/` (never committed):
 - `.watcher_last_file` — last file the watcher processed
 - `.last_injected_hash.summary.*` — per-session dedupe hashes for static summary injection
 - `.last_injected_hash.retrieval.*` — per-session dedupe hashes for query-aware retrieval injection
-- `.last_injected_paths.retrieval.*` — per-session set of injected `{path, source}` (009 #1 outcome substrate); the PostToolUse hook scores file-opens against it. Overwritten each injection (compared against the most-recent surfaced set)
+- `.last_injected_paths.retrieval.*` — per-session set of injected `{ts, stale, arm, paths:[{path, source}]}` (009 #1 outcome substrate + holdback arm); the PostToolUse hook scores file-opens against it and reads `arm` (armed|holdback) to tag the event. Overwritten each injection (compared against the most-recent surfaced set). On a holdback turn it carries the paths sextant WOULD have surfaced even though no block was emitted (the counterfactual)
 - `index.json.migrated` — legacy index.json renamed after one-time migration to graph.db
 
 ## Key Design Decisions

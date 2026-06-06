@@ -58,23 +58,26 @@ function injectedPathsFile(root, sessionKey) {
   );
 }
 
-// Read the most-recent injection set for this session into a Map<relPath, source>.
-// Returns null when there's nothing to score against (no injection yet, missing/
-// malformed file, or an empty set) — the caller emits NO event in that case, so
-// path_hit/path_miss only count opens that had a real surfaced set to compare to.
-function readInjectedSet(root, sessionKey) {
+// Parse the most-recent injection set file for this session into its raw object.
+// null on missing/malformed file.
+function readInjectedRaw(root, sessionKey) {
   let raw;
   try {
     raw = fs.readFileSync(injectedPathsFile(root, sessionKey), "utf8");
   } catch {
     return null;
   }
-  let parsed;
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
     return null;
   }
+}
+
+// Build the Map<relPath, source> from a parsed set object. null when there's
+// nothing to score against (no paths / empty) — the caller emits NO event then,
+// so path_hit/path_miss only count opens that had a real surfaced set.
+function buildInjectedMap(parsed) {
   if (!parsed || !Array.isArray(parsed.paths)) return null;
   const map = new Map();
   for (const entry of parsed.paths) {
@@ -83,6 +86,19 @@ function readInjectedSet(root, sessionKey) {
     }
   }
   return map.size ? map : null;
+}
+
+// The arm tag (009 #1 follow-up) of a parsed set: "armed" (block was shown) or
+// "holdback" (block was withheld — this turn is the counterfactual baseline).
+// Legacy sets written before the holdback arm carry no `arm` field → "armed"
+// (they were all effectively armed), so historical scoring is unchanged.
+function readInjectedArm(parsed) {
+  return parsed && typeof parsed.arm === "string" ? parsed.arm : "armed";
+}
+
+// Back-compat wrapper kept for existing callers/tests: Map<relPath, source>.
+function readInjectedSet(root, sessionKey) {
+  return buildInjectedMap(readInjectedRaw(root, sessionKey));
 }
 
 // Normalize an opened file path to the repo-relative form the injected set uses
@@ -141,8 +157,13 @@ async function run() {
     if (!filePath) return;
 
     const sessionKey = deriveSessionKey(data);
-    const injectedMap = readInjectedSet(root, sessionKey);
+    const parsed = readInjectedRaw(root, sessionKey);
+    const injectedMap = buildInjectedMap(parsed);
     if (!injectedMap) return; // no surfaced set this session → no denominator, emit nothing
+    // arm stamps EVERY event so open-precision can be split armed vs holdback —
+    // the armed−holdback delta is the actual benefit signal (009 #1 follow-up).
+    // On a holdback turn the block was NOT shown, so these opens are the baseline.
+    const arm = readInjectedArm(parsed);
 
     const repoRel = toRepoRel(root, filePath);
     if (repoRel == null) return; // outside the repo → not ours to score
@@ -152,9 +173,9 @@ async function run() {
 
     if (verdict.hit) {
       // source = the signal that surfaced this file → per-signal open attribution.
-      recordEvent(root, "retrieval.path_hit", { source: verdict.source, tool });
+      recordEvent(root, "retrieval.path_hit", { source: verdict.source, tool, arm });
     } else {
-      recordEvent(root, "retrieval.path_miss", { tool });
+      recordEvent(root, "retrieval.path_miss", { tool, arm });
     }
   } catch {
     // Never throw on the hook hot path (see CRITICAL CONSTRAINTS).
@@ -168,6 +189,9 @@ module.exports = {
   toRepoRel,
   extractFilePath,
   readInjectedSet,
+  readInjectedRaw,
+  buildInjectedMap,
+  readInjectedArm,
   injectedPathsFile,
   FILE_TOOLS,
 };

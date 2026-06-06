@@ -17,6 +17,7 @@ Usage:
   sextant doctor [--root <path>]
   sextant query <imports|dependents|exports> --file <relPath> [--root <path>]
   sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old]
+  sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
   sextant hook sessionstart
   sextant hook refresh
   sextant hook posttooluse
@@ -39,6 +40,7 @@ const commandMap = {
   doctor: "../commands/doctor",
   query: "../commands/query",
   telemetry: "../commands/telemetry",
+  "eval-trajectory": "../commands/eval-trajectory",
   retrieve: "../commands/retrieve",
   zoekt: "../commands/zoekt",
 };
