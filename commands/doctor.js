@@ -4,6 +4,7 @@ const intel = require("../lib/intel");
 const graph = require("../lib/graph");
 const { loadRepoConfig } = require("../lib/config");
 const { getWatcherStatus } = require("../lib/cli");
+const { diagnoseScanCoverage } = require("../lib/coverage-diagnostics");
 
 async function run(ctx) {
   const r = ctx.roots[0];
@@ -35,11 +36,40 @@ async function run(ctx) {
   const ageSec = h.metrics?.indexAgeSec ?? h.indexAgeSec ?? 0;
   const indexed = h.metrics?.indexedFiles ?? h.indexedFiles ?? h.index?.files ?? 0;
 
+  // WHY a live coverage probe here (doctor is on-demand, the walk cost is
+  // fine): distinguishes "never scanned" from "scanned but globs don't match
+  // the layout" from "unsupported language" — three very different fixes that
+  // an "empty index" message alone conflates.
+  let coverage = null;
+  if (fs.existsSync(graphDb)) {
+    try {
+      coverage = await diagnoseScanCoverage({
+        rootAbs,
+        globs: cfg.globs,
+        ignore: cfg.ignore,
+        gitignoreFilter: cfg.gitignoreFilter,
+        indexedTotal: indexed,
+      });
+    } catch {
+      coverage = null;
+    }
+  }
+
   const actions = [];
   if (!fs.existsSync(sd)) {
     actions.push({ msg: "State dir missing — sextant not initialized in this repo", cmd: "sextant init" });
   } else if (!fs.existsSync(graphDb)) {
     actions.push({ msg: "graph.db missing — index has never been built", cmd: "sextant scan --force" });
+  } else if (coverage && coverage.kind === "globs-too-narrow") {
+    actions.push({
+      msg: coverage.message,
+      cmd: 'edit .codebase-intel.json "globs" to match your layout, then: sextant scan --force',
+    });
+  } else if (coverage && coverage.kind === "unsupported-language") {
+    actions.push({
+      msg: coverage.message,
+      cmd: "(no action — sextant has no extractor for this language)",
+    });
   } else if (indexed === 0) {
     actions.push({ msg: "graph.db exists but is empty", cmd: "sextant scan --force" });
   }
@@ -210,6 +240,18 @@ async function run(ctx) {
   lines.push(viz.header("Config"));
   lines.push(viz.metric("globs", viz.dim(JSON.stringify(cfg.globs.slice(0, 2)) + (cfg.globs.length > 2 ? "..." : ""))));
   lines.push(viz.metric("ignore", viz.dim(`${cfg.ignore.length} patterns`)));
+  if (coverage) {
+    if (coverage.kind === "ok") {
+      const avail = coverage.supportedAvailable != null ? ` (${coverage.supportedAvailable} supported sources in tree)` : "";
+      lines.push(viz.metric("coverage", viz.status("ok", `indexing all in scope${avail}`)));
+    } else if (coverage.kind === "globs-too-narrow") {
+      lines.push(viz.metric("coverage", viz.status("error", coverage.message)));
+    } else if (coverage.kind === "unsupported-language") {
+      lines.push(viz.metric("coverage", viz.status("warn", coverage.message)));
+    } else if (coverage.kind === "empty-repo") {
+      lines.push(viz.metric("coverage", viz.status("warn", coverage.message)));
+    }
+  }
 
   // Search backends
   lines.push(viz.header("Search Backends"));

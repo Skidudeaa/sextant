@@ -71,7 +71,15 @@ files=$(grep -oE 'Indexed files.*[0-9]+' "$intel_summary" 2>/dev/null | grep -oE
 # slot below.  Pattern matches "ALERT: SWIFT PARSER INIT_FAILED" or
 # "ALERT: SWIFT PARSER UNAVAILABLE".
 swift_alert=$(grep -oE '^ALERT: SWIFT PARSER [A-Z_]+' "$intel_summary" 2>/dev/null | head -1)
-[ -z "$files" ] && [ -z "$res" ] && exit 0
+# WHY: emitted by lib/summary.js when the index is empty/near-empty because
+# the globs don't match the repo layout (or the language is unsupported).
+# This is the most severe condition — sextant has ~zero intelligence — so it
+# outranks every other action hint below.
+coverage_alert=$(grep -oE '^ALERT: COVERAGE [A-Z_-]+' "$intel_summary" 2>/dev/null | head -1)
+# WHY not bail when a coverage alert is present: an empty index has neither a
+# "resolution" nor an "Indexed files" line, so without this guard the most
+# severe state (sextant sees nothing) would be the one state we stay silent on.
+[ -z "$files" ] && [ -z "$res" ] && [ -z "$coverage_alert" ] && exit 0
 
 # ── Health dot ────────────────────────────────────────
 if [ -n "$res" ]; then
@@ -153,7 +161,11 @@ fi
 # Multiple-issue case: show the most severe; when it's resolved, the
 # next-most severe surfaces.  We do NOT auto-execute -- the user copies.
 action_hint=""
-if [ "$watcher_state" = "off" ] || [ "$watcher_state" = "stale" ]; then
+if [ -n "$coverage_alert" ]; then
+    # Empty/near-empty index: nothing the watcher or a rescan fixes — the
+    # globs (or language support) are the issue. Point at the full diagnosis.
+    action_hint="\e[31m⚠ index empty — check globs: sextant doctor\e[m"
+elif [ "$watcher_state" = "off" ] || [ "$watcher_state" = "stale" ]; then
     action_hint="\e[33m⚠ run: sextant watch-start\e[m"
 elif [ -n "$res" ] && [ "$res" -lt 90 ]; then
     action_hint="\e[33m⚠ run: sextant scan --force\e[m"

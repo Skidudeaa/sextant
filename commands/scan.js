@@ -147,13 +147,32 @@ async function run(ctx) {
     };
 
     try {
-      await intel.scan(r, globs, {
+      const scanResult = await intel.scan(r, globs, {
         ignore: cfg.ignore,
         gitignoreFilter: cfg.gitignoreFilter,
         pruneMissing,
         onProgress,
         force: forceReindex,
       });
+
+      // WHY: a 0-file (or barely-populated) index is the #1 silent failure —
+      // wrong globs or an unsupported language. The scan otherwise exits
+      // "successfully" with a green-looking summary. Surface the diagnosis
+      // loudly here, where the user is actually watching the terminal.
+      const cov = scanResult && scanResult.coverage;
+      if (cov && cov.kind && cov.kind !== "ok") {
+        const label = cov.kind === "unsupported-language" ? "✗" : "⚠";
+        const color = cov.kind === "unsupported-language" ? viz.colors.red : viz.colors.yellow;
+        process.stdout.write(
+          `\n  ${viz.c(`${label} ${cov.message}`, color)}\n`
+        );
+        if (cov.fix) {
+          for (const line of String(cov.fix).split("\n")) {
+            process.stdout.write(`    ${viz.dim(line)}\n`);
+          }
+        }
+        process.stdout.write("\n");
+      }
 
       // WHY: Trigger Zoekt reindex after scan so search is ready soon.
       // Uses triggerReindex (non-blocking background spawn) instead of buildIndex

@@ -172,12 +172,33 @@ describe("summary writeSummaryMarkdown()", () => {
     assert.ok(md.includes("Indexed files"), "should include file count");
   });
 
-  it("empty index shows rescan message", () => {
+  it("empty index points at globs/doctor, not a blind rescan", () => {
     populateGraphFromIndex(db, {});
 
     const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
-    assert.ok(md.includes("No indexed files yet"), "should show empty state message");
-    assert.ok(md.includes("sextant rescan"), "should suggest rescan");
+    assert.ok(md.includes("No files indexed"), "should show empty state message");
+    // WHY: the old message said "Run: sextant rescan" even when the real
+    // problem was a glob/layout mismatch a rescan can't fix. The new message
+    // names globs and routes to the diagnosis.
+    assert.ok(md.includes("globs") && md.includes("sextant doctor"),
+      "empty-state message should mention globs and doctor");
+  });
+
+  it("empty index surfaces persisted coverage note as ALERT: COVERAGE", () => {
+    populateGraphFromIndex(db, {});
+    graphMod.setMetaValue(
+      db,
+      "coverage_note",
+      JSON.stringify({
+        kind: "globs-too-narrow",
+        message: "Indexed 0 files, but found 42 supported source file(s)...",
+      })
+    );
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(/^ALERT: COVERAGE GLOBS-TOO-NARROW/m.test(md),
+      "should emit a statusline-greppable ALERT: COVERAGE line");
+    assert.ok(md.includes("42 supported source file"), "should carry the note's message");
   });
 
   it("health alert when resolution < 90%", () => {
