@@ -16,7 +16,7 @@ companion: docs/010-benefit-proof.md, docs/ideas/009-yield-synthesis.md, todos.m
 ## TL;DR
 
 The benefit-proof campaign's headline is **done and proven**: sextant's query-aware
-retrieval has **1.98× open-rate lift** over a permutation null on 74 real sessions
+retrieval has **2.52× open-rate lift** over a permutation null on 110 real sessions (suffix-matcher v2, 2026-06-09 re-measurement; was 1.98× on the v1 anchor)
 (adversarially verified by a 6-agent reproduction). Both instruments shipped:
 - **`sextant eval-trajectory`** (offline replay) — proof you can run today.
 - **Injection-OFF holdback arm** — the causal upgrade, **enabled at 20%** on this repo.
@@ -60,7 +60,7 @@ start with **Public-API outline (#6, XS)**, then schema anchors (#2), Makefile (
 resolution-by-kind (#4). See the ladder below.
 
 **Highest-leverage lever from the benefit data:** retrieval **precision**.
-`exported_symbol` injections earn opens at only 4.3% vs `text_only` 14% (`eval-trajectory`
+`exported_symbol` injections earn opens at only 3.3% vs `text_only` 9.4% (v2 matcher; `eval-trajectory`
 per-source); sextant surfaces ~4 files, the agent opens <1. Tightening the surfaced set
 (fewer, higher-confidence files) is the biggest retrieval improvement available, and now
 has a real metric to optimize against.
@@ -82,7 +82,7 @@ order (009 §sequencing), the cheap manifest-seam wins:
 Then: co-change lane (#3), swift_relations pathfinder (#8) → symbol-blast-radius (#11).
 
 **Newly actionable from the benefit data:** `exported_symbol` injections earn opens at
-only 4.3% vs `text_only` 14% (`sextant eval-trajectory` per-source). Retrieval
+only 3.3% vs `text_only` 9.4% (v2 matcher; `sextant eval-trajectory` per-source). Retrieval
 **precision** (surfaces ~4 files, agent opens <1) is now the highest-leverage lever,
 with a metric to optimize against.
 
@@ -92,7 +92,7 @@ with a metric to optimize against.
   it only ran on the feature branch; that risk is closed.)
 - **`eval-trajectory` corpus is a rolling ~14-day window** — a crontab entry
   (`find ~/.claude/projects … -mtime +14 -delete`) prunes old transcripts nightly. The
-  1.98× is the *frozen 74-session anchor*; the live command recomputes over recent
+  2.52× is the *110-session anchor @ 2026-06-09*; the live command recomputes over recent
   sessions and drifts slightly (and this repo self-dogfoods, so its own sessions enter
   the corpus).
 - **Telemetry is local-only** (`.planning/intel/*` gitignored). No remote/cloud routine

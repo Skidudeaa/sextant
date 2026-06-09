@@ -2,6 +2,20 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-06-09 — review-fix batch: flake root-caused, measurement integrity, coverage knob, benefit re-measured (`657efc9` → `c1922b5` + docs)
+
+An adversarial review of the 2026-06-06/09 enhancements surfaced ~16 flaws; all shipped in four commits, then the benefit numbers were re-derived.
+
+**Flake root-caused — not a timing race (`657efc9`).** `test/hook-refresh-freshness.test.js`'s rotating-case "flake" was the dogfooding `SEXTANT_HOLDBACK_PCT=20` (this repo's `.claude/settings.json` env) leaking into spawned test hooks: each un-pinned spawn had a 20% chance of a holdback turn withholding the block the assertions expect. All hook-spawning tests now pin the arm per-spawn (env captured *inside* the spawn helper — a load-time snapshot missed the `before()`-installed PATH shim and let the REAL detached background rescan race fixture teardown, the second bug found). 30/30 loop + 3× full suite green under ambient PCT=20.
+
+**Measurement integrity (`3ff86b7`).** Four fixes that protect the benefit numbers: 24h TTL on the posttooluse injected set (recycled session keys scored today's opens against days-old corpora); `decideArm` rejects `SEXTANT_HOLDBACK_PCT>100` (a typo'd 150 silently locked 100% holdback); **trajectory suffix matching replaces basename matching at all three match sites** (same-basename-different-dir files counted as opens, inflating both actual and null arms); deterministic arm-key ordering in telemetry JSON.
+
+**Benefit re-measured under the honest matcher — the proof got STRONGER.** On the identical 110-session corpus, v1-basename vs v2-suffix: retrieval lift 2.24× → **2.52×** (5.64% vs 2.24% null; false matches inflated the null more than the actual), static raw rate 18.5% → 14.6% (a chunk of static's apparent usefulness was literal name collisions — exactly the overcount the 6-agent verification flagged as "works against the claim"). New canonical anchor (110 sessions / 9 repos / 5,628 opens, K=200, seed 12345): **retrieval 2.52×, static 1.38×, median first-touch rank 2**; robustness floor across per-repo/drop-largest/size-matched cuts is ~2× (v1's floor was 1.39×). `docs/010-benefit-proof.md` updated with the matcher A/B and re-derived robustness; README/STRATEGY/CLAUDE.md/handoff citations updated.
+
+**Coverage diagnostics refinements (`fe1f0b3`).** XML-escaped ALERT message; kind-aware statusline hints (no more "index empty" on partial-coverage or unsupported-language states); `hasBroadJsTsGlob` no longer fooled by deep-constrained `**/dir/*.ts` globs; new `.codebase-intel.json: coverageDiagnostics:false` opt-out (deliberately-narrowed monorepo globs) enforced at scan/summary/doctor including stale-note suppression; doctor stops printing prose in the copy-pasteable `→` slot.
+
+**Holdback-benefit cron hardened (`c1922b5`).** `--include-old` (rotation no longer regresses accrual counts), bin resolved from the script's checkout (`SEXTANT_BIN`; data repo ≠ code repo), mkdir guards for log + sentinel dirs, summarizer crash guard, READY gate now floors BOTH arms at ≥30 scored opens (an armed baseline at n=1 could previously trigger). New 6-scenario `scripts/test-holdback-benefit.sh` wired into `npm test`/`test:integration`.
+
 ## 2026-06-06 — benefit proof: trajectory replay + injection-OFF holdback arm (`6857673` → `392c270`)
 
 For its entire life sextant could prove *no-regression* (MRR/nDCG/graphLiftNDCG on synthetic fixtures) but never *benefit* on real agent behavior — the structural hollow-verification trap the 009 synthesis named as load-bearing. This session closed it with two complementary instruments and a verified proof report (`docs/010-benefit-proof.md`).

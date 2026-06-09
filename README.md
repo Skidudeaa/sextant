@@ -28,21 +28,23 @@ the only question that matters: when sextant surfaced a file, *did the agent ope
 it?* — scored against a permutation null (would a random plausible repo file have
 been opened just as often?).
 
-**On 74 real sessions across 7 repos (4,216 file-opens):**
+**On 110 real sessions across 9 repos (5,628 file-opens):**
 
 | Signal | Raw open-rate | Chance baseline | **Lift** |
 |--------|--------------|-----------------|----------|
-| **Query-aware retrieval** | 6.8% | 3.4% | **1.98×** |
-| Static summary (recent-changes etc.) | 19.3% | 14.4% | 1.34× |
+| **Query-aware retrieval** | 5.6% | 2.2% | **2.52×** |
+| Static summary (recent-changes etc.) | 14.6% | 10.6% | 1.38× |
 
-The files sextant surfaces for a query are opened **~2× more than chance**, and
+The files sextant surfaces for a query are opened **~2.5× more than chance**, and
 when one is opened it lands early (median first-touch rank 2). The static summary
-*looks* more useful (19.3% raw) but most of that is the **correlation trap** —
+*looks* more useful (14.6% raw) but most of that is the **correlation trap** —
 "recent changes" lists the files you're already editing, which the agent opens
-anyway. Query-relevance carries ~1.5× more genuine signal than recency.
+anyway. Query-relevance carries ~1.8× more genuine signal than recency.
 
 This isn't a vanity number. A 6-agent adversarial workflow rebuilt the measurement
-from scratch and attacked six validity threats; two "refutations" were themselves
+from scratch and attacked six validity threats (against the original anchor; the
+current numbers re-derive on the same harness with a stricter matcher that removes
+the one overcount the workflow itself flagged); two "refutations" were themselves
 overturned on reproduction (one "fairer" baseline was drawing from already-opened
 files — biased by construction). **Honest caveat:** the permutation null controls
 for "plausible repo files" but not for "the agent would've opened the canonical
@@ -288,12 +290,12 @@ Sextant carries two kinds of evidence, deliberately kept distinct:
 1. **Offline fixture evals** (MRR / nDCG / graphLiftNDCG) prove *no-regression* — a
    scoring change can't silently bury a canonical definition. See [Eval Results](#eval-results).
 2. **Real-behavior benefit** (`sextant eval-trajectory` + the holdback arm) proves
-   the tool *helps* — the [1.98× open-rate lift](#does-it-actually-work-the-proof)
+   the tool *helps* — the [2.52× open-rate lift](#does-it-actually-work-the-proof)
    above, on real sessions. This is the honest answer to "but does it actually work?"
 
 ### The holdback arm — turning correlation into causation
 
-The 1.98× lift is strong correlation, not proven causation (the agent might open
+The 2.52× lift is strong correlation, not proven causation (the agent might open
 the canonical file regardless). The fix is a clean A/B: on a configurable fraction
 of turns, sextant **withholds** the retrieval block (still falling back to the
 static summary, so the agent keeps orientation) and tags the turn `holdback`. The

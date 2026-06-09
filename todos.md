@@ -7,12 +7,13 @@ Roadmaps: `docs/ideas/006-next-targets-roadmap.md` (functional targets),
 priority ordering in 006/007 where they overlap). Merged-to-`main` clusters: T1.1/T1.2/T1.3 +
 step-4 honest-hook-path, the 008 honesty-leak cluster, the 007 declared-manifest cluster, and the
 009 #1 v1 outcome substrate. **✅ BENEFIT MEASURED (2026-06-06):** the 009 #1 holdback arm + #12
-offline trajectory harness — **merged to `main` @ `5d1d709`** → query-aware retrieval has **1.98×
-open-rate lift** on 74 real sessions (`docs/010-benefit-proof.md`; reproduce with
+offline trajectory harness — **merged to `main` @ `5d1d709`** → query-aware retrieval has **2.52×
+open-rate lift** on 110 real sessions (2026-06-09 suffix-matcher v2 re-measurement;
+`docs/010-benefit-proof.md`; reproduce with
 `sextant eval-trajectory`). The unlock is complete — every eval-invisible signal below is now
 provable, and the 20% holdback dogfood accrues automatically. **Next: the cheap manifest-seam wins
-(#6/#2/#7/#4)**; highest-leverage retrieval lever is **precision** (exported_symbol 4.3% vs
-text_only 14% opens). Current handoff: `docs/011-handoff.md`.
+(#6/#2/#7/#4)**; highest-leverage retrieval lever is **precision** (exported_symbol 3.3% vs
+text_only 9.4% opens, v2). Current handoff: `docs/011-handoff.md`.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 
@@ -37,9 +38,10 @@ text_only 14% opens). Current handoff: `docs/011-handoff.md`.
   integration tests (`test/hook-holdback.test.js`, 12 cases). NEXT (Amo's call): enable on a
   dogfooding repo (`SEXTANT_HOLDBACK_PCT=20`) to accumulate the causal baseline.
 - [x] [009 #12 — offline complement, the proof-TODAY half] **Trajectory benefit harness.** SHIPPED:
-  `lib/trajectory.js` + `sextant eval-trajectory` replays real session JSONL → retrieval **1.98×
-  open-rate lift** over a permutation-null (74 sessions, 7 repos, 4216 opens); static summary only
-  1.34× (the recency correlation trap); median first-touch rank 2. Verified by a 6-agent adversarial
+  `lib/trajectory.js` + `sextant eval-trajectory` replays real session JSONL → retrieval **2.52×
+  open-rate lift** over a permutation-null (110 sessions, 9 repos, 5628 opens, suffix-matcher v2;
+  1.98× on the original 74-session v1 anchor); static summary only 1.38× (the recency correlation
+  trap); median first-touch rank 2. Verified by a 6-agent adversarial
   reproduction — both "refuted" verdicts overturned on reproduction. Full writeup + caveats:
   `docs/010-benefit-proof.md`. Reframed off the degenerate hallucinated-path metric (009 correction)
   toward orientation-latency + permutation-null lift.
