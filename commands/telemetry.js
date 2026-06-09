@@ -244,10 +244,16 @@ function summarize(events) {
   };
 }
 
+// Arm names in deterministic (sorted) order regardless of which arm's events
+// appear first in the log — keeps the --json key order stable across windows.
+function armNames(hitsByArm, missesByArm) {
+  return [...new Set([...hitsByArm.keys(), ...missesByArm.keys()])].sort();
+}
+
 // Per-arm scored-open counts: { armed: {hits, misses, scored}, holdback: {...} }.
 function armCounts(hitsByArm, missesByArm) {
   const out = {};
-  for (const arm of new Set([...hitsByArm.keys(), ...missesByArm.keys()])) {
+  for (const arm of armNames(hitsByArm, missesByArm)) {
     const hits = hitsByArm.get(arm) || 0;
     const misses = missesByArm.get(arm) || 0;
     out[arm] = { hits, misses, scored: hits + misses };
@@ -258,7 +264,7 @@ function armCounts(hitsByArm, missesByArm) {
 // openPrecision per arm: { armed: 0.x|null, holdback: 0.x|null }.
 function armPrecision(hitsByArm, missesByArm) {
   const out = {};
-  for (const arm of new Set([...hitsByArm.keys(), ...missesByArm.keys()])) {
+  for (const arm of armNames(hitsByArm, missesByArm)) {
     const h = hitsByArm.get(arm) || 0;
     const m = missesByArm.get(arm) || 0;
     out[arm] = h + m ? h / (h + m) : null;

@@ -58,8 +58,16 @@ function injectedPathsFile(root, sessionKey) {
   );
 }
 
+// TTL for a persisted injection set. sessionKey fallbacks (terminal_id, TMUX
+// pane, ppid) recycle across days — without an age gate, a set persisted by a
+// long-dead session scores TODAY's opens against a days-old surfaced corpus,
+// silently corrupting open-precision. 24h is generous for one session; the
+// file is overwritten on every injection anyway.
+const INJECTED_SET_TTL_MS = 24 * 60 * 60 * 1000;
+
 // Parse the most-recent injection set file for this session into its raw object.
-// null on missing/malformed file.
+// null on missing/malformed/expired file (expired ⇒ the caller emits NO event —
+// an unscoreable open, not a miss).
 function readInjectedRaw(root, sessionKey) {
   let raw;
   try {
@@ -68,7 +76,15 @@ function readInjectedRaw(root, sessionKey) {
     return null;
   }
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed.ts !== "number" ||
+      Date.now() - parsed.ts > INJECTED_SET_TTL_MS
+    ) {
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }

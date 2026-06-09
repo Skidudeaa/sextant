@@ -51,6 +51,15 @@ describe("decideArm — default-off, force, pct, stale interaction", () => {
     assert.equal(decideArm({}, true, { SEXTANT_HOLDBACK_PCT: "100" }), "armed");
     assert.equal(decideArm({}, true, { SEXTANT_HOLDBACK_FORCE: "holdback" }), "armed");
   });
+  it("treats out-of-range or malformed pct as default-off (armed)", () => {
+    // A typo'd pct=150 must NOT silently lock the install into 100% holdback.
+    assert.equal(decideArm({}, false, { SEXTANT_HOLDBACK_PCT: "150" }), "armed");
+    assert.equal(decideArm({}, false, { SEXTANT_HOLDBACK_PCT: "101" }), "armed");
+    assert.equal(decideArm({}, false, { SEXTANT_HOLDBACK_PCT: "-5" }), "armed");
+    assert.equal(decideArm({}, false, { SEXTANT_HOLDBACK_PCT: "abc" }), "armed");
+    // Boundary stays valid: 100 = deliberate always-holdback (test usage).
+    assert.equal(decideArm({}, false, { SEXTANT_HOLDBACK_PCT: "100" }), "holdback");
+  });
 });
 
 // ─── readInjectedArm (pure) ─────────────────────────────────────────────────
@@ -109,6 +118,18 @@ describe("telemetry — open-precision split by arm + benefitDelta", () => {
     const s = summarize(events);
     assert.equal(s.retrieval.openPrecisionByArm.armed, 0.5);
     assert.equal(s.retrieval.benefitDelta, null);
+  });
+  it("arm key order is deterministic (sorted) even when holdback events come first", () => {
+    // Map/Set iteration is insertion-ordered — without sorting, a window whose
+    // first scored open happens to be a holdback turn would flip the --json key
+    // order run-to-run.
+    const events = [
+      { name: "retrieval.path_hit", source: "path_match", arm: "holdback" },
+      { name: "retrieval.path_miss", arm: "armed" },
+    ];
+    const s = summarize(events);
+    assert.deepEqual(Object.keys(s.retrieval.armCounts), ["armed", "holdback"]);
+    assert.deepEqual(Object.keys(s.retrieval.openPrecisionByArm), ["armed", "holdback"]);
   });
 });
 

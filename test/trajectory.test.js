@@ -124,15 +124,29 @@ describe("analyzeSession", () => {
     assert.equal(r.retrieval.bySource.text_only.opened, 0); // c.js never opened
   });
 
-  it("matches an absolute open outside cwd against a surfaced repo-rel path by basename", () => {
+  it("matches an absolute open outside cwd against a surfaced repo-rel path by path suffix", () => {
     const recs = [
       inject("t1", null, "<codebase-retrieval>\n### Relevant files\n- `lib/a.js` — exports foo\n"),
-      // opened via a path NOT under cwd (e.g. symlinked checkout) -> basename fallback
+      // opened via a path NOT under cwd (e.g. symlinked checkout) -> suffix fallback
       open("t2", "Read", "/other/place/lib/a.js"),
     ];
     const { events } = traj.extractEvents(recs);
     const r = traj.analyzeSession(events);
     assert.equal(r.retrieval.surfacedOpened, 1);
+  });
+
+  it("does NOT match a same-basename file in a different directory (no basename fallback)", () => {
+    // Old basename matching counted lib/config.js as opened when the agent
+    // opened config/config.js — a different file — inflating coverage on both
+    // the actual and the permutation-null arm. Suffix matching kills that.
+    const recs = [
+      inject("t1", null, "<codebase-retrieval>\n### Relevant files\n- `lib/config.js` — exports loadRepoConfig\n"),
+      open("t2", "Read", "/repo/config/config.js"),
+    ];
+    const { events } = traj.extractEvents(recs, { sessionCwd: "/repo" });
+    const r = traj.analyzeSession(events);
+    assert.equal(r.retrieval.surfacedOpened, 0, "same basename, different dir must be a miss");
+    assert.deepEqual(r.retrieval.firstTouchRanks, [], "first-touch must not match by basename either");
   });
 });
 

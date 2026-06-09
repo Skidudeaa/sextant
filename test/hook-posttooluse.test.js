@@ -32,6 +32,7 @@ const {
   toRepoRel,
   extractFilePath,
   injectedPathsFile,
+  readInjectedRaw,
 } = require("../commands/hook-posttooluse");
 const { buildInjectedPaths } = require("../commands/hook-refresh");
 
@@ -83,6 +84,31 @@ describe("hook-posttooluse — pure helpers", () => {
     } finally {
       try { fs.unlinkSync(symRoot); } catch {}
       fs.rmSync(realRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("readInjectedRaw: rejects an expired or ts-less set (TTL — stale sessions must not score)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-ttl-"));
+    try {
+      fs.mkdirSync(path.join(root, ".planning", "intel"), { recursive: true });
+      const write = (payload) =>
+        fs.writeFileSync(injectedPathsFile(root, "ttl-s"), JSON.stringify(payload));
+      const paths = [{ path: "lib/a.js", source: "exported_symbol" }];
+
+      // Fresh set → scoreable.
+      write({ ts: Date.now(), arm: "armed", paths });
+      assert.ok(readInjectedRaw(root, "ttl-s"), "fresh set must be readable");
+
+      // 25h-old set → null: sessionKey fallbacks (terminal_id/ppid) recycle
+      // across days; a dead session's corpus must not score today's opens.
+      write({ ts: Date.now() - 25 * 60 * 60 * 1000, arm: "armed", paths });
+      assert.equal(readInjectedRaw(root, "ttl-s"), null, "expired set must be rejected");
+
+      // Legacy ts-less set → null (unscoreable, not a miss).
+      write({ arm: "armed", paths });
+      assert.equal(readInjectedRaw(root, "ttl-s"), null, "ts-less set must be rejected");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 

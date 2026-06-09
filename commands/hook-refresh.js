@@ -54,7 +54,10 @@ function decideArm(data, contentStale, env = process.env) {
     (data && typeof data._holdbackForce === "string" ? data._holdbackForce : "");
   if (force === "armed" || force === "holdback") return force;
   const pct = parseInt((env && env.SEXTANT_HOLDBACK_PCT) || "0", 10);
-  if (!Number.isFinite(pct) || pct <= 0) return "armed"; // default-off
+  // pct > 100 is a misconfig (e.g. a typo'd "150"), not "always holdback" —
+  // fall back to the default-off contract rather than silently locking the
+  // install into 100% holdback. pct === 100 stays valid (deliberate always-on).
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return "armed"; // default-off
   return Math.random() * 100 < pct ? "holdback" : "armed";
 }
 
