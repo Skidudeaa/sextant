@@ -2,6 +2,14 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-06-09 — exported_symbol precision: term-quality gate + no test-floor (docs/012 fixes 1+2)
+
+The benefit re-measurement left one named precision gap: exported_symbol surfacings earned opens at 3.3% vs text_only's 9.4%. Instance-level diagnosis (`docs/012-exported-symbol-gap.md`) showed the lane is sextant's *strongest* signal when real (code-shaped non-test matches: 22%) — 95% of firings were junk: generic English words (`session`, `plan`, `out`, `pass`) exact-matching pytest fixtures and test constants, then def-floored to rank 1.
+
+**Term-quality gate (fix 1)** in both injection lanes (`lib/graph-retrieve.js` Layer 1 hook path, `lib/retrieve.js` export-graph CLI/MCP path): a non-code-shaped term (`utils.isCodeShapedTerm`) earns export injection only when the target file's fan-in clears `EXPORT_INJECT_MIN_FANIN` (5) or the match is exact-case on a case-distinctive name. **No def-floor for test paths (fix 2)** in `mergeResults`: a test-path def signal keeps its penalized graph score but is never lifted onto the zoekt scale (0/89 opened; the discounted floor ≈525 beat zoekt's ~500 base). Fixes 3 (skip lane on borderline confidence) and 4 (case-strictness) from the diagnosis are subsumed by the gate.
+
+Pre-validated by simulating the gate on the 214 historical instances (kills 175 junk surfacings, keeps 6/7 real hits, predicted open rate 15.4%), then verified live on somaNotes' graph.db (`client`/`session`/`out`/`pass` → no injection; `user` → `database/models.py` fan-in 90 survives; `accept_note` survives). All ship gates byte-identical: self-eval 21/21, python-eval 7/7, Vapor CLI+hook diff PASS, hook-eval means unchanged (the two single-case failures reproduce at baseline — pre-existing). Unit 792/792. In-field confirmation accrues via `eval-trajectory` per-source coverage on post-ship sessions.
+
 ## 2026-06-09 — review-fix batch: flake root-caused, measurement integrity, coverage knob, benefit re-measured (`657efc9` → `c1922b5` + docs)
 
 An adversarial review of the 2026-06-06/09 enhancements surfaced ~16 flaws; all shipped in four commits, then the benefit numbers were re-derived.

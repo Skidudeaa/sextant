@@ -593,6 +593,54 @@ describe("mergeResults — test-path penalty (Python/Go filename conventions)", 
   });
 });
 
+describe("mergeResults — no def-floor for test paths (docs/012 fix 2)", () => {
+  // A pytest fixture / helper export is not a canonical definition. 0/89
+  // test-path exported_symbol surfacings earned an open in the 110-session
+  // corpus, yet the discounted floor ((600+g)×0.75 ≈ 525) still beat zoekt's
+  // ~500 base — junk at rank 1 on graph-only blocks.
+
+  it("a test-path exported_symbol does NOT get lifted onto the zoekt scale", () => {
+    const graphResults = {
+      files: [
+        // pytest fixture file "exporting" `client` — def signal on a test path
+        { path: "tests/conftest.py", hitType: "exported_symbol", matchedTerms: ["client"], fanIn: 0, score: 100 },
+      ],
+    };
+    const zoektHits = [
+      { path: "api/routes.py", lineNumber: 3, line: "def client_routes():", score: 500 },
+    ];
+    const result = mergeResults(graphResults, zoektHits);
+    const test = result.files.find((f) => f.path === "tests/conftest.py");
+    const src = result.files.find((f) => f.path === "api/routes.py");
+    // graph 100 × graphBoost 1.4 × (1 − TEST_PENALTY 0.25) = 105 — NOT the
+    // floored 525 that previously out-ranked real text evidence.
+    assert.equal(test.fusedScore, 105, "test path must keep its raw (penalized) graph score");
+    assert.ok(src.fusedScore > test.fusedScore, "live text evidence must outrank the fixture file");
+    assert.equal(result.files[0].path, "api/routes.py");
+  });
+
+  it("a SOURCE-path exported_symbol keeps the floor (control — B3 def-eviction guard)", () => {
+    const graphResults = {
+      files: [
+        { path: "lib/graph.js", hitType: "exported_symbol", matchedTerms: ["loadDb"], fanIn: 5, score: 100 },
+      ],
+    };
+    const result = mergeResults(graphResults, []);
+    assert.equal(result.files[0].fusedScore, 740, "source-file def floor must be unchanged");
+  });
+
+  it("a Tests/ Swift type decl does NOT get the floor either", () => {
+    const graphResults = {
+      files: [
+        { path: "Tests/AppTests/URITests.swift", hitType: "swift_decl_type", matchedTerms: ["URITests"], fanIn: 0, score: 100 },
+      ],
+    };
+    const result = mergeResults(graphResults, []);
+    // 100 × 1.4 × 0.75 = 105 (an XCTestCase subclass is a decl, not the canonical def)
+    assert.equal(result.files[0].fusedScore, 105);
+  });
+});
+
 // ─── Content-stale gating (T1.2 freshness-gate) ────────────────────────────
 //
 // WHY: After a checkout/edit the hook must stop asserting graph structure that

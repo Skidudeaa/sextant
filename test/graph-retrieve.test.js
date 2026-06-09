@@ -47,16 +47,18 @@ describe("graphRetrieve — export symbol lookup (layer 1)", () => {
       { name: "withQueue", kind: "named" },
     ]);
 
-    // Fan-in: intel.js is imported by 3 files, graph.js by 1
-    graph.upsertFile(db, { relPath: "a.js", type: "js", sizeBytes: 10, mtimeMs: 1 });
-    graph.upsertFile(db, { relPath: "b.js", type: "js", sizeBytes: 10, mtimeMs: 1 });
-    graph.upsertFile(db, { relPath: "c.js", type: "js", sizeBytes: 10, mtimeMs: 1 });
-    graph.replaceImports(db, "a.js", [
-      { specifier: "./lib/intel", toPath: "lib/intel.js", kind: "relative" },
-    ]);
-    graph.replaceImports(db, "b.js", [
-      { specifier: "./lib/intel", toPath: "lib/intel.js", kind: "relative" },
-    ]);
+    // Fan-in: intel.js is imported by 5 files, graph.js by 1.
+    // WHY 5: the "case-insensitive symbol match" test queries `withqueue`
+    // (all-lowercase, not code-shaped), which the docs/012 term-quality gate
+    // only admits when the target file clears EXPORT_INJECT_MIN_FANIN — so
+    // intel.js must sit at the floor for that test to keep exercising the
+    // case-insensitive lookup rather than the gate.
+    for (const f of ["a.js", "b.js", "c.js", "d.js", "e.js"]) {
+      graph.upsertFile(db, { relPath: f, type: "js", sizeBytes: 10, mtimeMs: 1 });
+      graph.replaceImports(db, f, [
+        { specifier: "./lib/intel", toPath: "lib/intel.js", kind: "relative" },
+      ]);
+    }
     graph.replaceImports(db, "c.js", [
       { specifier: "./lib/intel", toPath: "lib/intel.js", kind: "relative" },
       { specifier: "./lib/graph", toPath: "lib/graph.js", kind: "relative" },
@@ -99,6 +101,71 @@ describe("graphRetrieve — export symbol lookup (layer 1)", () => {
     const result = graphRetrieve(db, ["resolveImport"]);
     assert.equal(typeof result.durationMs, "number");
     assert.ok(result.durationMs >= 0);
+  });
+});
+
+describe("graphRetrieve — export-injection term-quality gate (docs/012 fix 1)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    ({ tmpDir, db } = await freshDb("gate"));
+
+    // The junk shape: a pytest fixture file "exporting" generic names, fan-in 0.
+    graph.upsertFile(db, { relPath: "tests/conftest.py", type: "py", sizeBytes: 300, mtimeMs: 1 });
+    graph.replaceExports(db, "tests/conftest.py", [
+      { name: "client", kind: "function" },
+      { name: "session", kind: "function" },
+    ]);
+
+    // The rescued shape: a models module exporting a generic name `user`,
+    // but with structural authority (fan-in >= EXPORT_INJECT_MIN_FANIN).
+    graph.upsertFile(db, { relPath: "db/models.py", type: "py", sizeBytes: 900, mtimeMs: 1 });
+    graph.replaceExports(db, "db/models.py", [{ name: "user", kind: "function" }]);
+    for (let i = 0; i < 5; i++) {
+      const f = `imp${i}.py`;
+      graph.upsertFile(db, { relPath: f, type: "py", sizeBytes: 10, mtimeMs: 1 });
+      graph.replaceImports(db, f, [
+        { specifier: "db.models", toPath: "db/models.py", kind: "local" },
+      ]);
+    }
+
+    // The exact-case-distinctive shape: a PascalCase class in a small repo
+    // (fan-in 0) — `Widget` must match, `widget` must not.
+    graph.upsertFile(db, { relPath: "ui/widget.py", type: "py", sizeBytes: 200, mtimeMs: 1 });
+    graph.replaceExports(db, "ui/widget.py", [{ name: "Widget", kind: "class" }]);
+
+    // The code-shaped escape hatch: snake_case term, fan-in 0.
+    graph.upsertFile(db, { relPath: "svc/runner.py", type: "py", sizeBytes: 200, mtimeMs: 1 });
+    graph.replaceExports(db, "svc/runner.py", [{ name: "run_pipeline", kind: "function" }]);
+  });
+
+  after(() => cleanup(tmpDir));
+
+  function exportHit(result, p) {
+    return result.files.find((f) => f.path === p && f.hitType === "exported_symbol");
+  }
+
+  it("generic lowercase term + low-fan-in target is NOT injected (pytest-fixture junk)", () => {
+    // "client"/"session" are the docs/012 junk archetypes: 0/89 test-path
+    // surfacings opened; fixture exports matched conversational words.
+    assert.equal(exportHit(graphRetrieve(db, ["client"]), "tests/conftest.py"), undefined);
+    assert.equal(exportHit(graphRetrieve(db, ["session"]), "tests/conftest.py"), undefined);
+  });
+
+  it("generic term + fan-in at the floor IS injected (the User-model rescue)", () => {
+    const hit = exportHit(graphRetrieve(db, ["user"]), "db/models.py");
+    assert.ok(hit, "high-fan-in models module must survive the gate");
+  });
+
+  it("exact-case match on a case-distinctive name passes at fan-in 0", () => {
+    assert.ok(exportHit(graphRetrieve(db, ["Widget"]), "ui/widget.py"),
+      "PascalCase exact-case match is an intentional identifier lookup");
+    assert.equal(exportHit(graphRetrieve(db, ["widget"]), "ui/widget.py"), undefined,
+      "the all-lowercase English word must stay gated");
+  });
+
+  it("code-shaped term passes at fan-in 0", () => {
+    assert.ok(exportHit(graphRetrieve(db, ["run_pipeline"]), "svc/runner.py"));
   });
 });
 
@@ -320,8 +387,10 @@ describe("graphRetrieve — short terms skipped", () => {
   });
 
   it("mix of short and long terms: long terms still work", () => {
-    graph.replaceExports(db, "ab.js", [{ name: "abcdef", kind: "named" }]);
-    const result = graphRetrieve(db, ["ab", "abcdef"]);
+    // snake_case so the docs/012 term-quality gate stays out of the way —
+    // this test is about MIN_TERM_LENGTH, not term quality.
+    graph.replaceExports(db, "ab.js", [{ name: "abc_def", kind: "named" }]);
+    const result = graphRetrieve(db, ["ab", "abc_def"]);
     assert.ok(result.files.length > 0, "long term should still match");
   });
 });

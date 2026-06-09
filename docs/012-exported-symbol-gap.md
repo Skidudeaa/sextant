@@ -1,7 +1,7 @@
 ---
 title: The exported_symbol precision gap — diagnosis from real-session instance data
 date: 2026-06-09
-status: diagnosed (fixes proposed, not yet shipped)
+status: fixes 1+2 SHIPPED (same day — term-quality gate + no-test-floor); 3+4 subsumed, see below
 method: instance-level replay of all 214 exported_symbol surfacings in the 110-session corpus (suffix matcher v2)
 companion: docs/010-benefit-proof.md (per-source table), lib/graph-retrieve.js, lib/merge-results.js, lib/classifier.js
 ---
@@ -63,27 +63,41 @@ files; 468 text_only instances as contrast.
    usually get zero zoekt hits, so the block is graph-only and the fixture file sits at
    rank 1 unopposed.
 
-## Proposed fixes (ranked; ship behind eval gates)
+## Fixes (1+2 SHIPPED 2026-06-09; 3+4 subsumed)
 
-1. **Term-quality gate on the export-injection lane** (`graph-retrieve.js` Layer 2 +
-   `retrieve.js:injectGraphMatches`): a *generic* term (not code-shaped: no `_`, no
-   internal capitals, short) only earns injection when corroborated — target file has
-   meaningful fan-in (the `user`→`User` hits had fan-in 88/11; the junk had 0–2) or the
-   file also has a live text hit. Kills ~95% of junk while keeping both generic-term hits.
-2. **No def-floor for test-path files** (`merge-results.js`): a pytest fixture export is
-   not a canonical definition. Route test-file export matches like `reexport_chain`
-   (present, but no floor). Evidence: 0/89.
-3. **Skip the export lane on confidence-0.4 turns** (hook already shrinks result count on
-   borderline turns; extend to the graph-authority lane). 60% of junk volume, 2.3% open rate.
-4. (Lighter variant of 1) Case-strictness: lowercase English-word terms shouldn't match
-   `SCREAMING_CASE` constants case-insensitively.
+1. **Term-quality gate on the export-injection lane** — SHIPPED in both lanes
+   (`graph-retrieve.js` Layer 1 for the hook, `retrieve.js` export-graph lookup for
+   CLI/MCP). A generic term (not code-shaped per `utils.isCodeShapedTerm`: no `_`/`.`,
+   no internal case change, <10 chars) earns injection only when (a) the target file's
+   fan-in ≥ `EXPORT_INJECT_MIN_FANIN` (5) — the `user`→`User` hits had fan-in 88/11, the
+   junk had 0–2 — or (b) the match is exact-case on a case-distinctive export name
+   (`Widget`→`class Widget` passes; `pass`→`PASS` and `Run`→`run` stay gated). The
+   Swift decl lane is deliberately untouched (different table, Vapor-gated).
+2. **No def-floor for test-path files** — SHIPPED (`merge-results.js`): a test-path
+   `exported_symbol`/`swift_decl_type` keeps its (penalized) graph score but is never
+   lifted onto the zoekt scale. Evidence: 0/89.
+3. ~~Skip the export lane on confidence-0.4 turns~~ — subsumed by 1 in the gate
+   simulation (the junk dies on term/fan-in grounds regardless of confidence). Revisit
+   only if residual junk shows in per-source telemetry.
+4. ~~Case-strictness~~ — subsumed: the test-path consts die via 1+2; non-test
+   SCREAMING-case matches need fan-in; exact-case distinctive matches are now an
+   explicit pass condition.
 
-**Measurement**: per-source coverage in `sextant eval-trajectory` is the scoreboard —
-exported_symbol should move toward ~20% as junk volume drops ~10×. No-regression gates:
-self-eval 21/21 byte-identical-or-better, Vapor `eval-swift-external.sh diff` (the floor
-exists to win `URI`-class cases — fix 2 must not regress them; Vapor's canonical defs are
-non-test paths, so it shouldn't), python-eval `py-penalty-001`/`py-reexport-001`
-(def-over-barrel must keep the floor for *source* files).
+**Pre-validated offline** (gate simulation on the 214 historical instances): kills
+175/214 surfacings, keeps 6/7 hits, predicted post-fix open rate **15.4%** (vs 3.3%
+shipped-before, vs text_only 9.2%). Verified live on somaNotes' graph.db after shipping:
+`client`/`session`/`out`/`pass` → no exported_symbol injection; `user` →
+`database/models.py` (fan-in 90) survives; `accept_note` → `hyperdrive/router.py`
+survives. Ship gates all byte-identical: self-eval 21/21 (MRR 0.900 / nDCG 0.920 /
+lift +0.012), python-eval 7/7 CLI (lift 0.000 = pre-change baseline), Vapor CLI+hook
+diff PASS, hook self-eval and python hook-eval means identical (their single failures —
+`multi-003`, `py-flag-001` — reproduce at baseline; pre-existing, and `py-flag-001`'s
+dataset notes already call it a soft signal, not a hard guard).
+
+**Measurement going forward**: per-source coverage in `sextant eval-trajectory` is the
+scoreboard — exported_symbol should move toward the predicted ~15% as NEW sessions accrue
+(historical injections are baked; only post-ship turns reflect the gate). Watch
+`surfaced` volume drop alongside the rate rise; the freed slots fill with text hits.
 
 ## Caveat
 
