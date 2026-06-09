@@ -129,12 +129,37 @@ async function buildFixture() {
   return dir;
 }
 
+// A no-op `sextant` on PATH: the fixture has no scan-state (no_scan_record →
+// content-stale), so the refresh hook's freshness gate spawns a detached
+// background rescan. Without the shim that resolves the REAL npm-linked
+// sextant, which scans the fixture asynchronously and races the after()
+// rmSync (ENOTEMPTY) — same hazard hook-refresh-freshness.test.js shims.
+function installSextantShim() {
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-shim-ptu-"));
+  fs.writeFileSync(path.join(shimDir, "sextant"), "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(path.join(shimDir, "sextant"), 0o755);
+  const prevPath = process.env.PATH;
+  process.env.PATH = shimDir + path.delimiter + prevPath;
+  return () => {
+    process.env.PATH = prevPath;
+    try { fs.rmSync(shimDir, { recursive: true, force: true }); } catch {}
+  };
+}
+
+// HERMETIC ARM: pin the holdback decision to default-off — an inherited
+// SEXTANT_HOLDBACK_PCT (dogfooding env) would randomly turn refresh spawns
+// into holdback turns and tag the persisted set arm:"holdback". Captured
+// per-spawn because installSextantShim() mutates process.env.PATH.
+function hookEnv() {
+  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "" };
+}
 function runRefresh(dir, prompt) {
   return spawnSync(process.execPath, [BIN, "hook", "refresh"], {
     cwd: dir,
     input: JSON.stringify({ prompt, session_id: SESSION }),
     encoding: "utf8",
     timeout: 20000,
+    env: hookEnv(),
   });
 }
 
@@ -154,11 +179,13 @@ function pathEvents(dir) {
 }
 
 describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
-  let dir;
+  let dir, restoreShim;
   before(async () => {
+    restoreShim = installSextantShim();
     dir = await buildFixture();
   });
   after(() => {
+    if (restoreShim) restoreShim();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 

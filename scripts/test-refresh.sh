@@ -7,6 +7,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 
+# HERMETIC ARM: a dogfooding shell exports SEXTANT_HOLDBACK_PCT, giving each
+# hook invocation a random chance of a holdback turn that withholds the block
+# this test asserts on. Pin the arm to the default-off state.
+export SEXTANT_HOLDBACK_PCT=0
+export SEXTANT_HOLDBACK_FORCE=
+
 fail() {
   echo "FAIL: $1" >&2
   exit 1

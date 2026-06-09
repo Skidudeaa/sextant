@@ -179,15 +179,17 @@ text_only 14% opens). Current handoff: `docs/011-handoff.md`.
 
 ## Tech debt / flakes
 
-- [ ] [flaky test] `test/hook-refresh-freshness.test.js` (T1.2) fails ~1/run intermittently —
-  fails 4/5 on a clean tree (verified by stashing unrelated changes), failing case names rotate
-  between runs ("fresh turn omits the marker", "STALE marker survives dedupe", "version-stale does
-  NOT suppress"). Timing/ordering-dependent; short-circuits `npm test`'s `&&` chain before the
-  integration + eval stages even run. Pre-existing, NOT introduced by the coverage/glob work
-  (`93f790e`). Stabilize: hunt the shared-state/timing dependency (likely spawn timing or a
-  filesystem-mtime race in the freshness fixture setup) — make setup deterministic, not a sleep bump.
+(none currently)
 
 ## Completed
+
+- [x] [flaky test] `test/hook-refresh-freshness.test.js` rotating-case flake — root cause was NOT
+  timing: the dogfooding `SEXTANT_HOLDBACK_PCT=20` (.claude/settings.json env) leaked into spawned
+  hooks, giving each un-pinned spawn a 20% chance of a holdback turn that withholds the block the
+  test asserts on. Fixed by pinning the arm per-spawn (PCT=0, FORCE cleared) in all hook-spawning
+  tests + test-refresh.sh; also shimmed `sextant` on PATH in hook-refresh-telemetry/hook-posttooluse
+  (their no_scan_record fixtures spawned the REAL detached rescan → ENOTEMPTY teardown race).
+  30/30 loop + 3× full unit suite green under ambient PCT=20. | Done: 06/09/2026
 
 - [x] [Review cluster] Hook-display honesty (branch feat/hookpath-honesty-and-swift-labels):
   swift_decl `defines/declares (in Parent) L<n>` label (#1/#12), content-stale graph-provenance

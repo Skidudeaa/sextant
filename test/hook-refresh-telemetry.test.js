@@ -69,12 +69,38 @@ async function buildFixture() {
 // Spawn the hook with a crafted stdin payload and the fixture as cwd.
 // Returns the parsed telemetry events recorded by THIS run (the fixture is
 // freshly created so the file only holds events from this invocation).
+// A no-op `sextant` on PATH: this fixture has no scan-state (no_scan_record →
+// content-stale), so the hook's freshness gate spawns a detached background
+// rescan. Without the shim that resolves the REAL npm-linked sextant, which
+// scans the fixture asynchronously and races the after() rmSync (ENOTEMPTY)
+// — the same hazard hook-refresh-freshness.test.js shims against.
+function installSextantShim() {
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-shim-t13-"));
+  fs.writeFileSync(path.join(shimDir, "sextant"), "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(path.join(shimDir, "sextant"), 0o755);
+  const prevPath = process.env.PATH;
+  process.env.PATH = shimDir + path.delimiter + prevPath;
+  return () => {
+    process.env.PATH = prevPath;
+    try { fs.rmSync(shimDir, { recursive: true, force: true }); } catch {}
+  };
+}
+
+// HERMETIC ARM: pin the holdback decision to default-off — a dogfooding shell
+// exports SEXTANT_HOLDBACK_PCT, and an inherited pct gives each spawn a random
+// chance of withholding the block (rotating-case flake; see
+// hook-refresh-freshness.test.js for the full story). Captured per-spawn, not
+// at module load, because installSextantShim() mutates process.env.PATH.
+function hookEnv() {
+  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "" };
+}
 function runHook(dir, prompt) {
   const res = spawnSync(process.execPath, [BIN, "hook", "refresh"], {
     cwd: dir,
     input: JSON.stringify({ prompt, session_id: "t13-test" }),
     encoding: "utf8",
     timeout: 20000,
+    env: hookEnv(),
   });
   return {
     stdout: res.stdout || "",
@@ -85,11 +111,13 @@ function runHook(dir, prompt) {
 }
 
 describe("hook-refresh telemetry — code-relevant prompt", () => {
-  let dir;
+  let dir, restoreShim;
   before(async () => {
+    restoreShim = installSextantShim();
     dir = await buildFixture();
   });
   after(() => {
+    if (restoreShim) restoreShim();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -128,11 +156,13 @@ describe("hook-refresh telemetry — code-relevant prompt", () => {
 });
 
 describe("hook-refresh telemetry — conversational prompt", () => {
-  let dir;
+  let dir, restoreShim;
   before(async () => {
+    restoreShim = installSextantShim();
     dir = await buildFixture();
   });
   after(() => {
+    if (restoreShim) restoreShim();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 

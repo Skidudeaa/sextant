@@ -108,12 +108,26 @@ async function setScanState(dir, mode) {
 }
 
 // Run the hook with a prompt; return stdout + the recorded retrieval.* events.
+// HERMETIC ARM: the spawned hook inherits the ambient environment, and a
+// dogfooding shell exports SEXTANT_HOLDBACK_PCT (.claude/settings.json env) —
+// each un-pinned spawn then has a pct% chance of a holdback turn that
+// withholds the <codebase-retrieval> block, failing whichever case rolled it
+// (this was the rotating-case "flake"). Pin the arm to the default-off state.
+// NOTE: the env MUST be captured per-spawn (inside runHook), not at module
+// load — installSextantShim() mutates process.env.PATH in before(), and a
+// load-time snapshot would hand the hook a shim-less PATH, making its detached
+// background rescan resolve the REAL sextant and write into the fixture mid-
+// teardown (ENOTEMPTY race).
+function hookEnv() {
+  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "" };
+}
 function runHook(dir, prompt) {
   const res = spawnSync(process.execPath, [BIN, "hook", "refresh"], {
     cwd: dir,
     input: JSON.stringify({ prompt, session_id: "t12-test" }),
     encoding: "utf8",
     timeout: 20000,
+    env: hookEnv(),
   });
   return {
     stdout: res.stdout || "",
