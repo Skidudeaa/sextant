@@ -71,6 +71,58 @@ describe("coverage-diagnostics — hasBroadJsTsGlob", () => {
   it("false for python/swift-only globs", () => {
     assert.equal(hasBroadJsTsGlob(["**/*.py", "**/*.swift"]), false);
   });
+  it("false for deep-constrained globs that merely start with **/ (B3)", () => {
+    // `**/templates/*.ts` is narrow — counting it broad would silently skip
+    // the partial-coverage probe for exactly the configs that need it.
+    assert.equal(hasBroadJsTsGlob(["**/templates/*.ts"]), false);
+    assert.equal(hasBroadJsTsGlob(["**/src/**/*.js"]), false);
+  });
+  it("true for simple tree-wide single-extension globs", () => {
+    assert.equal(hasBroadJsTsGlob(["**/*.ts"]), true);
+    assert.equal(hasBroadJsTsGlob(["**/*.js"]), true);
+  });
+});
+
+describe("coverage-diagnostics — coverageDiagnostics config knob", () => {
+  const { loadRepoConfig } = require("../lib/config");
+  const intel = require("../lib/intel");
+  const graph = require("../lib/graph");
+
+  it("defaults to true; .codebase-intel.json false is honored", () => {
+    const root = tmpRoot();
+    try {
+      assert.equal(loadRepoConfig(root).coverageDiagnostics, true);
+      fs.writeFileSync(
+        path.join(root, ".codebase-intel.json"),
+        JSON.stringify({ coverageDiagnostics: false })
+      );
+      assert.equal(loadRepoConfig(root).coverageDiagnostics, false);
+    } finally {
+      rmrf(root);
+    }
+  });
+
+  it("intel.scan with coverageDiagnostics:false skips the probe and clears the note", async () => {
+    const root = tmpRoot();
+    try {
+      // Supported source OUTSIDE the configured globs → normally globs-too-narrow.
+      fs.mkdirSync(path.join(root, "app"), { recursive: true });
+      fs.writeFileSync(path.join(root, "app", "x.py"), "X = 1\n");
+
+      await intel.scan(root, ["src/**/*.js"]);
+      let db = await graph.loadDb(root);
+      let note = graph.getMetaValue(db, "coverage_note");
+      assert.ok(note && JSON.parse(note).kind === "globs-too-narrow",
+        "control: diagnosis enabled persists the note");
+
+      await intel.scan(root, ["src/**/*.js"], { coverageDiagnostics: false });
+      db = await graph.loadDb(root);
+      note = graph.getMetaValue(db, "coverage_note");
+      assert.ok(!note, "knob off must clear the previously-persisted note");
+    } finally {
+      rmrf(root);
+    }
+  });
 });
 
 describe("coverage-diagnostics — diagnoseScanCoverage", () => {

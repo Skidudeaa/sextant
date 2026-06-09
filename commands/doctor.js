@@ -41,7 +41,7 @@ async function run(ctx) {
   // the layout" from "unsupported language" — three very different fixes that
   // an "empty index" message alone conflates.
   let coverage = null;
-  if (fs.existsSync(graphDb)) {
+  if (fs.existsSync(graphDb) && cfg.coverageDiagnostics !== false) {
     try {
       coverage = await diagnoseScanCoverage({
         rootAbs,
@@ -66,9 +66,11 @@ async function run(ctx) {
       cmd: 'edit .codebase-intel.json "globs" to match your layout, then: sextant scan --force',
     });
   } else if (coverage && coverage.kind === "unsupported-language") {
+    // No runnable command exists for this one — cmd:null keeps the prose out
+    // of the copy-pasteable `→` slot (the render loop skips it).
     actions.push({
-      msg: coverage.message,
-      cmd: "(no action — sextant has no extractor for this language)",
+      msg: `${coverage.message} No action available.`,
+      cmd: null,
     });
   } else if (indexed === 0) {
     actions.push({ msg: "graph.db exists but is empty", cmd: "sextant scan --force" });
@@ -112,7 +114,11 @@ async function run(ctx) {
   } else {
     for (const a of actions) {
       lines.push(`  ${viz.c("[ACT]", viz.colors.yellow)} ${a.msg}`);
-      lines.push(`        ${viz.c("→", viz.colors.dim)} ${viz.c(a.cmd, viz.colors.cyan)}`);
+      // cmd is null for conditions with no runnable fix (e.g. unsupported
+      // language) — the `→` slot is reserved for copy-pasteable commands.
+      if (a.cmd) {
+        lines.push(`        ${viz.c("→", viz.colors.dim)} ${viz.c(a.cmd, viz.colors.cyan)}`);
+      }
     }
   }
 
@@ -240,7 +246,9 @@ async function run(ctx) {
   lines.push(viz.header("Config"));
   lines.push(viz.metric("globs", viz.dim(JSON.stringify(cfg.globs.slice(0, 2)) + (cfg.globs.length > 2 ? "..." : ""))));
   lines.push(viz.metric("ignore", viz.dim(`${cfg.ignore.length} patterns`)));
-  if (coverage) {
+  if (cfg.coverageDiagnostics === false) {
+    lines.push(viz.metric("coverage", viz.dim("disabled by config (coverageDiagnostics: false)")));
+  } else if (coverage) {
     if (coverage.kind === "ok") {
       const avail = coverage.supportedAvailable != null ? ` (${coverage.supportedAvailable} supported sources in tree)` : "";
       lines.push(viz.metric("coverage", viz.status("ok", `indexing all in scope${avail}`)));

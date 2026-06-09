@@ -201,6 +201,48 @@ describe("summary writeSummaryMarkdown()", () => {
     assert.ok(md.includes("42 supported source file"), "should carry the note's message");
   });
 
+  it("XML-escapes the coverage note message (it rides inside <codebase-intelligence>)", () => {
+    populateGraphFromIndex(db, {});
+    try {
+      graphMod.setMetaValue(
+        db,
+        "coverage_note",
+        JSON.stringify({
+          kind: "globs-too-narrow",
+          message: 'found <script>"x"</script> & 3 files',
+        })
+      );
+      const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+      assert.ok(!md.includes("<script>"), "raw angle brackets must not survive");
+      assert.ok(md.includes("&lt;script&gt;"), "message must be XML-escaped");
+      // The kind tag stays raw/greppable — escaping must not touch it.
+      assert.ok(/^ALERT: COVERAGE GLOBS-TOO-NARROW/m.test(md));
+    } finally {
+      graphMod.setMetaValue(db, "coverage_note", "");
+    }
+  });
+
+  it("coverageDiagnostics:false suppresses a persisted (possibly stale) coverage note", () => {
+    populateGraphFromIndex(db, {});
+    const cfgPath = path.join(tmpDir, ".codebase-intel.json");
+    try {
+      // A user who disables the knob WITHOUT rescanning still has the old
+      // note in graph meta — the summary gate must suppress it, not just the
+      // scan-time probe.
+      graphMod.setMetaValue(
+        db,
+        "coverage_note",
+        JSON.stringify({ kind: "globs-too-narrow", message: "stale note" })
+      );
+      fs.writeFileSync(cfgPath, JSON.stringify({ coverageDiagnostics: false }));
+      const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+      assert.ok(!/ALERT: COVERAGE/.test(md), "knob off must suppress the coverage ALERT");
+    } finally {
+      try { fs.unlinkSync(cfgPath); } catch {}
+      graphMod.setMetaValue(db, "coverage_note", "");
+    }
+  });
+
   it("health alert when resolution < 90%", () => {
     // Create many unresolved imports
     const files = {};

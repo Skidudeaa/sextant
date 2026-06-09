@@ -162,9 +162,28 @@ fi
 # next-most severe surfaces.  We do NOT auto-execute -- the user copies.
 action_hint=""
 if [ -n "$coverage_alert" ]; then
-    # Empty/near-empty index: nothing the watcher or a rescan fixes — the
-    # globs (or language support) are the issue. Point at the full diagnosis.
-    action_hint="\e[31m⚠ index empty — check globs: sextant doctor\e[m"
+    # Coverage problem: nothing the watcher or a rescan fixes — the globs (or
+    # language support) are the issue. Branch on the KIND token the summary
+    # embeds: GLOBS-TOO-NARROW fires on both the empty-index and the
+    # partial-coverage (files indexed, <50% of supported sources) paths, so
+    # disambiguate via $files; UNSUPPORTED-LANGUAGE has no glob fix at all.
+    cov_kind="${coverage_alert#ALERT: COVERAGE }"
+    case "$cov_kind" in
+        UNSUPPORTED-LANGUAGE)
+            action_hint="\e[33m⚠ unsupported language: sextant doctor\e[m" ;;
+        EMPTY-REPO)
+            action_hint="\e[31m⚠ index empty: sextant doctor\e[m" ;;
+        GLOBS-TOO-NARROW)
+            if [ -z "$files" ] || [ "$files" = "0" ]; then
+                action_hint="\e[31m⚠ index empty — check globs: sextant doctor\e[m"
+            else
+                action_hint="\e[33m⚠ partial coverage — check globs: sextant doctor\e[m"
+            fi ;;
+        *)
+            # Future/unknown kind: keep the old generic red hint rather than
+            # going silent on the most severe state.
+            action_hint="\e[31m⚠ index coverage problem: sextant doctor\e[m" ;;
+    esac
 elif [ "$watcher_state" = "off" ] || [ "$watcher_state" = "stale" ]; then
     action_hint="\e[33m⚠ run: sextant watch-start\e[m"
 elif [ -n "$res" ] && [ "$res" -lt 90 ]; then

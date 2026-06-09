@@ -150,6 +150,9 @@ async function run(ctx) {
       const scanResult = await intel.scan(r, globs, {
         ignore: cfg.ignore,
         gitignoreFilter: cfg.gitignoreFilter,
+        // The .codebase-intel.json opt-out for the coverage diagnosis —
+        // intel.scan skips the probe and clears any persisted note.
+        coverageDiagnostics: cfg.coverageDiagnostics,
         pruneMissing,
         onProgress,
         force: forceReindex,
