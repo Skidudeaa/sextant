@@ -13,7 +13,9 @@ open-rate lift** on 110 real sessions (2026-06-09 suffix-matcher v2 re-measureme
 `sextant eval-trajectory`). The unlock is complete — every eval-invisible signal below is now
 provable, and the 20% holdback dogfood accrues automatically. **Next: the cheap manifest-seam wins
 (#6/#2/#7/#4)**; highest-leverage retrieval lever is **precision** (exported_symbol 3.3% vs
-text_only 9.4% opens, v2). Current handoff: `docs/011-handoff.md`.
+text_only 9.4% opens, v2 — **DIAGNOSED 2026-06-09**, `docs/012-exported-symbol-gap.md`: 95% of
+firings are generic-word/test-fixture junk; code-shaped non-test matches hit 22%; 4 ranked fixes
+proposed, term-quality gate first). Current handoff: `docs/011-handoff.md`.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 
