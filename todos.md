@@ -177,6 +177,16 @@ text_only 14% opens). Current handoff: `docs/011-handoff.md`.
   count cross-package edges regardless of `kind` (relative cross-package edges must not be dropped);
   new monorepo fixture required.
 
+## Tech debt / flakes
+
+- [ ] [flaky test] `test/hook-refresh-freshness.test.js` (T1.2) fails ~1/run intermittently —
+  fails 4/5 on a clean tree (verified by stashing unrelated changes), failing case names rotate
+  between runs ("fresh turn omits the marker", "STALE marker survives dedupe", "version-stale does
+  NOT suppress"). Timing/ordering-dependent; short-circuits `npm test`'s `&&` chain before the
+  integration + eval stages even run. Pre-existing, NOT introduced by the coverage/glob work
+  (`93f790e`). Stabilize: hunt the shared-state/timing dependency (likely spawn timing or a
+  filesystem-mtime race in the freshness fixture setup) — make setup deterministic, not a sleep bump.
+
 ## Completed
 
 - [x] [Review cluster] Hook-display honesty (branch feat/hookpath-honesty-and-swift-labels):
