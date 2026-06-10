@@ -15,10 +15,11 @@ provable, and the 20% holdback dogfood accrues automatically. **Next: the cheap 
 (#6/#2/#7/#4)**; the precision lever is **DONE** (exported_symbol was 3.3% vs text_only 9.4% —
 diagnosed AND fixed 2026-06-09, `docs/012-exported-symbol-gap.md`: term-quality gate + no
 test-floor SHIPPED, predicted post-fix ~15%; confirm via `eval-trajectory` per-source as
-post-ship sessions accrue). path_match diagnosed too (`docs/013-path-match-pool.md`): mostly
-INTRINSIC to fuzzy filename matching, ceiling ~5.5% — aggressive gating rejected with data;
-two small optional moves (drop loose-on-borderline 216:3 kill ratio; promote dir-segment 23%
-class). Current handoff: `docs/011-handoff.md`.
+post-ship sessions accrue). path_match diagnosed AND its two surgical moves SHIPPED
+(`docs/013-path-match-pool.md`): loose-on-borderline drop (216:3) + dir-segment/stem-exact
+promotion; aggressive gating rejected with data (lane is intrinsically fuzzy, ceiling ~5.5%).
+Retrieval-precision arc now mined out; next lever is upstream (classifier conf-0.4 firing on
+conversational prompts feeds every lane). Current handoff: `docs/011-handoff.md`.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 

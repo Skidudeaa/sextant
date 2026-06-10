@@ -229,7 +229,11 @@ async function run() {
       if (db) {
         graphResults = require("../lib/graph-retrieve").graphRetrieve(
           db,
-          classification.terms
+          classification.terms,
+          // docs/013 move 1: on a borderline turn (classifier barely fired)
+          // a mid-word path guess is 1.4% noise — drop it.  Confident turns
+          // keep loose matches: that's where the typo rescues live.
+          { borderline: classification.confidence <= 0.4 }
         );
       }
     } catch {

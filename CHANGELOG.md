@@ -2,6 +2,15 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-06-09 — path_match precision: match-location tiers + borderline loose-drop (docs/013)
+
+Follow-up instance analysis of the path_match lane (1,270 surfacings, 4.7% opens — 65% of all surfaced volume) found a different shape than 012: **no 0% junk class**. Hit mass is diffuse because fuzzy filename matching is the lane's job — "junk-looking" matches include typo rescues (`rendere`→renderer, `hness`→freshness) that earned real opens, and every simulated aggressive gate traded ~⅓ of hits for ~1pt of rate. Aggressive gating rejected; two surgical moves shipped (`docs/013-path-match-pool.md`):
+
+- **Match-location tiers**: `classifyPathMatch` (Layer 4, `lib/graph-retrieve.js`) buckets each match; `dir-segment`/`stem-exact` (22.9%/7.6% measured open rates) score the new `GR_PATH_MATCH_STRONG` (70) — kept below `GR_REEXPORT_CHAIN` (80) so it's pure within-lane reordering.
+- **Borderline loose-drop**: hook-refresh passes `borderline: confidence <= 0.4` into `graphRetrieve`; `loose` mid-word matches on those turns (1.4% open rate, 216:3 kill ratio) are skipped, shrinking the blocks where filename guesses filled ≥6 of 8 slots. Confident-turn loose matches are untouched (the typo rescues).
+
+Gates: unit 797/797, CLI self-eval byte-identical, python CLI+hook and hook self-eval means identical (both single-case failures pre-existing), Vapor CLI+hook zero-delta. Predicted lane effect: 4.7% → ~5.4% with ~17% less path_match volume.
+
 ## 2026-06-09 — exported_symbol precision: term-quality gate + no test-floor (docs/012 fixes 1+2)
 
 The benefit re-measurement left one named precision gap: exported_symbol surfacings earned opens at 3.3% vs text_only's 9.4%. Instance-level diagnosis (`docs/012-exported-symbol-gap.md`) showed the lane is sextant's *strongest* signal when real (code-shaped non-test matches: 22%) — 95% of firings were junk: generic English words (`session`, `plan`, `out`, `pass`) exact-matching pytest fixtures and test constants, then def-floored to rank 1.

@@ -1,7 +1,7 @@
 ---
 title: The path_match pool — diagnosis, and why the 012 playbook does NOT transfer
 date: 2026-06-09
-status: diagnosed (verdict — mostly intrinsic, two small fixes proposed, aggressive gating rejected with data)
+status: the two small moves SHIPPED same day (loose-on-borderline drop + dir-segment/stem-exact promotion); aggressive gating rejected with data
 method: instance-level replay of all 1,270 path_match surfacings in the 110-session corpus (same harness as docs/012)
 companion: docs/012-exported-symbol-gap.md, lib/graph-retrieve.js (Layer 4), lib/graph.js:filePathsMatching
 ---
@@ -48,24 +48,32 @@ Match-location taxonomy (term vs the path it surfaced):
 - Non-human boilerplate prompts (`#`-prefixed autonomous-loop ticks) contribute 57 instances
   / 2 opens — small, but pure noise (`Run` ×20 from one recurring loop prompt).
 
-## Verdict and the two moves worth making
+## Verdict and the two moves (SHIPPED 2026-06-09)
 
-The realistic ceiling for this lane is ~5.5–6%, not 15% — **recommend AGAINST 012-style
-gating** (every simulated aggressive gate trades a third of real opens for ~1pt of rate).
-Two surgical moves survive the data:
+The realistic ceiling for this lane is ~5.5–6%, not 15% — **aggressive 012-style gating is
+rejected** (every simulated aggressive gate trades a third of real opens for ~1pt of rate).
+Two surgical moves survived the data and shipped:
 
-1. **Drop `loose` (mid-word, non-near) path matches on borderline-confidence turns only.**
-   Kills 216 instances (17% of lane volume) for 3 lost hits; lane rate 4.7% → ~5.4%. Needs
-   the hook to pass its existing borderline flag into `graphRetrieve` (the "fewer results on
-   borderline" conduit already exists in hook-refresh). Keeps every typo rescue (those live
-   on confident turns) and shrinks the 8-slot filename-guess filler blocks, which is its own
-   UX win — a short honest block beats eight guesses.
-2. **Promote `dir-segment` and `stem-exact` within the lane** (score tier above other path
-   matches). No recall loss — pure reordering so the 23% class sits highest among path
-   matches in the block. Cheap: the classification is computable at match time from the
-   path + term.
+1. **Drop `loose` (mid-word, non-near) path matches on borderline-confidence turns** —
+   SHIPPED: `commands/hook-refresh.js` passes `borderline: confidence <= 0.4` into
+   `graphRetrieve`; Layer 4 skips `loose`-classified matches on those turns. Kill ratio
+   216:3 in the corpus; lane rate 4.7% → ~5.4% predicted; the 8-slot filename-guess filler
+   blocks shrink. Typo rescues are untouched (they live on confident turns). Hook-only —
+   borderline is a hook-classifier concept; CLI/MCP `retrieve()` has no path-match lane.
+2. **Promote `dir-segment` and `stem-exact` within the lane** — SHIPPED:
+   `classifyPathMatch` (exported from `lib/graph-retrieve.js`) tiers every path match;
+   strong matches score `GR_PATH_MATCH_STRONG` (70), kept below `GR_REEXPORT_CHAIN` (80) so
+   the change never crosses lanes — pure reordering among path matches. No recall loss.
 
-Explicitly NOT recommended: token-boundary-required matching (kills typo rescue),
+Ship gates all clean: unit 797/797, CLI self-eval 21/21 byte-identical, python-eval 7/7
+(CLI + hook means identical; `py-flag-001` hook failure pre-existing), hook self-eval means
+identical (`multi-003` pre-existing), Vapor CLI+hook diff zero-delta PASS. Live check on
+somaNotes: borderline turn cuts `ery` path matches 3 → 1. (Side observation from the live
+check: somaNotes' `transfer` now matches 20 files, so the pre-existing `MAX_PATH_MATCHES`
+guard skips the term entirely — the >10 cliff is all-or-nothing; a future refinement could
+keep the top strong-tier matches instead of dropping the term, now that tiers exist.)
+
+Explicitly NOT shipped: token-boundary-required matching (kills typo rescue),
 test-path exclusion (test files earn opens here), per-block caps by rank (loses 17/60 hits
 for +0.7pt).
 

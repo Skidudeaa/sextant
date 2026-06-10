@@ -257,6 +257,63 @@ describe("graphRetrieve — path matching (layer 3)", () => {
   });
 });
 
+describe("classifyPathMatch — docs/013 match-location taxonomy", () => {
+  const { classifyPathMatch } = require("../lib/graph-retrieve");
+
+  it("classifies each tier", () => {
+    assert.equal(classifyPathMatch("renderer", "services/renderer.py"), "stem-exact");
+    assert.equal(classifyPathMatch("transfer", "lib/transfer_utils.py"), "stem-token");
+    assert.equal(classifyPathMatch("transfer", "static/js/transfer/index.js"), "dir-segment");
+    assert.equal(classifyPathMatch("flag", "lib/flags.py"), "near"); // plural, 1 leftover char
+    assert.equal(classifyPathMatch("render", "services/renderer.py"), "near"); // truncation, 2 leftover
+    assert.equal(classifyPathMatch("roup", "lib/grouping.js"), "loose"); // mid-word
+    assert.equal(classifyPathMatch("hness", "lib/freshness.js"), "loose"); // typo-suffix, 4 leftover
+  });
+
+  it("strips stray dots and handles empties defensively", () => {
+    assert.equal(classifyPathMatch("up.", "tools/setup.py"), "loose");
+    assert.equal(classifyPathMatch("", "a/b.js"), "loose");
+  });
+});
+
+describe("graphRetrieve — path-match tiers + borderline drop (docs/013)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    ({ tmpDir, db } = await freshDb("pathtier"));
+    graph.upsertFile(db, { relPath: "static/transfer/index.js", type: "js", sizeBytes: 100, mtimeMs: 1 }); // dir-segment
+    graph.upsertFile(db, { relPath: "lib/transfer_utils.js", type: "js", sizeBytes: 100, mtimeMs: 1 });    // stem-token
+    graph.upsertFile(db, { relPath: "lib/grouping.js", type: "js", sizeBytes: 100, mtimeMs: 1 });          // loose for "roup"
+    graph.upsertFile(db, { relPath: "lib/flags.js", type: "js", sizeBytes: 100, mtimeMs: 1 });             // near for "flag"
+  });
+
+  after(() => cleanup(tmpDir));
+
+  it("dir-segment match outranks a stem-token match (strong tier)", () => {
+    const result = graphRetrieve(db, ["transfer"]);
+    const paths = result.files.map((f) => f.path);
+    const dirIdx = paths.indexOf("static/transfer/index.js");
+    const tokIdx = paths.indexOf("lib/transfer_utils.js");
+    assert.ok(dirIdx !== -1 && tokIdx !== -1, "both must surface");
+    assert.ok(dirIdx < tokIdx, "dir-segment (22.9% open rate) must sort above stem-token (3.9%)");
+  });
+
+  it("borderline turn drops loose mid-word matches, keeps near matches", () => {
+    const loose = graphRetrieve(db, ["roup"], { borderline: true });
+    assert.ok(!loose.files.some((f) => f.path === "lib/grouping.js"),
+      "mid-word guess must be dropped on a borderline turn (1.4% noise)");
+    const near = graphRetrieve(db, ["flag"], { borderline: true });
+    assert.ok(near.files.some((f) => f.path === "lib/flags.js"),
+      "near (plural) match must survive a borderline turn");
+  });
+
+  it("confident turn keeps loose matches (typo rescue)", () => {
+    const result = graphRetrieve(db, ["roup"]);
+    assert.ok(result.files.some((f) => f.path === "lib/grouping.js"),
+      "loose matches stay on confident turns — that's where the typo rescues live");
+  });
+});
+
 describe("graphRetrieve — deduplication", () => {
   let tmpDir, db;
 
