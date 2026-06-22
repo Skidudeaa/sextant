@@ -32,6 +32,15 @@ sextant scan --force # indexes files, builds dependency graph
 
 The watcher auto-starts on next Claude Code session. To start manually: `sextant watch-start`
 
+### Codex integration (`sextant init --codex`)
+
+`sextant init` wires **Claude Code only** — `.claude/settings.json` hooks + `.mcp.json` are both Claude-Code surfaces that **Codex does not read**, so a plain init leaves sextant dark under Codex (agent orients blind = the orientation-failure class sextant exists to prevent). `sextant init --codex` additionally writes the three pieces Codex *does* read (`commands/init.js`):
+- **`<repo>/.codex/hooks.json`** — auto-injection. Mirrors the Claude hook JSON shape (`SessionStart` → `sextant hook sessionstart`, `UserPromptSubmit` → `sextant hook refresh`); Codex maps these onto its internal `session_start`/`user_prompt_submit` events. PostToolUse is intentionally omitted (unverified under Codex; an unknown event could break hook parsing). Merge-not-clobber: preserves the user's own Codex hooks.
+- **`<repo>/AGENTS.md`** — Codex's session-start orientation file. Created if absent; the sextant section is appended if AGENTS.md exists without it; left untouched if it already mentions sextant.
+- **`~/.codex/config.toml` `[mcp_servers.sextant]`** — the on-demand MCP tools (GLOBAL, since Codex ignores `.mcp.json`; one registration covers every repo — the MCP server resolves the repo from `process.cwd()`). Appended only when the file exists (no auto-create of global config); idempotent; never disturbs existing tables.
+
+**Verification boundary**: `sextant hook refresh` is verified to *emit* the injection blocks from the repo cwd (both static `<codebase-intelligence>` and query-aware `<codebase-retrieval>`). Whether Codex *ingests* hook stdout into model context is not headless-testable — it needs a live Codex session. The on-demand MCP tools work regardless. Restart Codex after init; it prompts to trust the new `.codex/hooks.json`.
+
 ## Architecture
 
 ### Pipeline

@@ -7,7 +7,7 @@ function usage(exitCode = 1) {
   console.log(`sextant v${pkg.version}
 
 Usage:
-  sextant init [--root <path> | --roots <a,b> | --roots-file <file>]
+  sextant init [--root <path> | --roots <a,b> | --roots-file <file>] [--codex]
   sextant scan [--root/--roots/--roots-file] [--force]
   sextant rescan [--root/--roots/--roots-file] [--force]
   sextant update --file <relPath> [--root <path>]
