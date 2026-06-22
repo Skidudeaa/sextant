@@ -72,7 +72,7 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
    - Separates re-exports from regular exports during indexing
 
 5. **Summary** (`lib/summary.js`) generates bounded markdown summaries (~2200 chars max)
-   - Health metrics, module types, dependency hotspots, entry points, recent git changes
+   - Health metrics, module types, dependency hotspots, public-API outline (exported symbols of hotspot files, 009 #6), entry points, recent git changes
    - Emits `ALERT:` lines when resolution < 90% or index is stale
 
 6. **Retrieve** (`lib/retrieve.js`) provides ranked search — three layers:

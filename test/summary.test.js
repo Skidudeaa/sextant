@@ -172,6 +172,47 @@ describe("summary writeSummaryMarkdown()", () => {
     assert.ok(md.includes("Indexed files"), "should include file count");
   });
 
+  it("renders a Public API outline for hotspot files (009 #6)", () => {
+    // A high-fan-in core file (hotspot) WITH exports, plus consumers that give
+    // it fan-in. Anchored on the hotspot block, not entry points (per spec a
+    // CLI dispatcher entry point carries zero exports).
+    populateGraphFromIndex(db, {
+      "lib/core.js": {
+        type: "js",
+        imports: [],
+        exports: [
+          { name: "buildThing", kind: "function" },
+          { name: "parseThing", kind: "function" },
+          { name: "default", kind: "default" },
+        ],
+      },
+      "lib/a.js": { type: "js", imports: [{ specifier: "./core", resolved: "lib/core.js", kind: "relative" }] },
+      "lib/b.js": { type: "js", imports: [{ specifier: "./core", resolved: "lib/core.js", kind: "relative" }] },
+      "lib/c.js": { type: "js", imports: [{ specifier: "./core", resolved: "lib/core.js", kind: "relative" }] },
+    });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Public API (hotspots)"), "should render the Public API section");
+    assert.match(md, /lib\/core\.js`: [^\n]*buildThing/, "hotspot file's named exports listed");
+    assert.ok(md.includes("parseThing"), "all named exports listed");
+    // "default" is not a usable symbol name — it must be dropped.
+    assert.ok(!/Public API[\s\S]*?\bdefault\b/.test(md.slice(md.indexOf("### Public API"))),
+      "literal 'default' export must be excluded from the outline");
+  });
+
+  it("omits Public API rows for hotspot files with zero exports (009 #6)", () => {
+    // A hotspot with NO exports (e.g. a CLI dispatcher) must not produce a row.
+    populateGraphFromIndex(db, {
+      "bin/cli.js": { type: "js", imports: [], exports: [] },
+      "x.js": { type: "js", imports: [{ specifier: "./bin/cli", resolved: "bin/cli.js", kind: "relative" }] },
+      "y.js": { type: "js", imports: [{ specifier: "./bin/cli", resolved: "bin/cli.js", kind: "relative" }] },
+    });
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    // The hotspot exists, but with zero exports there's no API row → no section.
+    assert.ok(!md.includes("### Public API (hotspots)"),
+      "no Public API section when no hotspot has exports");
+  });
+
   it("empty index points at globs/doctor, not a blind rescan", () => {
     populateGraphFromIndex(db, {});
 

@@ -66,9 +66,11 @@ handoff; instrument committed at `scripts/analyze-surfacings.js`). Current hando
   check_failed blackouts stay green — that's honest). Write the sentinel at BOTH injection sites
   (retrieval hook AND static-summary `applyFreshnessGate`), or SessionStart blackout never flips the
   glyph. (Refines the old "[Tier 3 / Review #13]" item below.) ~S
-- [ ] [009 #6 · composite 42] **Public-API outline** — `graph.queryExports` (`graph.js:428`) already
-  exists; one call site in `writeSummaryMarkdown`. FAIL-pre must anchor on the HOTSPOT block
-  (`bin/intel.js` has zero exports), NOT the entry-point row. Benefit-proof deferred to #1. ~XS
+- [x] [009 #6 · composite 42] **Public-API outline** — SHIPPED 2026-06-22. `### Public API (hotspots)`
+  block in `writeSummaryMarkdown` (`summary.js`), sourced from `graph.queryExports`; anchored on the
+  hotspot set (entry point `bin/intel.js` has zero exports), capped 4 files × 6 syms, `default`
+  dropped, fresh-body-only. Locked by `test/summary.test.js` (renders-on-hotspot + zero-export-omit +
+  default-drop). Unit 809, self-eval byte-identical. Benefit-proof via `eval-trajectory` as sessions accrue.
 - [ ] [009 #7 · composite 42] **Makefile → Commands block** — second producer into the shipped
   `### Commands` renderer. Specify the dual-source merge contract (polyglot repos have both
   package.json scripts AND a Makefile; dedupe/prefix, N-cap-8 contention) — that, not phantom
@@ -186,6 +188,19 @@ handoff; instrument committed at `scripts/analyze-surfacings.js`). Current hando
 - [ ] [007 tier-1, monorepo] Workspace package map → cross-package fan-in — the T2.1 package altitude;
   count cross-package edges regardless of `kind` (relative cross-package edges must not be dropped);
   new monorepo fixture required.
+
+## Active — Codex integration (shipped 2026-06-22)
+
+- [x] `sextant init --codex` — wires `.codex/hooks.json` + `AGENTS.md` + global
+  `~/.codex/config.toml [mcp_servers.sextant]` (merge-not-clobber, idempotent; `commands/init.js`,
+  9 tests). Hook-stdout ingestion VERIFIED live (Codex 0.141.0): both hooks fire, model answered
+  `INJECTED`. Shipped @ `1f96979`/`9def3ec`/`aad4039`.
+- [ ] **USER ACTION — restart Codex to trust new hooks** in the 6 repos wired this session:
+  `jan25`, `manus-api-mcp`, `amoSportsCenter`, `sinter`, `somaNotes`, `open-interpreter-fork`.
+  (glasshud already trusted.) Until restarted+trusted, those repos get the MCP tools but NOT
+  auto-injection — Codex skips an untrusted `.codex/hooks.json` silently.
+- [ ] [enhancement, optional] `sextant init` could auto-detect a Codex install (`~/.codex/`) and
+  suggest `--codex`, so the gap doesn't recur silently on new repos.
 
 ## Tech debt / flakes
 
