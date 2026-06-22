@@ -130,6 +130,14 @@ const CODEX_USERPROMPT = { hooks: [{ type: "command", command: "sextant hook ref
 
 function ensureCodexHooks(root) {
   const dir = path.join(root, ".codex");
+  // A stray FILE named .codex (e.g. an accidental `touch`/redirect) makes
+  // mkdirSync throw a bare EEXIST stack trace. Surface it as an actionable
+  // message instead — sextant exists to make state legible, not crash on it.
+  if (fs.existsSync(dir) && !fs.statSync(dir).isDirectory()) {
+    throw new Error(
+      `${dir} exists but is not a directory — remove it, then re-run \`sextant init --codex\``
+    );
+  }
   const p = path.join(dir, "hooks.json");
   let existing = {};
   if (fs.existsSync(p)) {

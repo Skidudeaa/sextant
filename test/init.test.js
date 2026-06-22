@@ -246,6 +246,16 @@ describe("init --codex — Codex hooks", () => {
     }
   });
 
+  it("ensureCodexHooks throws an actionable error when .codex is a file, not a dir", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-codex-"));
+    try {
+      fs.writeFileSync(path.join(tmp, ".codex"), ""); // stray 0-byte file
+      assert.throws(() => ensureCodexHooks(tmp), /not a directory/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("ensureCodexHooks is idempotent — re-run reports alreadyConfigured, no dupes", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-codex-"));
     try {
