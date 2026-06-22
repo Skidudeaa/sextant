@@ -21,7 +21,8 @@ promotion; aggressive gating rejected with data (lane is intrinsically fuzzy, ce
 Retrieval-precision arc now mined out; next lever is upstream (classifier conf-0.4 firing on
 conversational prompts feeds every lane — evidence, landmines, and candidate fixes in the
 handoff; instrument committed at `scripts/analyze-surfacings.js`). Current handoff:
-`docs/014-handoff.md`.
+`docs/015-handoff.md` (Codex integration shipped+verified + #6 public-API outline this session;
+the classifier conf-0.4 mission in `docs/014` is unchanged and still the next dev lever).
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 
