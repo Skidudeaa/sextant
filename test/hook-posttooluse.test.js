@@ -292,6 +292,188 @@ describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
   });
 });
 
+// ─── (D) blast-radius emitter (docs/016 Sprint 1) ───────────────────────────
+//
+// The action-time injection lane: an Edit/Write on a file with untouched
+// dependents or co-change partners emits ONE additionalContext JSON envelope;
+// everything else stays byte-silent on stdout.  Fixtures are real git repos so
+// the freshness gate sees a genuine fresh/stale state.
+
+const { execFileSync } = require("child_process");
+const freshness = require("../lib/freshness");
+
+async function buildBlastFixture({ recordScan = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-blast-"));
+  fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
+  const write = (rel, content) => fs.writeFileSync(path.join(dir, rel), content);
+  write("lib/core.js", "module.exports = {};\n");
+  for (const n of ["a", "b", "c"]) write(`lib/${n}.js`, "require('./core');\n");
+  write("lib/solo.js", "module.exports = 1;\n");
+  write("lib/leaf.js", "module.exports = 2;\n");
+  write("lib/leafdep.js", "require('./leaf');\n");
+  const git = (...a) =>
+    execFileSync("git", a, {
+      cwd: dir,
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-qm", "fixture");
+
+  const db = await graph.loadDb(dir);
+  for (const rel of ["lib/core.js", "lib/a.js", "lib/b.js", "lib/c.js", "lib/solo.js", "lib/leaf.js", "lib/leafdep.js"]) {
+    graph.upsertFile(db, { relPath: rel, type: "js", sizeBytes: 10, mtimeMs: 1 });
+  }
+  for (const n of ["a", "b", "c"]) {
+    graph.replaceImports(db, `lib/${n}.js`, [{ specifier: "./core", toPath: "lib/core.js", kind: "relative" }]);
+  }
+  graph.replaceImports(db, "lib/leafdep.js", [{ specifier: "./leaf", toPath: "lib/leaf.js", kind: "relative" }]);
+  // solo.js has no import edges — its blast radius is purely co-change.
+  graph.replaceCoChangePairs(
+    db,
+    [{ a: "lib/solo.js", b: "lib/a.js", count: 4, confidence: 0.8 }],
+    new Map([["lib/solo.js", 1], ["lib/a.js", 1]])
+  );
+  if (recordScan) freshness.recordScanState(db, dir);
+  await graph.persistDb(dir);
+  return dir;
+}
+
+function parseEnvelope(stdout) {
+  const parsed = JSON.parse(stdout);
+  assert.equal(parsed.hookSpecificOutput.hookEventName, "PostToolUse");
+  return parsed.hookSpecificOutput.additionalContext;
+}
+
+function blastEvents(dir) {
+  return telemetry.readEvents(dir).filter((e) => e.name === "blastradius.injected");
+}
+
+describe("hook-posttooluse — blast-radius emitter", () => {
+  let dir;
+  before(async () => {
+    dir = await buildBlastFixture();
+  });
+  after(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("Edit on a high-fan-in file emits the additionalContext envelope + telemetry", () => {
+    const res = runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "core.js") },
+      session_id: "blast-1",
+    });
+    const note = parseEnvelope(res.stdout);
+    assert.match(note, /Blast radius of lib\/core\.js/);
+    assert.match(note, /3 files import it/);
+    assert.match(note, /lib\/a\.js/);
+    assert.ok(note.length < 600, `note must stay compact, got ${note.length} chars`);
+    const evs = blastEvents(dir);
+    assert.equal(evs.length, 1);
+    assert.equal(evs[0].dependents, 3);
+  });
+
+  it("second Edit on the same file in the same session is byte-silent (once per session/file)", () => {
+    const res = runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "core.js") },
+      session_id: "blast-1",
+    });
+    assert.equal(res.stdout || "", "");
+    assert.equal(blastEvents(dir).length, 1, "no second telemetry event");
+  });
+
+  it("Read never emits — even on the high-fan-in file", () => {
+    const res = runPost(dir, {
+      tool_name: "Read",
+      tool_input: { file_path: path.join(dir, "lib", "core.js") },
+      session_id: "blast-read",
+    });
+    assert.equal(res.stdout || "", "");
+  });
+
+  it("dependents already touched this session are subtracted; all-touched → silent", () => {
+    const session = "blast-touched";
+    for (const n of ["a", "b", "c"]) {
+      runPost(dir, {
+        tool_name: "Read",
+        tool_input: { file_path: path.join(dir, "lib", `${n}.js`) },
+        session_id: session,
+      });
+    }
+    const res = runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "core.js") },
+      session_id: session,
+    });
+    assert.equal(res.stdout || "", "", "every dependent already opened → nothing worth saying");
+  });
+
+  it("co-change partners surface for a file with no import fan-in", () => {
+    const res = runPost(dir, {
+      tool_name: "Write",
+      tool_input: { file_path: path.join(dir, "lib", "solo.js") },
+      session_id: "blast-cc",
+    });
+    const note = parseEnvelope(res.stdout);
+    assert.match(note, /historically co-changes with lib\/a\.js \(4 commits\)/);
+    assert.doesNotMatch(note, /files import it/, "no fan-in claim without fan-in");
+  });
+
+  it("a leaf file below the fan-in floor is silent", () => {
+    const res = runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "leaf.js") },
+      session_id: "blast-leaf",
+    });
+    assert.equal(res.stdout || "", "", "fan-in 1 < floor 3 and no partners → silent");
+  });
+
+  it("content-stale graph emits NOTHING (silent absence over false confidence)", async () => {
+    const staleDir = await buildBlastFixture();
+    try {
+      // Change tracked content AFTER the scan record → status-hash mismatch →
+      // contentChanged=true. (A missing record is also content-stale, but this
+      // exercises the real "repo moved under the graph" path.)
+      fs.writeFileSync(path.join(staleDir, "lib", "core.js"), "module.exports = { changed: true };\n");
+      const res = runPost(staleDir, {
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(staleDir, "lib", "core.js") },
+        session_id: "blast-stale",
+      });
+      assert.equal(res.stdout || "", "", "content-stale → no structural claims");
+      assert.equal(blastEvents(staleDir).length, 0);
+    } finally {
+      fs.rmSync(staleDir, { recursive: true, force: true });
+    }
+  });
+
+  it("outcome scoring still works on an emission turn (both lanes fire)", async () => {
+    const dir2 = await buildBlastFixture();
+    try {
+      // Surface lib/core.js for this session, then Edit it: expect BOTH a
+      // path_hit AND the blast-radius envelope from one hook invocation.
+      fs.writeFileSync(
+        injectedPathsFile(dir2, "blast-both"),
+        JSON.stringify({ ts: Date.now(), arm: "armed", paths: [{ path: "lib/core.js", source: "exported_symbol" }] })
+      );
+      const res = runPost(dir2, {
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(dir2, "lib", "core.js") },
+        session_id: "blast-both",
+      });
+      parseEnvelope(res.stdout);
+      const hits = telemetry.readEvents(dir2).filter((e) => e.name === "retrieval.path_hit");
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0].source, "exported_symbol");
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── (C) telemetry aggregation ──────────────────────────────────────────────
 
 describe("telemetry summarize — outcome substrate aggregation", () => {
