@@ -2,6 +2,22 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-01 — blast-radius lane: action-time injection after edits (docs/016 Sprint 1)
+
+Sextant's first ACTION-TIME injection: after the agent edits a file, the PostToolUse hook may emit one factual note — the file's dependents not yet touched this session plus its top git co-change partners — via the `hookSpecificOutput.additionalContext` JSON envelope. This targets the "missed blast radius" orientation-failure class named in the project mission but previously unserved: prompt-time retrieval answers "where is X", not "what breaks if I change X".
+
+Grounded by four recon spikes with pre-registered kill criteria (`docs/016-phase0-recon.md`):
+- **R1 field-verified the channel** (Claude Code 2.1.198, marker experiment): plain PostToolUse stdout goes to the debug log ONLY — the long-standing CLAUDE.md caveat claiming it "can reach the transcript/context" was WRONG (now corrected, Visibility Model table updated). The JSON envelope IS injected as a `<system-reminder>` immediately after the tool call.
+- **R2 pass-with-filters**: raw co-change top-50 is 40-86% CHANGELOG/docs junk; filtering to indexed source files leaves ~0% junk, and 37% of sextant's own filtered pairs have NO import edge (hub-orchestrated siblings — signal the import graph structurally cannot see). Both v1 requirements shipped: the `isIndexable`+scan-membership pair filter and hub dampening (partner degree > 25 dropped).
+- **R3 killed live self-tuning** (88% single-source blocks = no lever for a per-source multiplier; dead-tie simulation; 19/6 lifetime samples on the thin sources; rolling transcript corpus). Fallback shipped: `sextant tune` — REPORTING-ONLY per-source open rates with 95% Wilson intervals and n≥30 prior-eligibility; no scoring weight reads it.
+- **R4**: no hook channel to Task/workflow subagents exists (0/200 transcripts) — subagent orientation excluded from this sprint's scope.
+
+Mechanics: `lib/cochange.js` parses `git log -n3000 --name-only --no-merges` at bulk-scan finalize into `cochange_pairs`/`cochange_degree` (wholesale replace, count≥3 floor, 5000-pair cap, NUL pair keys); SCHEMA_VERSION 2→3. Emitter discipline: fan-in ≥ 3 or partner confidence ≥ 0.4 to speak at all; once per (session, file); Reads and repeat edits silent; content-stale graph emits NOTHING (silent absence); freshness's git cost paid only on would-emit turns; never throws. Telemetry: `blastradius.injected` + audit section in `sextant telemetry`. Per-session state at `.planning/intel/.blastradius.<sessionKey>`.
+
+Field note: the lane's first real injection fired during its own development session — on the very edit that completed the emitter — and correctly surfaced the two dependent test files that needed updating next.
+
+Gates: unit 839/839 + integration scripts green, CLI self-eval byte-identical (21/21, MRR 0.900, nDCG 0.920, lift +0.012 — scoring untouched), live envelope verification in-session (marker experiment + two real emissions during development). New tests: 15 (cochange lib) + 8 (emitter) + 6 (tune) + 1 (telemetry audit).
+
 ## 2026-06-09 — path_match precision: match-location tiers + borderline loose-drop (docs/013)
 
 Follow-up instance analysis of the path_match lane (1,270 surfacings, 4.7% opens — 65% of all surfaced volume) found a different shape than 012: **no 0% junk class**. Hit mass is diffuse because fuzzy filename matching is the lane's job — "junk-looking" matches include typo rescues (`rendere`→renderer, `hness`→freshness) that earned real opens, and every simulated aggressive gate traded ~⅓ of hits for ~1pt of rate. Aggressive gating rejected; two surgical moves shipped (`docs/013-path-match-pool.md`):
