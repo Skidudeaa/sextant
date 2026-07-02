@@ -18,6 +18,7 @@ Usage:
   sextant query <imports|dependents|exports> --file <relPath> [--root <path>]
   sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old]
   sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
+  sextant tune [--projects <path>] [--repo <name>] [--json]
   sextant hook sessionstart
   sextant hook refresh
   sextant hook posttooluse
@@ -41,6 +42,7 @@ const commandMap = {
   query: "../commands/query",
   telemetry: "../commands/telemetry",
   "eval-trajectory": "../commands/eval-trajectory",
+  tune: "../commands/tune",
   retrieve: "../commands/retrieve",
   zoekt: "../commands/zoekt",
 };
