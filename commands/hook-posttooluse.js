@@ -310,10 +310,20 @@ async function maybeEmitBlastRadius(root, sessionKey, repoRel, brState) {
 
     // Freshness gate LAST: structural claims only from a content-fresh graph.
     // Pure version staleness (contentChanged=false) keeps the claims valid —
-    // same distinction hook-refresh draws.
-    const freshness = await require("../lib/freshness").checkFreshness(root);
+    // same distinction hook-refresh draws.  SELF-CAUSED-DRIFT exception
+    // (found by the headless end-to-end gate): the agent's OWN edit makes the
+    // tree content-stale at exactly the moment this note should fire, so
+    // without a live watcher re-stamping scan state the lane would never
+    // speak.  Drift confined to files this session touched does not
+    // invalidate claims about OTHER files (the dependents/partners named in
+    // the note); foreign drift still suppresses.
+    const freshnessMod = require("../lib/freshness");
+    const freshness = await freshnessMod.checkFreshness(root);
     if (freshness && freshness.fresh === false && freshness.contentChanged === true) {
-      return false;
+      const touchedSet = new Set([...brState.touched, repoRel]);
+      if (!freshnessMod.isSelfCausedStatusDrift(db, root, touchedSet)) {
+        return false;
+      }
     }
 
     emitAdditionalContext(composed.note);

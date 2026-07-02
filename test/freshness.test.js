@@ -417,3 +417,80 @@ describe("freshness scan-in-progress marker (cooperative watcher pause)", () => 
     assert.equal(fs.existsSync(p), false, "must clear our own marker");
   });
 });
+
+describe("isSelfCausedStatusDrift (docs/016 blast-radius fix)", () => {
+  const { execFileSync } = require("child_process");
+  const graph = require("../lib/graph");
+  let dir, db;
+
+  before(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-selfdrift-"));
+    fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
+    const git = (...a) =>
+      execFileSync("git", a, { cwd: dir, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    fs.writeFileSync(path.join(dir, "a.js"), "1");
+    fs.writeFileSync(path.join(dir, "b.js"), "2");
+    git("init", "-q");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    db = await graph.loadDb(dir);
+    freshness.recordScanState(db, dir);
+  });
+
+  after(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("recordScanState persists the dirty-path list (empty at a clean tree)", () => {
+    const raw = graph.getMetaValue(db, freshness.META_STATUS_FILES);
+    assert.deepEqual(JSON.parse(raw), []);
+  });
+
+  it("drift confined to touched files → true; foreign drift → false", () => {
+    fs.writeFileSync(path.join(dir, "a.js"), "changed");
+    assert.equal(
+      freshness.isSelfCausedStatusDrift(db, dir, new Set(["a.js"])),
+      true,
+      "only a.js drifted and a.js is touched"
+    );
+    assert.equal(
+      freshness.isSelfCausedStatusDrift(db, dir, new Set(["b.js"])),
+      false,
+      "a.js drifted but only b.js is touched"
+    );
+    fs.writeFileSync(path.join(dir, "b.js"), "also changed");
+    assert.equal(
+      freshness.isSelfCausedStatusDrift(db, dir, new Set(["a.js"])),
+      false,
+      "b.js drift is foreign"
+    );
+    assert.equal(
+      freshness.isSelfCausedStatusDrift(db, dir, new Set(["a.js", "b.js"])),
+      true,
+      "both drifted, both touched"
+    );
+  });
+
+  it("a moved HEAD disqualifies the check (porcelain baseline shifted)", () => {
+    const git = (...a) =>
+      execFileSync("git", a, { cwd: dir, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+    git("add", "-A");
+    git("commit", "-qm", "moves head");
+    assert.equal(
+      freshness.isSelfCausedStatusDrift(db, dir, new Set(["a.js", "b.js"])),
+      false,
+      "HEAD moved since scan → cannot compare path lists"
+    );
+  });
+
+  it("a missing stored list (pre-upgrade graph or >cap tree) → false", async () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-selfdrift-bare-"));
+    try {
+      fs.mkdirSync(path.join(bare, ".planning", "intel"), { recursive: true });
+      const db2 = await graph.loadDb(bare);
+      assert.equal(freshness.isSelfCausedStatusDrift(db2, bare, new Set(["x.js"])), false);
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});

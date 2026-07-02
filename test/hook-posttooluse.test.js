@@ -431,22 +431,68 @@ describe("hook-posttooluse — blast-radius emitter", () => {
     assert.equal(res.stdout || "", "", "fan-in 1 < floor 3 and no partners → silent");
   });
 
-  it("content-stale graph emits NOTHING (silent absence over false confidence)", async () => {
+  it("FOREIGN content drift emits NOTHING (silent absence over false confidence)", async () => {
     const staleDir = await buildBlastFixture();
     try {
-      // Change tracked content AFTER the scan record → status-hash mismatch →
-      // contentChanged=true. (A missing record is also content-stale, but this
-      // exercises the real "repo moved under the graph" path.)
-      fs.writeFileSync(path.join(staleDir, "lib", "core.js"), "module.exports = { changed: true };\n");
+      // A file the session never touched changes AFTER the scan record →
+      // status drift NOT attributable to this session → suppress.
+      fs.writeFileSync(path.join(staleDir, "lib", "solo.js"), "module.exports = 99;\n");
       const res = runPost(staleDir, {
         tool_name: "Edit",
         tool_input: { file_path: path.join(staleDir, "lib", "core.js") },
         session_id: "blast-stale",
       });
-      assert.equal(res.stdout || "", "", "content-stale → no structural claims");
+      assert.equal(res.stdout || "", "", "foreign drift → no structural claims");
       assert.equal(blastEvents(staleDir).length, 0);
     } finally {
       fs.rmSync(staleDir, { recursive: true, force: true });
+    }
+  });
+
+  it("SELF-CAUSED drift still emits — the edit that triggers the note must not suppress it", async () => {
+    // The headless end-to-end gate found this: without a live watcher, the
+    // agent's own edit made the tree content-stale at hook time and the lane
+    // never spoke.  Drift confined to the edited file itself is self-caused.
+    const selfDir = await buildBlastFixture();
+    try {
+      fs.writeFileSync(path.join(selfDir, "lib", "core.js"), "module.exports = { edited: true };\n");
+      const res = runPost(selfDir, {
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(selfDir, "lib", "core.js") },
+        session_id: "blast-self",
+      });
+      const note = parseEnvelope(res.stdout);
+      assert.match(note, /Blast radius of lib\/core\.js/);
+      assert.equal(blastEvents(selfDir).length, 1);
+    } finally {
+      fs.rmSync(selfDir, { recursive: true, force: true });
+    }
+  });
+
+  it("self-caused drift across MULTIPLE session-touched files still emits", async () => {
+    const dir3 = await buildBlastFixture();
+    try {
+      const session = "blast-multi-touch";
+      // The session Reads (touches) lib/a.js, then both a.js and core.js are
+      // dirty at Edit time — all drift attributable to the session.
+      runPost(dir3, {
+        tool_name: "Read",
+        tool_input: { file_path: path.join(dir3, "lib", "a.js") },
+        session_id: session,
+      });
+      fs.writeFileSync(path.join(dir3, "lib", "a.js"), "// touched by session\n");
+      fs.writeFileSync(path.join(dir3, "lib", "core.js"), "module.exports = { v2: 1 };\n");
+      const res = runPost(dir3, {
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(dir3, "lib", "core.js") },
+        session_id: session,
+      });
+      const note = parseEnvelope(res.stdout);
+      // a.js was touched → subtracted from the untouched-dependents list
+      assert.doesNotMatch(note, /lib\/a\.js/);
+      assert.match(note, /lib\/b\.js/);
+    } finally {
+      fs.rmSync(dir3, { recursive: true, force: true });
     }
   });
 
