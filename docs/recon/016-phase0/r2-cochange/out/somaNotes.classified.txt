@@ -1,0 +1,14 @@
+=== /root/somaNotes ===
+top50 pairs: 50
+junk-involved pairs: 43 (86%)
+source-only pairs (post-filter): 7 (14%)
+  of which involve a test file: 0
+
+Source-only pairs (post-filter), in original rank order:
+  count= 92 conf=0.41  static/js/census/index.js  <->  templates/census.html
+  count= 71 conf=0.48  static/js/census/index.js  <->  static/js/census/note-generation.js
+  count= 43 conf=0.63  static/css/sol-layout.css  <->  templates/census.html
+  count= 43 conf=0.25  somaNotes.py  <->  templates/census.html
+  count= 35 conf=0.38  core/settings.py  <->  somaNotes.py
+  count= 32 conf=0.22  static/js/census/note-generation.js  <->  templates/census.html
+  count= 29 conf=0.43  static/css/sol-layout.css  <->  static/js/census/index.js

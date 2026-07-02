@@ -1,0 +1,412 @@
+{
+  "repo": "/root/defGen2",
+  "totalCommits": 233,
+  "usedCommits": 226,
+  "excludedCommits": 6,
+  "maxFilesPerCommit": 20,
+  "pairsGte3": 83,
+  "pairsGte5": 11,
+  "totalPairs": 1148,
+  "top50": [
+    {
+      "a": "CLAUDE.md",
+      "b": "allTogether3.py",
+      "count": 13,
+      "occA": 19,
+      "occB": 123,
+      "confidence": 0.6842105263157895
+    },
+    {
+      "a": "allTogether3.py",
+      "b": "generate_today.sh",
+      "count": 11,
+      "occA": 123,
+      "occB": 14,
+      "confidence": 0.7857142857142857
+    },
+    {
+      "a": "allTogether3.py",
+      "b": "narrative_orchestrator.py",
+      "count": 9,
+      "occA": 123,
+      "occB": 10,
+      "confidence": 0.9
+    },
+    {
+      "a": ".planning/ROADMAP.md",
+      "b": ".planning/STATE.md",
+      "count": 7,
+      "occA": 9,
+      "occB": 10,
+      "confidence": 0.7777777777777778
+    },
+    {
+      "a": "api/routes_defense.py",
+      "b": "api/routes_stream.py",
+      "count": 7,
+      "occA": 18,
+      "occB": 11,
+      "confidence": 0.6363636363636364
+    },
+    {
+      "a": ".env.example",
+      "b": "allTogether3.py",
+      "count": 6,
+      "occA": 7,
+      "occB": 123,
+      "confidence": 0.8571428571428571
+    },
+    {
+      "a": "docs/api_fixtures/README.md",
+      "b": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "count": 5,
+      "occA": 6,
+      "occB": 5,
+      "confidence": 1
+    },
+    {
+      "a": "allTogether3.py",
+      "b": "location_integration.py",
+      "count": 5,
+      "occA": 123,
+      "occB": 5,
+      "confidence": 1
+    },
+    {
+      "a": ".planning/REQUIREMENTS.md",
+      "b": ".planning/ROADMAP.md",
+      "count": 5,
+      "occA": 5,
+      "occB": 9,
+      "confidence": 1
+    },
+    {
+      "a": "api/models.py",
+      "b": "api/routes_defense.py",
+      "count": 5,
+      "occA": 7,
+      "occB": 18,
+      "confidence": 0.7142857142857143
+    },
+    {
+      "a": "allTogether3.py",
+      "b": "api/routes_defense.py",
+      "count": 5,
+      "occA": 123,
+      "occB": 18,
+      "confidence": 0.2777777777777778
+    },
+    {
+      "a": "analysis/chain_helpers.py",
+      "b": "docs/api_fixtures/rich_fusion_full.json",
+      "count": 4,
+      "occA": 6,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "analysis/chain_helpers.py",
+      "b": "docs/api_fixtures/rich_fusion_minimal.json",
+      "count": 4,
+      "occA": 6,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "api/models.py",
+      "b": "docs/api_fixtures/rich_fusion_full.json",
+      "count": 4,
+      "occA": 7,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "api/models.py",
+      "b": "docs/api_fixtures/rich_fusion_minimal.json",
+      "count": 4,
+      "occA": 7,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/README.md",
+      "b": "docs/api_fixtures/rich_fusion_full.json",
+      "count": 4,
+      "occA": 6,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/README.md",
+      "b": "docs/api_fixtures/rich_fusion_minimal.json",
+      "count": 4,
+      "occA": 6,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "b": "docs/api_fixtures/rich_fusion_full.json",
+      "count": 4,
+      "occA": 5,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "b": "docs/api_fixtures/rich_fusion_minimal.json",
+      "count": 4,
+      "occA": 5,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/rich_fusion_full.json",
+      "b": "docs/api_fixtures/rich_fusion_minimal.json",
+      "count": 4,
+      "occA": 4,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "analysis/narrative_fusion.py",
+      "b": "api/models.py",
+      "count": 4,
+      "occA": 4,
+      "occB": 7,
+      "confidence": 1
+    },
+    {
+      "a": "allTogether3.py",
+      "b": "requirements.txt",
+      "count": 4,
+      "occA": 123,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": ".env",
+      "b": "allTogether3.py",
+      "count": 4,
+      "occA": 4,
+      "occB": 123,
+      "confidence": 1
+    },
+    {
+      "a": "analysis/chain_helpers.py",
+      "b": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "count": 4,
+      "occA": 6,
+      "occB": 5,
+      "confidence": 0.8
+    },
+    {
+      "a": "api/models.py",
+      "b": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "count": 4,
+      "occA": 7,
+      "occB": 5,
+      "confidence": 0.8
+    },
+    {
+      "a": ".planning/REQUIREMENTS.md",
+      "b": ".planning/STATE.md",
+      "count": 4,
+      "occA": 5,
+      "occB": 10,
+      "confidence": 0.8
+    },
+    {
+      "a": "analysis/chain_helpers.py",
+      "b": "api/routes_defense.py",
+      "count": 4,
+      "occA": 6,
+      "occB": 18,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "analysis/chain_helpers.py",
+      "b": "api/models.py",
+      "count": 4,
+      "occA": 6,
+      "occB": 7,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "analysis/chain_helpers.py",
+      "b": "docs/api_fixtures/README.md",
+      "count": 4,
+      "occA": 6,
+      "occB": 6,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "api/models.py",
+      "b": "docs/api_fixtures/README.md",
+      "count": 4,
+      "occA": 7,
+      "occB": 6,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "allTogether3.py",
+      "b": "analysis/generators.py",
+      "count": 4,
+      "occA": 123,
+      "occB": 8,
+      "confidence": 0.5
+    },
+    {
+      "a": "analysis/generators.py",
+      "b": "api/routes_defense.py",
+      "count": 4,
+      "occA": 8,
+      "occB": 18,
+      "confidence": 0.5
+    },
+    {
+      "a": ".gitignore",
+      "b": "allTogether3.py",
+      "count": 4,
+      "occA": 10,
+      "occB": 123,
+      "confidence": 0.4
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "api/routes_defense.py",
+      "count": 4,
+      "occA": 19,
+      "occB": 18,
+      "confidence": 0.2222222222222222
+    },
+    {
+      "a": "analysis/continuity_pipeline.py",
+      "b": "api/routes_defense.py",
+      "count": 3,
+      "occA": 3,
+      "occB": 18,
+      "confidence": 1
+    },
+    {
+      "a": "analysis/continuity_pipeline.py",
+      "b": "tests/test_continuity_wiring.py",
+      "count": 3,
+      "occA": 3,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/README.md",
+      "b": "static/ui-next/fixtures/rich_fusion_full.json",
+      "count": 3,
+      "occA": 6,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/README.md",
+      "b": "static/ui-next/fixtures/rich_fusion_minimal.json",
+      "count": 3,
+      "occA": 6,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "b": "static/ui-next/fixtures/rich_fusion_full.json",
+      "count": 3,
+      "occA": 5,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "b": "static/ui-next/fixtures/rich_fusion_minimal.json",
+      "count": 3,
+      "occA": 5,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "static/ui-next/fixtures/rich_fusion_full.json",
+      "b": "static/ui-next/fixtures/rich_fusion_minimal.json",
+      "count": 3,
+      "occA": 3,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "analysis/continuity_brief.py",
+      "b": "tests/test_continuity_brief.py",
+      "count": 3,
+      "occA": 4,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "api/routes_defense.py",
+      "b": "tests/test_persist_analysis.py",
+      "count": 3,
+      "occA": 18,
+      "occB": 3,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "analysis/chain_helpers.py",
+      "count": 3,
+      "occA": 3,
+      "occB": 6,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "analysis/narrative_fusion.py",
+      "count": 3,
+      "occA": 3,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "api/models.py",
+      "count": 3,
+      "occA": 3,
+      "occB": 7,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "docs/api_fixtures/README.md",
+      "count": 3,
+      "occA": 3,
+      "occB": 6,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "docs/api_fixtures/_make_rich_fusion_sample.py",
+      "count": 3,
+      "occA": 3,
+      "occB": 5,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "docs/api_fixtures/rich_fusion_full.json",
+      "count": 3,
+      "occA": 3,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "SWIFTUI_API_CONTRACT_ADDENDUM_rich-fusion_2026-06-09.md",
+      "b": "docs/api_fixtures/rich_fusion_minimal.json",
+      "count": 3,
+      "occA": 3,
+      "occB": 4,
+      "confidence": 1
+    }
+  ]
+}

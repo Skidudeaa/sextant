@@ -1,0 +1,412 @@
+{
+  "repo": "/root/sextant",
+  "totalCommits": 157,
+  "usedCommits": 154,
+  "excludedCommits": 3,
+  "maxFilesPerCommit": 20,
+  "pairsGte3": 132,
+  "pairsGte5": 27,
+  "totalPairs": 1712,
+  "top50": [
+    {
+      "a": "CLAUDE.md",
+      "b": "README.md",
+      "count": 14,
+      "occA": 40,
+      "occB": 20,
+      "confidence": 0.7
+    },
+    {
+      "a": "lib/merge-results.js",
+      "b": "test/merge-results.test.js",
+      "count": 9,
+      "occA": 12,
+      "occB": 9,
+      "confidence": 1
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/retrieve.js",
+      "count": 8,
+      "occA": 40,
+      "occB": 11,
+      "confidence": 0.7272727272727273
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "CLAUDE.md",
+      "count": 8,
+      "occA": 12,
+      "occB": 40,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "lib/intel.js",
+      "b": "lib/summary.js",
+      "count": 8,
+      "occA": 18,
+      "occB": 18,
+      "confidence": 0.4444444444444444
+    },
+    {
+      "a": "lib/classifier.js",
+      "b": "test/classifier.test.js",
+      "count": 7,
+      "occA": 7,
+      "occB": 8,
+      "confidence": 1
+    },
+    {
+      "a": "commands/scan.js",
+      "b": "lib/intel.js",
+      "count": 7,
+      "occA": 9,
+      "occB": 18,
+      "confidence": 0.7777777777777778
+    },
+    {
+      "a": "lib/graph.js",
+      "b": "lib/intel.js",
+      "count": 7,
+      "occA": 13,
+      "occB": 18,
+      "confidence": 0.5384615384615384
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/intel.js",
+      "count": 7,
+      "occA": 40,
+      "occB": 18,
+      "confidence": 0.3888888888888889
+    },
+    {
+      "a": "lib/summary.js",
+      "b": "test/summary.test.js",
+      "count": 6,
+      "occA": 18,
+      "occB": 6,
+      "confidence": 1
+    },
+    {
+      "a": "lib/config.js",
+      "b": "lib/intel.js",
+      "count": 6,
+      "occA": 7,
+      "occB": 18,
+      "confidence": 0.8571428571428571
+    },
+    {
+      "a": "lib/summary.js",
+      "b": "watch.js",
+      "count": 6,
+      "occA": 18,
+      "occB": 9,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "README.md",
+      "count": 6,
+      "occA": 12,
+      "occB": 20,
+      "confidence": 0.5
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/summary.js",
+      "count": 6,
+      "occA": 40,
+      "occB": 18,
+      "confidence": 0.3333333333333333
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "todos.md",
+      "count": 6,
+      "occA": 40,
+      "occB": 25,
+      "confidence": 0.24
+    },
+    {
+      "a": "mcp/server.js",
+      "b": "test/mcp-server.test.js",
+      "count": 5,
+      "occA": 6,
+      "occB": 5,
+      "confidence": 1
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "commands/init.js",
+      "count": 5,
+      "occA": 40,
+      "occB": 7,
+      "confidence": 0.7142857142857143
+    },
+    {
+      "a": "commands/hook-refresh.js",
+      "b": "commands/telemetry.js",
+      "count": 5,
+      "occA": 16,
+      "occB": 7,
+      "confidence": 0.7142857142857143
+    },
+    {
+      "a": "commands/doctor.js",
+      "b": "lib/summary.js",
+      "count": 5,
+      "occA": 8,
+      "occB": 18,
+      "confidence": 0.625
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "commands/scan.js",
+      "count": 5,
+      "occA": 40,
+      "occB": 9,
+      "confidence": 0.5555555555555556
+    },
+    {
+      "a": "lib/graph.js",
+      "b": "watch.js",
+      "count": 5,
+      "occA": 13,
+      "occB": 9,
+      "confidence": 0.5555555555555556
+    },
+    {
+      "a": "bin/intel.js",
+      "b": "lib/graph.js",
+      "count": 5,
+      "occA": 9,
+      "occB": 13,
+      "confidence": 0.5555555555555556
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/zoekt.js",
+      "count": 5,
+      "occA": 40,
+      "occB": 10,
+      "confidence": 0.5
+    },
+    {
+      "a": "lib/cli.js",
+      "b": "lib/summary.js",
+      "count": 5,
+      "occA": 10,
+      "occB": 18,
+      "confidence": 0.5
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/merge-results.js",
+      "count": 5,
+      "occA": 40,
+      "occB": 12,
+      "confidence": 0.4166666666666667
+    },
+    {
+      "a": "lib/graph.js",
+      "b": "lib/summary.js",
+      "count": 5,
+      "occA": 13,
+      "occB": 18,
+      "confidence": 0.38461538461538464
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "commands/hook-refresh.js",
+      "count": 5,
+      "occA": 40,
+      "occB": 16,
+      "confidence": 0.3125
+    },
+    {
+      "a": "commands/init.js",
+      "b": "test/init.test.js",
+      "count": 4,
+      "occA": 7,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "lib/graph-retrieve.js",
+      "b": "test/graph-retrieve.test.js",
+      "count": 4,
+      "occA": 6,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "lib/cli.js",
+      "b": "test/cli.test.js",
+      "count": 4,
+      "occA": 10,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "test/zoekt-query.test.js",
+      "count": 4,
+      "occA": 40,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "lib/zoekt.js",
+      "b": "test/zoekt-query.test.js",
+      "count": 4,
+      "occA": 10,
+      "occB": 4,
+      "confidence": 1
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "fixtures/vapor-baseline.json",
+      "count": 4,
+      "occA": 40,
+      "occB": 5,
+      "confidence": 0.8
+    },
+    {
+      "a": "lib/extractors/python.js",
+      "b": "lib/graph.js",
+      "count": 4,
+      "occA": 5,
+      "occB": 13,
+      "confidence": 0.8
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/graph-retrieve.js",
+      "count": 4,
+      "occA": 40,
+      "occB": 6,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "lib/graph-retrieve.js",
+      "b": "lib/merge-results.js",
+      "count": 4,
+      "occA": 6,
+      "occB": 12,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "lib/freshness.js",
+      "b": "test/freshness.test.js",
+      "count": 4,
+      "occA": 7,
+      "occB": 6,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "EVAL_FINDINGS.md",
+      "b": "README.md",
+      "count": 4,
+      "occA": 6,
+      "occB": 20,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "lib/graph.js",
+      "b": "lib/rg.js",
+      "count": 4,
+      "occA": 13,
+      "occB": 6,
+      "confidence": 0.6666666666666666
+    },
+    {
+      "a": "commands/doctor.js",
+      "b": "scripts/statusline-command.sh",
+      "count": 4,
+      "occA": 8,
+      "occB": 7,
+      "confidence": 0.5714285714285714
+    },
+    {
+      "a": "lib/config.js",
+      "b": "lib/summary.js",
+      "count": 4,
+      "occA": 7,
+      "occB": 18,
+      "confidence": 0.5714285714285714
+    },
+    {
+      "a": "lib/summary.js",
+      "b": "lib/utils.js",
+      "count": 4,
+      "occA": 18,
+      "occB": 7,
+      "confidence": 0.5714285714285714
+    },
+    {
+      "a": "lib/config.js",
+      "b": "lib/utils.js",
+      "count": 4,
+      "occA": 7,
+      "occB": 7,
+      "confidence": 0.5714285714285714
+    },
+    {
+      "a": "lib/intel.js",
+      "b": "lib/utils.js",
+      "count": 4,
+      "occA": 18,
+      "occB": 7,
+      "confidence": 0.5714285714285714
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "bin/intel.js",
+      "count": 4,
+      "occA": 40,
+      "occB": 9,
+      "confidence": 0.4444444444444444
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "test/merge-results.test.js",
+      "count": 4,
+      "occA": 40,
+      "occB": 9,
+      "confidence": 0.4444444444444444
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "watch.js",
+      "count": 4,
+      "occA": 40,
+      "occB": 9,
+      "confidence": 0.4444444444444444
+    },
+    {
+      "a": "lib/intel.js",
+      "b": "watch.js",
+      "count": 4,
+      "occA": 18,
+      "occB": 9,
+      "confidence": 0.4444444444444444
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "lib/cli.js",
+      "count": 4,
+      "occA": 40,
+      "occB": 10,
+      "confidence": 0.4
+    },
+    {
+      "a": "lib/cli.js",
+      "b": "lib/intel.js",
+      "count": 4,
+      "occA": 10,
+      "occB": 18,
+      "confidence": 0.4
+    }
+  ]
+}

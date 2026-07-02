@@ -1,0 +1,23 @@
+=== /root/jan25 ===
+top50 pairs: 50
+junk-involved pairs: 34 (68%)
+source-only pairs (post-filter): 16 (32%)
+  of which involve a test file: 3
+
+Source-only pairs (post-filter), in original rank order:
+  count= 30 conf=0.41  feb8.py  <->  services/content/song_story.py
+  count= 22 conf=0.73  routes/timeline.py  <->  services/timeline/cache.py
+  count= 21 conf=0.88  services/content/song_story.py  <->  tests/test_song_story.py
+  count= 19 conf=0.79  feb8.py  <->  redis_sse_manager_simple.py
+  count= 17 conf=0.53  appleMediaMarch2.py  <->  feb8.py
+  count= 16 conf=0.64  services/biography/config.py  <->  services/biography/pipeline.py
+  count= 16 conf=0.53  feb8.py  <->  openai_bio3.py
+  count= 15 conf=0.60  desc2.py  <->  feb8.py
+  count= 14 conf=0.93  services/booklet/config.py  <->  tests/test_booklet_substrate.py
+  count= 14 conf=0.88  services/booklet/renderer.py  <->  tests/test_booklet_substrate.py
+  count= 13 conf=0.65  autocorrect.py  <->  feb8.py
+  count= 13 conf=0.46  feb8.py  <->  routes/biography_v2.py
+  count= 12 conf=0.71  artist_photo_optimized.py  <->  feb8.py
+  count= 12 conf=0.60  feb8.py  <->  services/biography/fact_accumulator.py
+  count= 12 conf=0.31  feb8.py  <->  services/biography/data_sources.py
+  count= 11 conf=0.73  services/booklet/config.py  <->  services/booklet/renderer.py

@@ -1,0 +1,412 @@
+{
+  "repo": "/root/jan25",
+  "totalCommits": 1090,
+  "usedCommits": 1041,
+  "excludedCommits": 48,
+  "maxFilesPerCommit": 20,
+  "pairsGte3": 624,
+  "pairsGte5": 250,
+  "totalPairs": 7216,
+  "top50": [
+    {
+      "a": "CHANGELOG.md",
+      "b": "todos.md",
+      "count": 343,
+      "occA": 386,
+      "occB": 369,
+      "confidence": 0.9295392953929539
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "feb8.py",
+      "count": 128,
+      "occA": 386,
+      "occB": 359,
+      "confidence": 0.3565459610027855
+    },
+    {
+      "a": "feb8.py",
+      "b": "todos.md",
+      "count": 123,
+      "occA": 359,
+      "occB": 369,
+      "confidence": 0.3426183844011142
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "routes/timeline.py",
+      "count": 48,
+      "occA": 386,
+      "occB": 59,
+      "confidence": 0.8135593220338984
+    },
+    {
+      "a": "routes/timeline.py",
+      "b": "todos.md",
+      "count": 46,
+      "occA": 59,
+      "occB": 369,
+      "confidence": 0.7796610169491526
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/content/song_story.py",
+      "count": 43,
+      "occA": 386,
+      "occB": 74,
+      "confidence": 0.581081081081081
+    },
+    {
+      "a": "services/content/song_story.py",
+      "b": "todos.md",
+      "count": 42,
+      "occA": 74,
+      "occB": 369,
+      "confidence": 0.5675675675675675
+    },
+    {
+      "a": "feb8.py",
+      "b": "services/content/song_story.py",
+      "count": 30,
+      "occA": 359,
+      "occB": 74,
+      "confidence": 0.40540540540540543
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/biography/data_sources.py",
+      "count": 29,
+      "occA": 386,
+      "occB": 39,
+      "confidence": 0.7435897435897436
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/timeline/cache.py",
+      "count": 24,
+      "occA": 386,
+      "occB": 30,
+      "confidence": 0.8
+    },
+    {
+      "a": "services/timeline/cache.py",
+      "b": "todos.md",
+      "count": 24,
+      "occA": 30,
+      "occB": 369,
+      "confidence": 0.8
+    },
+    {
+      "a": "services/biography/data_sources.py",
+      "b": "todos.md",
+      "count": 24,
+      "occA": 39,
+      "occB": 369,
+      "confidence": 0.6153846153846154
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/plans/2026-05-13-feb8-extraction-progress.md",
+      "count": 23,
+      "occA": 386,
+      "occB": 26,
+      "confidence": 0.8846153846153846
+    },
+    {
+      "a": "docs/plans/2026-05-13-feb8-extraction-progress.md",
+      "b": "todos.md",
+      "count": 23,
+      "occA": 26,
+      "occB": 369,
+      "confidence": 0.8846153846153846
+    },
+    {
+      "a": "docs/plans/2026-05-13-feb8-extraction-progress.md",
+      "b": "feb8.py",
+      "count": 22,
+      "occA": 26,
+      "occB": 359,
+      "confidence": 0.8461538461538461
+    },
+    {
+      "a": "routes/timeline.py",
+      "b": "services/timeline/cache.py",
+      "count": 22,
+      "occA": 59,
+      "occB": 30,
+      "confidence": 0.7333333333333333
+    },
+    {
+      "a": "services/content/song_story.py",
+      "b": "tests/test_song_story.py",
+      "count": 21,
+      "occA": 74,
+      "occB": 24,
+      "confidence": 0.875
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "tests/test_booklet_substrate.py",
+      "count": 19,
+      "occA": 386,
+      "occB": 21,
+      "confidence": 0.9047619047619048
+    },
+    {
+      "a": "feb8.py",
+      "b": "redis_sse_manager_simple.py",
+      "count": 19,
+      "occA": 359,
+      "occB": 24,
+      "confidence": 0.7916666666666666
+    },
+    {
+      "a": "tests/test_booklet_substrate.py",
+      "b": "todos.md",
+      "count": 17,
+      "occA": 21,
+      "occB": 369,
+      "confidence": 0.8095238095238095
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "tests/test_song_story.py",
+      "count": 17,
+      "occA": 386,
+      "occB": 24,
+      "confidence": 0.7083333333333334
+    },
+    {
+      "a": "tests/test_song_story.py",
+      "b": "todos.md",
+      "count": 17,
+      "occA": 24,
+      "occB": 369,
+      "confidence": 0.7083333333333334
+    },
+    {
+      "a": "appleMediaMarch2.py",
+      "b": "feb8.py",
+      "count": 17,
+      "occA": 32,
+      "occB": 359,
+      "confidence": 0.53125
+    },
+    {
+      "a": "services/biography/config.py",
+      "b": "services/biography/pipeline.py",
+      "count": 16,
+      "occA": 26,
+      "occB": 25,
+      "confidence": 0.64
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/biography/config.py",
+      "count": 16,
+      "occA": 386,
+      "occB": 26,
+      "confidence": 0.6153846153846154
+    },
+    {
+      "a": "feb8.py",
+      "b": "openai_bio3.py",
+      "count": 16,
+      "occA": 359,
+      "occB": 30,
+      "confidence": 0.5333333333333333
+    },
+    {
+      "a": "artist_cache.pickle",
+      "b": "bio_cache.pickle",
+      "count": 15,
+      "occA": 16,
+      "occB": 15,
+      "confidence": 1
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/booklet/renderer.py",
+      "count": 15,
+      "occA": 386,
+      "occB": 16,
+      "confidence": 0.9375
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/biography/fact_accumulator.py",
+      "count": 15,
+      "occA": 386,
+      "occB": 20,
+      "confidence": 0.75
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/biography/pipeline.py",
+      "count": 15,
+      "occA": 386,
+      "occB": 25,
+      "confidence": 0.6
+    },
+    {
+      "a": "desc2.py",
+      "b": "feb8.py",
+      "count": 15,
+      "occA": 25,
+      "occB": 359,
+      "confidence": 0.6
+    },
+    {
+      "a": "services/biography/config.py",
+      "b": "todos.md",
+      "count": 15,
+      "occA": 26,
+      "occB": 369,
+      "confidence": 0.5769230769230769
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "CLAUDE.md",
+      "count": 15,
+      "occA": 386,
+      "occB": 27,
+      "confidence": 0.5555555555555556
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "services/booklet/config.py",
+      "count": 14,
+      "occA": 386,
+      "occB": 15,
+      "confidence": 0.9333333333333333
+    },
+    {
+      "a": "services/booklet/config.py",
+      "b": "tests/test_booklet_substrate.py",
+      "count": 14,
+      "occA": 15,
+      "occB": 21,
+      "confidence": 0.9333333333333333
+    },
+    {
+      "a": "services/booklet/renderer.py",
+      "b": "todos.md",
+      "count": 14,
+      "occA": 16,
+      "occB": 369,
+      "confidence": 0.875
+    },
+    {
+      "a": "services/booklet/renderer.py",
+      "b": "tests/test_booklet_substrate.py",
+      "count": 14,
+      "occA": 16,
+      "occB": 21,
+      "confidence": 0.875
+    },
+    {
+      "a": "services/biography/pipeline.py",
+      "b": "todos.md",
+      "count": 14,
+      "occA": 25,
+      "occB": 369,
+      "confidence": 0.56
+    },
+    {
+      "a": "CLAUDE.md",
+      "b": "todos.md",
+      "count": 14,
+      "occA": 27,
+      "occB": 369,
+      "confidence": 0.5185185185185185
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "tests/test_2026_04_30_audit_fixes.py",
+      "count": 13,
+      "occA": 386,
+      "occB": 13,
+      "confidence": 1
+    },
+    {
+      "a": "tests/test_2026_04_30_audit_fixes.py",
+      "b": "todos.md",
+      "count": 13,
+      "occA": 13,
+      "occB": 369,
+      "confidence": 1
+    },
+    {
+      "a": "services/booklet/config.py",
+      "b": "todos.md",
+      "count": 13,
+      "occA": 15,
+      "occB": 369,
+      "confidence": 0.8666666666666667
+    },
+    {
+      "a": "services/biography/fact_accumulator.py",
+      "b": "todos.md",
+      "count": 13,
+      "occA": 20,
+      "occB": 369,
+      "confidence": 0.65
+    },
+    {
+      "a": "autocorrect.py",
+      "b": "feb8.py",
+      "count": 13,
+      "occA": 20,
+      "occB": 359,
+      "confidence": 0.65
+    },
+    {
+      "a": "feb8.py",
+      "b": "routes/biography_v2.py",
+      "count": 13,
+      "occA": 359,
+      "occB": 28,
+      "confidence": 0.4642857142857143
+    },
+    {
+      "a": "artist_photo_optimized.py",
+      "b": "feb8.py",
+      "count": 12,
+      "occA": 17,
+      "occB": 359,
+      "confidence": 0.7058823529411765
+    },
+    {
+      "a": "feb8.py",
+      "b": "services/biography/fact_accumulator.py",
+      "count": 12,
+      "occA": 359,
+      "occB": 20,
+      "confidence": 0.6
+    },
+    {
+      "a": "feb8.py",
+      "b": "services/biography/data_sources.py",
+      "count": 12,
+      "occA": 359,
+      "occB": 39,
+      "confidence": 0.3076923076923077
+    },
+    {
+      "a": "__pycache__/feb8.cpython-311.pyc",
+      "b": "feb8.py",
+      "count": 11,
+      "occA": 12,
+      "occB": 359,
+      "confidence": 0.9166666666666666
+    },
+    {
+      "a": "services/booklet/config.py",
+      "b": "services/booklet/renderer.py",
+      "count": 11,
+      "occA": 15,
+      "occB": 16,
+      "confidence": 0.7333333333333333
+    }
+  ]
+}

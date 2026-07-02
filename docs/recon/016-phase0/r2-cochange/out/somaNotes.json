@@ -1,0 +1,412 @@
+{
+  "repo": "/root/somaNotes",
+  "totalCommits": 2373,
+  "usedCommits": 2308,
+  "excludedCommits": 63,
+  "maxFilesPerCommit": 20,
+  "pairsGte3": 1598,
+  "pairsGte5": 654,
+  "totalPairs": 18351,
+  "top50": [
+    {
+      "a": "CHANGELOG.md",
+      "b": "todos.md",
+      "count": 356,
+      "occA": 739,
+      "occB": 414,
+      "confidence": 0.8599033816425121
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/system/CENSUS_FRONTEND.md",
+      "count": 149,
+      "occA": 739,
+      "occB": 234,
+      "confidence": 0.6367521367521367
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/system/NOTE_GENERATION.md",
+      "count": 130,
+      "occA": 739,
+      "occB": 190,
+      "confidence": 0.6842105263157895
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "static/js/census/index.js",
+      "count": 118,
+      "occA": 739,
+      "occB": 253,
+      "confidence": 0.466403162055336
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "templates/census.html",
+      "count": 100,
+      "occA": 739,
+      "occB": 226,
+      "confidence": 0.4424778761061947
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "docs/system/NOTE_GENERATION.md",
+      "count": 93,
+      "occA": 234,
+      "occB": 190,
+      "confidence": 0.48947368421052634
+    },
+    {
+      "a": "static/js/census/index.js",
+      "b": "templates/census.html",
+      "count": 92,
+      "occA": 253,
+      "occB": 226,
+      "confidence": 0.40707964601769914
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "static/js/census/note-generation.js",
+      "count": 83,
+      "occA": 739,
+      "occB": 147,
+      "confidence": 0.564625850340136
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "todos.md",
+      "count": 78,
+      "occA": 234,
+      "occB": 414,
+      "confidence": 0.3333333333333333
+    },
+    {
+      "a": "static/js/census/index.js",
+      "b": "static/js/census/note-generation.js",
+      "count": 71,
+      "occA": 253,
+      "occB": 147,
+      "confidence": 0.48299319727891155
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "static/js/census/index.js",
+      "count": 68,
+      "occA": 234,
+      "occB": 253,
+      "confidence": 0.2905982905982906
+    },
+    {
+      "a": "static/js/census/index.js",
+      "b": "todos.md",
+      "count": 65,
+      "occA": 253,
+      "occB": 414,
+      "confidence": 0.25691699604743085
+    },
+    {
+      "a": "docs/system/NOTE_GENERATION.md",
+      "b": "todos.md",
+      "count": 64,
+      "occA": 190,
+      "occB": 414,
+      "confidence": 0.3368421052631579
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/system/TRANSFER_CENTER.md",
+      "count": 63,
+      "occA": 739,
+      "occB": 71,
+      "confidence": 0.8873239436619719
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "generators/progress_generator.py",
+      "count": 58,
+      "occA": 739,
+      "occB": 132,
+      "confidence": 0.4393939393939394
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "static/js/census/note-generation.js",
+      "count": 56,
+      "occA": 234,
+      "occB": 147,
+      "confidence": 0.38095238095238093
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "somaNotes.py",
+      "count": 52,
+      "occA": 739,
+      "occB": 169,
+      "confidence": 0.3076923076923077
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "static/js/census/note-evolution-workspace.js",
+      "count": 49,
+      "occA": 234,
+      "occB": 49,
+      "confidence": 1
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "core/settings.py",
+      "count": 49,
+      "occA": 739,
+      "occB": 93,
+      "confidence": 0.5268817204301075
+    },
+    {
+      "a": "static/js/census/note-generation.js",
+      "b": "todos.md",
+      "count": 48,
+      "occA": 147,
+      "occB": 414,
+      "confidence": 0.32653061224489793
+    },
+    {
+      "a": "templates/census.html",
+      "b": "todos.md",
+      "count": 48,
+      "occA": 226,
+      "occB": 414,
+      "confidence": 0.21238938053097345
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "api/endpoints/generation_stream.py",
+      "count": 44,
+      "occA": 739,
+      "occB": 82,
+      "confidence": 0.5365853658536586
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "templates/census.html",
+      "count": 44,
+      "occA": 234,
+      "occB": 226,
+      "confidence": 0.19469026548672566
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "static/js/census/components/note-evolution-takeover.js",
+      "count": 43,
+      "occA": 234,
+      "occB": 44,
+      "confidence": 0.9772727272727273
+    },
+    {
+      "a": "core/settings.py",
+      "b": "docs/system/AUTH_SECURITY.md",
+      "count": 43,
+      "occA": 93,
+      "occB": 50,
+      "confidence": 0.86
+    },
+    {
+      "a": "static/css/sol-layout.css",
+      "b": "templates/census.html",
+      "count": 43,
+      "occA": 68,
+      "occB": 226,
+      "confidence": 0.6323529411764706
+    },
+    {
+      "a": "somaNotes.py",
+      "b": "templates/census.html",
+      "count": 43,
+      "occA": 169,
+      "occB": 226,
+      "confidence": 0.25443786982248523
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/system/HYPERDRIVE.md",
+      "count": 41,
+      "occA": 739,
+      "occB": 79,
+      "confidence": 0.5189873417721519
+    },
+    {
+      "a": "docs/system/NOTE_GENERATION.md",
+      "b": "static/css/note-evolution-takeover.css",
+      "count": 39,
+      "occA": 190,
+      "occB": 40,
+      "confidence": 0.975
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "static/js/census/note-evolution-workspace.js",
+      "count": 39,
+      "occA": 739,
+      "occB": 49,
+      "confidence": 0.7959183673469388
+    },
+    {
+      "a": "docs/system/NOTE_GENERATION.md",
+      "b": "static/js/census/note-evolution-workspace.js",
+      "count": 38,
+      "occA": 190,
+      "occB": 49,
+      "confidence": 0.7755102040816326
+    },
+    {
+      "a": "docs/system/NOTE_GENERATION.md",
+      "b": "generators/progress_generator.py",
+      "count": 38,
+      "occA": 190,
+      "occB": 132,
+      "confidence": 0.2878787878787879
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "static/js/census/components/takeover-bootstrap.js",
+      "count": 36,
+      "occA": 234,
+      "occB": 36,
+      "confidence": 1
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "static/js/census/components/note-evolution-takeover.js",
+      "count": 36,
+      "occA": 739,
+      "occB": 44,
+      "confidence": 0.8181818181818182
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "docs/system/AUTH_SECURITY.md",
+      "count": 36,
+      "occA": 739,
+      "occB": 50,
+      "confidence": 0.72
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "hyperdrive/router.py",
+      "count": 36,
+      "occA": 739,
+      "occB": 87,
+      "confidence": 0.41379310344827586
+    },
+    {
+      "a": "docs/system/NOTE_GENERATION.md",
+      "b": "static/js/census/note-generation.js",
+      "count": 36,
+      "occA": 190,
+      "occB": 147,
+      "confidence": 0.24489795918367346
+    },
+    {
+      "a": "core/settings.py",
+      "b": "somaNotes.py",
+      "count": 35,
+      "occA": 93,
+      "occB": 169,
+      "confidence": 0.3763440860215054
+    },
+    {
+      "a": ".planning/ROADMAP.md",
+      "b": ".planning/STATE.md",
+      "count": 34,
+      "occA": 62,
+      "occB": 90,
+      "confidence": 0.5483870967741935
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "static/css/note-evolution-takeover.css",
+      "count": 33,
+      "occA": 234,
+      "occB": 40,
+      "confidence": 0.825
+    },
+    {
+      "a": "generators/progress_generator.py",
+      "b": "todos.md",
+      "count": 32,
+      "occA": 132,
+      "occB": 414,
+      "confidence": 0.24242424242424243
+    },
+    {
+      "a": "static/js/census/note-generation.js",
+      "b": "templates/census.html",
+      "count": 32,
+      "occA": 147,
+      "occB": 226,
+      "confidence": 0.21768707482993196
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "static/css/transfer-center.css",
+      "count": 31,
+      "occA": 739,
+      "occB": 41,
+      "confidence": 0.7560975609756098
+    },
+    {
+      "a": "docs/system/TRANSFER_CENTER.md",
+      "b": "static/css/transfer-center.css",
+      "count": 31,
+      "occA": 71,
+      "occB": 41,
+      "confidence": 0.7560975609756098
+    },
+    {
+      "a": "CHANGELOG.md",
+      "b": "api/endpoints/notes.py",
+      "count": 31,
+      "occA": 739,
+      "occB": 55,
+      "confidence": 0.5636363636363636
+    },
+    {
+      "a": "docs/system/HYPERDRIVE.md",
+      "b": "hyperdrive/router.py",
+      "count": 31,
+      "occA": 79,
+      "occB": 87,
+      "confidence": 0.3924050632911392
+    },
+    {
+      "a": "docs/system/CENSUS_FRONTEND.md",
+      "b": "docs/system/HYPERDRIVE.md",
+      "count": 31,
+      "occA": 234,
+      "occB": 79,
+      "confidence": 0.3924050632911392
+    },
+    {
+      "a": "core/settings.py",
+      "b": "todos.md",
+      "count": 30,
+      "occA": 93,
+      "occB": 414,
+      "confidence": 0.3225806451612903
+    },
+    {
+      "a": "api/endpoints/notes.py",
+      "b": "docs/system/NOTE_GENERATION.md",
+      "count": 29,
+      "occA": 55,
+      "occB": 190,
+      "confidence": 0.5272727272727272
+    },
+    {
+      "a": "static/css/sol-layout.css",
+      "b": "static/js/census/index.js",
+      "count": 29,
+      "occA": 68,
+      "occB": 253,
+      "confidence": 0.4264705882352941
+    }
+  ]
+}

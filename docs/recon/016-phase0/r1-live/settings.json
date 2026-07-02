@@ -1,0 +1,50 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Read|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/tmp/claude-0/-root-sextant/99a8659d-2d38-447b-a637-0ec57e5a5886/scratchpad/r1-live/hook-json.sh"
+          },
+          {
+            "type": "command",
+            "command": "/tmp/claude-0/-root-sextant/99a8659d-2d38-447b-a637-0ec57e5a5886/scratchpad/r1-live/hook-plain.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook posttooluse"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook sessionstart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook refresh"
+          }
+        ]
+      }
+    ]
+  }
+}

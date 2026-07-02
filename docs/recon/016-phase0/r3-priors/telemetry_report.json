@@ -1,0 +1,452 @@
+{
+  "per_repo": {
+    "DwoodAmo": {
+      "file": "/root/DwoodAmo/.planning/intel/telemetry.jsonl",
+      "total_events": 104,
+      "names": {
+        "retrieval.path_miss": 86,
+        "freshness.stale_hit": 3,
+        "freshness.blackout_turn": 3,
+        "scan.completed": 3,
+        "retrieval.classified": 3,
+        "retrieval.injected": 2,
+        "retrieval.path_hit": 2,
+        "retrieval.stale_hit": 1,
+        "retrieval.empty_fallback": 1
+      },
+      "path_hit_by_source": {
+        "exported_symbol": 2
+      },
+      "path_hit_by_arm": {
+        "armed": 2
+      },
+      "path_miss_by_arm": {
+        "armed": 86
+      },
+      "first_ts": 1781047409321,
+      "last_ts": 1781132105109
+    },
+    "amoSportsCenter": {
+      "file": "/root/amoSportsCenter/.planning/intel/telemetry.jsonl",
+      "total_events": 1,
+      "names": {
+        "scan.completed": 1
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1778442241279,
+      "last_ts": 1778442241279
+    },
+    "avatar-studio": {
+      "file": "/root/avatar-studio/.planning/intel/telemetry.jsonl",
+      "total_events": 46,
+      "names": {
+        "retrieval.classified": 11,
+        "retrieval.empty_fallback": 7,
+        "scan.completed": 7,
+        "freshness.stale_hit": 6,
+        "freshness.blackout_turn": 6,
+        "freshness.fresh_hit": 5,
+        "retrieval.stale_hit": 4
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1782271296400,
+      "last_ts": 1782524885459
+    },
+    "cairn": {
+      "file": "/root/cairn/.planning/intel/telemetry.jsonl",
+      "total_events": 28,
+      "names": {
+        "freshness.fresh_hit": 16,
+        "freshness.stale_hit": 4,
+        "freshness.blackout_turn": 4,
+        "scan.completed": 4
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1777690411112,
+      "last_ts": 1777701133566
+    },
+    "dark-roast-theme": {
+      "file": "/root/dark-roast-theme/.planning/intel/telemetry.jsonl",
+      "total_events": 84,
+      "names": {
+        "retrieval.path_miss": 46,
+        "freshness.fresh_hit": 14,
+        "scan.completed": 8,
+        "retrieval.classified": 6,
+        "freshness.stale_hit": 3,
+        "freshness.blackout_turn": 3,
+        "retrieval.injected": 2,
+        "retrieval.stale_hit": 1,
+        "retrieval.empty_fallback": 1
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {
+        "armed": 46
+      },
+      "first_ts": 1777678188005,
+      "last_ts": 1780806981353
+    },
+    "defGen2": {
+      "file": "/root/defGen2/.planning/intel/telemetry.jsonl",
+      "total_events": 1228,
+      "names": {
+        "retrieval.path_miss": 525,
+        "freshness.fresh_hit": 172,
+        "retrieval.classified": 123,
+        "scan.completed": 101,
+        "freshness.stale_hit": 87,
+        "freshness.blackout_turn": 87,
+        "retrieval.empty_fallback": 67,
+        "retrieval.injected": 33,
+        "retrieval.stale_hit": 30,
+        "retrieval.path_hit": 3
+      },
+      "path_hit_by_source": {
+        "exported_symbol": 2,
+        "path_match": 1
+      },
+      "path_hit_by_arm": {
+        "armed": 3
+      },
+      "path_miss_by_arm": {
+        "armed": 510,
+        "?": 15
+      },
+      "first_ts": 1778117969790,
+      "last_ts": 1782790961059
+    },
+    "dictum": {
+      "file": "/root/dictum/.planning/intel/telemetry.jsonl",
+      "total_events": 207,
+      "names": {
+        "retrieval.path_miss": 126,
+        "retrieval.classified": 17,
+        "scan.completed": 15,
+        "freshness.fresh_hit": 9,
+        "retrieval.stale_hit": 9,
+        "retrieval.path_hit": 9,
+        "retrieval.injected": 8,
+        "freshness.stale_hit": 5,
+        "freshness.blackout_turn": 5,
+        "retrieval.empty_fallback": 4
+      },
+      "path_hit_by_source": {
+        "path_match": 5,
+        "exported_symbol": 4
+      },
+      "path_hit_by_arm": {
+        "armed": 9
+      },
+      "path_miss_by_arm": {
+        "armed": 126
+      },
+      "first_ts": 1779594472001,
+      "last_ts": 1781722531251
+    },
+    "glasshud": {
+      "file": "/root/glasshud/.planning/intel/telemetry.jsonl",
+      "total_events": 1831,
+      "names": {
+        "retrieval.path_miss": 656,
+        "retrieval.classified": 299,
+        "freshness.fresh_hit": 186,
+        "retrieval.empty_fallback": 147,
+        "scan.completed": 123,
+        "retrieval.path_hit": 100,
+        "freshness.stale_hit": 82,
+        "freshness.blackout_turn": 82,
+        "retrieval.stale_hit": 78,
+        "retrieval.injected": 78
+      },
+      "path_hit_by_source": {
+        "path_match": 76,
+        "text_only": 24
+      },
+      "path_hit_by_arm": {
+        "armed": 100
+      },
+      "path_miss_by_arm": {
+        "armed": 656
+      },
+      "first_ts": 1781383041225,
+      "last_ts": 1782960614448
+    },
+    "jan25": {
+      "file": "/root/jan25/.planning/intel/telemetry.jsonl",
+      "total_events": 3443,
+      "names": {
+        "retrieval.path_miss": 1579,
+        "retrieval.classified": 385,
+        "freshness.fresh_hit": 343,
+        "scan.completed": 232,
+        "freshness.stale_hit": 196,
+        "freshness.blackout_turn": 196,
+        "retrieval.empty_fallback": 147,
+        "retrieval.injected": 147,
+        "retrieval.path_hit": 126,
+        "retrieval.stale_hit": 92
+      },
+      "path_hit_by_source": {
+        "path_match": 126
+      },
+      "path_hit_by_arm": {
+        "armed": 125,
+        "?": 1
+      },
+      "path_miss_by_arm": {
+        "armed": 1314,
+        "?": 265
+      },
+      "first_ts": 1777520520696,
+      "last_ts": 1782960587595
+    },
+    "manus-api-mcp": {
+      "file": "/root/manus-api-mcp/.planning/intel/telemetry.jsonl",
+      "total_events": 101,
+      "names": {
+        "freshness.fresh_hit": 75,
+        "scan.completed": 10,
+        "freshness.stale_hit": 8,
+        "freshness.blackout_turn": 8
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1777957826267,
+      "last_ts": 1778443285425
+    },
+    "ollama-sentinel": {
+      "file": "/root/ollama-sentinel/.planning/intel/telemetry.jsonl",
+      "total_events": 6,
+      "names": {
+        "freshness.fresh_hit": 3,
+        "freshness.stale_hit": 1,
+        "freshness.blackout_turn": 1,
+        "scan.completed": 1
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1777821176786,
+      "last_ts": 1777823613493
+    },
+    "open-interpreter-fork": {
+      "file": "/root/open-interpreter-fork/.planning/intel/telemetry.jsonl",
+      "total_events": 194,
+      "names": {
+        "retrieval.path_miss": 67,
+        "freshness.fresh_hit": 44,
+        "scan.completed": 21,
+        "retrieval.classified": 17,
+        "freshness.stale_hit": 15,
+        "freshness.blackout_turn": 15,
+        "retrieval.empty_fallback": 6,
+        "retrieval.injected": 6,
+        "retrieval.stale_hit": 3
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {
+        "armed": 67
+      },
+      "first_ts": 1777594974213,
+      "last_ts": 1780889589052
+    },
+    "readingRoom": {
+      "file": "/root/readingRoom/.planning/intel/telemetry.jsonl",
+      "total_events": 46,
+      "names": {
+        "freshness.fresh_hit": 14,
+        "scan.completed": 7,
+        "retrieval.path_miss": 7,
+        "retrieval.classified": 6,
+        "freshness.stale_hit": 3,
+        "freshness.blackout_turn": 3,
+        "retrieval.empty_fallback": 2,
+        "retrieval.stale_hit": 2,
+        "retrieval.injected": 2
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {
+        "armed": 7
+      },
+      "first_ts": 1777567535907,
+      "last_ts": 1782272512423
+    },
+    "sextant": {
+      "file": "/root/sextant/.planning/intel/telemetry.jsonl",
+      "total_events": 727,
+      "names": {
+        "freshness.fresh_hit": 156,
+        "retrieval.path_miss": 149,
+        "scan.completed": 106,
+        "retrieval.classified": 78,
+        "freshness.stale_hit": 63,
+        "freshness.blackout_turn": 63,
+        "retrieval.empty_fallback": 32,
+        "retrieval.path_hit": 32,
+        "retrieval.injected": 28,
+        "retrieval.stale_hit": 19,
+        "retrieval.holdback": 1
+      },
+      "path_hit_by_source": {
+        "text_only": 20,
+        "path_match": 11,
+        "exported_symbol": 1
+      },
+      "path_hit_by_arm": {
+        "armed": 30,
+        "?": 2
+      },
+      "path_miss_by_arm": {
+        "armed": 139,
+        "?": 8,
+        "holdback": 2
+      },
+      "first_ts": 1777516546853,
+      "last_ts": 1782960498705
+    },
+    "sinter": {
+      "file": "/root/sinter/.planning/intel/telemetry.jsonl",
+      "total_events": 105,
+      "names": {
+        "freshness.fresh_hit": 93,
+        "freshness.stale_hit": 4,
+        "freshness.blackout_turn": 4,
+        "scan.completed": 3,
+        "retrieval.classified": 1
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1779083832709,
+      "last_ts": 1782523456706
+    },
+    "somaNotes": {
+      "file": "/root/somaNotes/.planning/intel/telemetry.jsonl",
+      "total_events": 5869,
+      "names": {
+        "retrieval.path_miss": 2759,
+        "freshness.fresh_hit": 749,
+        "scan.completed": 493,
+        "freshness.stale_hit": 467,
+        "freshness.blackout_turn": 467,
+        "retrieval.classified": 462,
+        "retrieval.injected": 225,
+        "retrieval.empty_fallback": 111,
+        "retrieval.stale_hit": 99,
+        "retrieval.path_hit": 37
+      },
+      "path_hit_by_source": {
+        "path_match": 36,
+        "exported_symbol": 1
+      },
+      "path_hit_by_arm": {
+        "armed": 36,
+        "?": 1
+      },
+      "path_miss_by_arm": {
+        "armed": 2651,
+        "?": 108
+      },
+      "first_ts": 1777530535544,
+      "last_ts": 1782960606477
+    },
+    "tradingDesk": {
+      "file": "/root/tradingDesk/.planning/intel/telemetry.jsonl",
+      "total_events": 162,
+      "names": {
+        "retrieval.classified": 37,
+        "retrieval.path_miss": 27,
+        "freshness.fresh_hit": 22,
+        "scan.completed": 20,
+        "retrieval.empty_fallback": 15,
+        "freshness.stale_hit": 13,
+        "freshness.blackout_turn": 13,
+        "retrieval.stale_hit": 8,
+        "retrieval.injected": 7
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {
+        "armed": 27
+      },
+      "first_ts": 1778438218959,
+      "last_ts": 1781047656711
+    },
+    ".planning": {
+      "file": "/root/.planning/intel/telemetry.jsonl",
+      "total_events": 14,
+      "names": {
+        "freshness.fresh_hit": 5,
+        "retrieval.classified": 3,
+        "scan.completed": 2,
+        "retrieval.empty_fallback": 2,
+        "freshness.stale_hit": 1,
+        "freshness.blackout_turn": 1
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {},
+      "first_ts": 1778018848903,
+      "last_ts": 1782179954860
+    },
+    ".claude": {
+      "file": "/root/.claude/.planning/intel/telemetry.jsonl",
+      "total_events": 429,
+      "names": {
+        "freshness.fresh_hit": 248,
+        "freshness.stale_hit": 58,
+        "freshness.blackout_turn": 58,
+        "scan.completed": 30,
+        "retrieval.classified": 21,
+        "retrieval.stale_hit": 5,
+        "retrieval.empty_fallback": 5,
+        "retrieval.injected": 3,
+        "retrieval.path_miss": 1
+      },
+      "path_hit_by_source": {},
+      "path_hit_by_arm": {},
+      "path_miss_by_arm": {
+        "armed": 1
+      },
+      "first_ts": 1777530535533,
+      "last_ts": 1782883506135
+    }
+  },
+  "totals_by_name": {
+    "freshness.stale_hit": 1019,
+    "freshness.blackout_turn": 1019,
+    "scan.completed": 1187,
+    "retrieval.classified": 1469,
+    "retrieval.injected": 541,
+    "retrieval.path_miss": 6028,
+    "retrieval.stale_hit": 351,
+    "retrieval.empty_fallback": 547,
+    "retrieval.path_hit": 309,
+    "freshness.fresh_hit": 2154,
+    "retrieval.holdback": 1
+  },
+  "totals_hit_by_source": {
+    "exported_symbol": 10,
+    "path_match": 255,
+    "text_only": 44
+  },
+  "totals_hit_by_arm": {
+    "armed": 305,
+    "?": 4
+  },
+  "totals_miss_by_arm": {
+    "armed": 5630,
+    "?": 396,
+    "holdback": 2
+  }
+}

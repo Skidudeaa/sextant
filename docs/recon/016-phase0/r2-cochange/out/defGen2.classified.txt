@@ -1,0 +1,22 @@
+=== /root/defGen2 ===
+top50 pairs: 50
+junk-involved pairs: 35 (70%)
+source-only pairs (post-filter): 15 (30%)
+  of which involve a test file: 3
+
+Source-only pairs (post-filter), in original rank order:
+  count= 11 conf=0.79  allTogether3.py  <->  generate_today.sh
+  count=  9 conf=0.90  allTogether3.py  <->  narrative_orchestrator.py
+  count=  7 conf=0.64  api/routes_defense.py  <->  api/routes_stream.py
+  count=  5 conf=1.00  allTogether3.py  <->  location_integration.py
+  count=  5 conf=0.71  api/models.py  <->  api/routes_defense.py
+  count=  5 conf=0.28  allTogether3.py  <->  api/routes_defense.py
+  count=  4 conf=1.00  analysis/narrative_fusion.py  <->  api/models.py
+  count=  4 conf=0.67  analysis/chain_helpers.py  <->  api/routes_defense.py
+  count=  4 conf=0.67  analysis/chain_helpers.py  <->  api/models.py
+  count=  4 conf=0.50  allTogether3.py  <->  analysis/generators.py
+  count=  4 conf=0.50  analysis/generators.py  <->  api/routes_defense.py
+  count=  3 conf=1.00  analysis/continuity_pipeline.py  <->  api/routes_defense.py
+  count=  3 conf=1.00  analysis/continuity_pipeline.py  <->  tests/test_continuity_wiring.py
+  count=  3 conf=1.00  analysis/continuity_brief.py  <->  tests/test_continuity_brief.py
+  count=  3 conf=1.00  api/routes_defense.py  <->  tests/test_persist_analysis.py

@@ -1,0 +1,37 @@
+=== /root/sextant ===
+top50 pairs: 50
+junk-involved pairs: 20 (40%)
+source-only pairs (post-filter): 30 (60%)
+  of which involve a test file: 9
+
+Source-only pairs (post-filter), in original rank order:
+  count=  9 conf=1.00  lib/merge-results.js  <->  test/merge-results.test.js
+  count=  8 conf=0.44  lib/intel.js  <->  lib/summary.js
+  count=  7 conf=1.00  lib/classifier.js  <->  test/classifier.test.js
+  count=  7 conf=0.78  commands/scan.js  <->  lib/intel.js
+  count=  7 conf=0.54  lib/graph.js  <->  lib/intel.js
+  count=  6 conf=1.00  lib/summary.js  <->  test/summary.test.js
+  count=  6 conf=0.86  lib/config.js  <->  lib/intel.js
+  count=  6 conf=0.67  lib/summary.js  <->  watch.js
+  count=  5 conf=1.00  mcp/server.js  <->  test/mcp-server.test.js
+  count=  5 conf=0.71  commands/hook-refresh.js  <->  commands/telemetry.js
+  count=  5 conf=0.63  commands/doctor.js  <->  lib/summary.js
+  count=  5 conf=0.56  lib/graph.js  <->  watch.js
+  count=  5 conf=0.56  bin/intel.js  <->  lib/graph.js
+  count=  5 conf=0.50  lib/cli.js  <->  lib/summary.js
+  count=  5 conf=0.38  lib/graph.js  <->  lib/summary.js
+  count=  4 conf=1.00  commands/init.js  <->  test/init.test.js
+  count=  4 conf=1.00  lib/graph-retrieve.js  <->  test/graph-retrieve.test.js
+  count=  4 conf=1.00  lib/cli.js  <->  test/cli.test.js
+  count=  4 conf=1.00  lib/zoekt.js  <->  test/zoekt-query.test.js
+  count=  4 conf=0.80  lib/extractors/python.js  <->  lib/graph.js
+  count=  4 conf=0.67  lib/graph-retrieve.js  <->  lib/merge-results.js
+  count=  4 conf=0.67  lib/freshness.js  <->  test/freshness.test.js
+  count=  4 conf=0.67  lib/graph.js  <->  lib/rg.js
+  count=  4 conf=0.57  commands/doctor.js  <->  scripts/statusline-command.sh
+  count=  4 conf=0.57  lib/config.js  <->  lib/summary.js
+  count=  4 conf=0.57  lib/summary.js  <->  lib/utils.js
+  count=  4 conf=0.57  lib/config.js  <->  lib/utils.js
+  count=  4 conf=0.57  lib/intel.js  <->  lib/utils.js
+  count=  4 conf=0.44  lib/intel.js  <->  watch.js
+  count=  4 conf=0.40  lib/cli.js  <->  lib/intel.js
