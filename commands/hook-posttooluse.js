@@ -219,10 +219,25 @@ function readBrState(root, sessionKey) {
 
 function writeBrState(root, sessionKey, state) {
   try {
-    if (state.touched.length > BR_MAX_TOUCHED) {
-      state.touched = state.touched.slice(-BR_MAX_TOUCHED);
-    }
-    fs.writeFileSync(brStateFile(root, sessionKey), JSON.stringify(state));
+    // MERGE-then-write (adversarial-review LOW-MEDIUM): parallel tool calls in
+    // one assistant turn spawn concurrent hook processes; a plain last-writer-
+    // wins overwrite could drop the other process's touched/emitted marks and
+    // re-fire a "once per session+file" note.  Re-reading and unioning right
+    // before the write shrinks the lost-update window to microseconds; the
+    // tmp+rename keeps readers from ever seeing a torn file.  Residual race
+    // accepted: worst case is one duplicate note, never corruption.
+    const disk = readBrState(root, sessionKey);
+    const touched = [...new Set([...disk.touched, ...state.touched])];
+    const emitted = { ...disk.emitted, ...state.emitted };
+    const merged = {
+      ts: Math.min(state.ts, disk.ts),
+      touched: touched.length > BR_MAX_TOUCHED ? touched.slice(-BR_MAX_TOUCHED) : touched,
+      emitted,
+    };
+    const file = brStateFile(root, sessionKey);
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(merged));
+    fs.renameSync(tmp, file);
   } catch {
     // best-effort — state loss degrades to a possible duplicate note, never an error
   }

@@ -441,9 +441,48 @@ describe("isSelfCausedStatusDrift (docs/016 blast-radius fix)", () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("recordScanState persists the dirty-path list (empty at a clean tree)", () => {
+  it("recordScanState persists the dirty-path hash map (empty at a clean tree)", () => {
     const raw = graph.getMetaValue(db, freshness.META_STATUS_FILES);
-    assert.deepEqual(JSON.parse(raw), []);
+    assert.deepEqual(JSON.parse(raw), {});
+  });
+
+  it("content re-drift on an ALREADY-dirty untouched file is FOREIGN (review MEDIUM)", async () => {
+    // a.js is dirty AT scan time → present in the stored map with its hash.
+    // A foreign actor then changes a.js's CONTENT again: porcelain still shows
+    // the same "M a.js" line, so a presence-only comparison is blind to it.
+    // The stored content hash must catch it.
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-redrift-"));
+    try {
+      fs.mkdirSync(path.join(dir2, ".planning", "intel"), { recursive: true });
+      const git = (...a) =>
+        execFileSync("git", a, { cwd: dir2, env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+      fs.writeFileSync(path.join(dir2, "a.js"), "committed");
+      fs.writeFileSync(path.join(dir2, "c.js"), "committed");
+      git("init", "-q");
+      git("add", "-A");
+      git("commit", "-qm", "base");
+      fs.writeFileSync(path.join(dir2, "a.js"), "dirty-at-scan");
+      const db2 = await graph.loadDb(dir2);
+      freshness.recordScanState(db2, dir2);
+
+      // Session touches only c.js; a.js keeps its scan-time dirty content.
+      fs.writeFileSync(path.join(dir2, "c.js"), "session edit");
+      assert.equal(
+        freshness.isSelfCausedStatusDrift(db2, dir2, new Set(["c.js"])),
+        true,
+        "a.js dirty state is byte-identical to scan time → self-caused"
+      );
+
+      // Foreign actor re-modifies a.js: same porcelain line, new bytes.
+      fs.writeFileSync(path.join(dir2, "a.js"), "foreign re-drift");
+      assert.equal(
+        freshness.isSelfCausedStatusDrift(db2, dir2, new Set(["c.js"])),
+        false,
+        "untouched a.js content moved since scan → foreign"
+      );
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
   });
 
   it("drift confined to touched files → true; foreign drift → false", () => {
