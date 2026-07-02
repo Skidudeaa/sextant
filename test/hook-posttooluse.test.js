@@ -492,6 +492,21 @@ describe("telemetry summarize — outcome substrate aggregation", () => {
     assert.equal(r.pathHitsBySource.text_only, 1);
   });
 
+  it("summarize aggregates blastradius.injected and printSummary renders it only when present", () => {
+    const withBr = summarize([
+      { ts: 1, name: "blastradius.injected", dependents: 3, cochange: 1 },
+      { ts: 2, name: "blastradius.injected", dependents: 2, cochange: 0 },
+    ]);
+    assert.equal(withBr.blastradius.injected, 2);
+    assert.equal(withBr.blastradius.dependentsSurfaced, 5);
+    assert.equal(withBr.blastradius.cochangeSurfaced, 1);
+    assert.match(printSummary("/x", withBr), /Blast radius \(post-edit injections\)/);
+    // pre-lane installs: section absent when no emissions
+    const without = summarize([{ ts: 1, name: "retrieval.path_miss", tool: "Read" }]);
+    assert.equal(without.blastradius.injected, 0);
+    assert.doesNotMatch(printSummary("/x", without), /Blast radius/);
+  });
+
   it("returns null open-precision and zero counts on an empty event set", () => {
     const r = summarize([]).retrieval;
     assert.equal(r.pathHits, 0);

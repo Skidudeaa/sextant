@@ -101,6 +101,13 @@ function summarize(events) {
   const pathHitsByArm = new Map();
   const pathMissesByArm = new Map();
 
+  // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
+  // edit.  Counts emissions and the surfaced-path volume split by signal so a
+  // future open-attribution pass has its denominator shape ready.
+  let brInjected = 0;
+  let brDependents = 0;
+  let brCochange = 0;
+
   for (const e of events) {
     const name = e.name || "(unknown)";
     byName.set(name, (byName.get(name) || 0) + 1);
@@ -156,6 +163,12 @@ function summarize(events) {
       pathMisses++;
       const arm = e.arm || "armed";
       pathMissesByArm.set(arm, (pathMissesByArm.get(arm) || 0) + 1);
+    }
+
+    if (name === "blastradius.injected") {
+      brInjected++;
+      brDependents += typeof e.dependents === "number" ? e.dependents : 0;
+      brCochange += typeof e.cochange === "number" ? e.cochange : 0;
     }
   }
 
@@ -240,6 +253,14 @@ function summarize(events) {
       // Raw per-arm scored-open counts so a consumer (e.g. the holdback-benefit
       // cron) can gate on VOLUME, not just read a rate that's unstable at low n.
       armCounts: armCounts(pathHitsByArm, pathMissesByArm),
+    },
+    // Blast-radius lane (docs/016 Sprint 1): post-edit additionalContext
+    // injections.  dependentsSurfaced/cochangeSurfaced are path VOLUMES (how
+    // many files the notes named), the future denominator for open-attribution.
+    blastradius: {
+      injected: brInjected,
+      dependentsSurfaced: brDependents,
+      cochangeSurfaced: brCochange,
     },
   };
 }
@@ -359,6 +380,18 @@ function printSummary(rootAbs, sum) {
         lines.push(`    - ${src.padEnd(28)} ${c}  (${fmtPct(c, r.injected)})`);
       }
     }
+  }
+
+  // Blast-radius lane (docs/016): shown only once emissions exist, so a
+  // pre-lane install's output is unchanged.
+  if (sum.blastradius && sum.blastradius.injected > 0) {
+    lines.push("");
+    lines.push("Blast radius (post-edit injections)");
+    const b = sum.blastradius;
+    lines.push(`  injected:       ${b.injected}`);
+    lines.push(
+      `  surfaced paths: ${b.dependentsSurfaced} dependents, ${b.cochangeSurfaced} co-change partners`
+    );
   }
 
   // 009 #1 outcome substrate — did the agent open what we surfaced?
