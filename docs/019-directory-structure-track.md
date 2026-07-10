@@ -1,7 +1,8 @@
 # 019 — Directory/subsystem mapping: the gap, why it exists, and the recon to run
 
-Date: 2026-07-02. Status: **USER WANTS TO PURSUE — queued for a future session.**
-Captured from a design conversation on main @ a93c613; nothing built yet.
+Date: 2026-07-02. Status: **RECON DONE 2026-07-09 — GO for design; results + design
+notes in `docs/020-dirmap-recon.md`** (neither kill criterion fired). Originally
+captured from a design conversation on main @ a93c613; nothing built yet.
 
 ## The observation
 
