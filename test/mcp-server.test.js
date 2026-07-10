@@ -224,6 +224,61 @@ describe("MCP server — tools/call handlers", () => {
     }
   });
 
+  it("sextant_explain dir mode (docs/021 form c): trailing slash returns the aggregate", async () => {
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_explain",
+        arguments: { file: "lib/" },
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.dir, "lib/");
+      assert.equal(data.files, 3);
+      assert.equal(data.internalEdges, 2); // foo→bar, bar→baz
+      assert.equal(data.inbound.total, 0);
+      assert.equal(data.outbound.total, 0);
+      assert.ok(data.hotspots.some((h) => h.path === "lib/bar.js" && h.fanIn === 1));
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("sextant_explain: a no-slash directory falls through to the aggregate", async () => {
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_explain",
+        arguments: { file: "lib" },
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.dir, "lib/", "no-slash dir must resolve to the dir aggregate");
+      assert.equal(data.files, 3);
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("sextant_explain dir mode: unknown dir is an explicit notIndexed, not an empty aggregate", async () => {
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", {});
+      const result = await dispatch("tools/call", {
+        name: "sextant_explain",
+        arguments: { file: "nope/" },
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.notIndexed, true);
+      assert.equal(data.dir, "nope/");
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
   it("sextant_health returns resolution stats", async () => {
     const origCwd = process.cwd;
     process.cwd = () => root;

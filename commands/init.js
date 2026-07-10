@@ -195,7 +195,7 @@ This repo is indexed by **sextant** (dependency-graph + full-text code intellige
 - Prefer the sextant MCP tools over raw \`grep\`/\`rg\`:
   - \`sextant_search\` — ranked code search (use INSTEAD of grep to find defs/symbols).
   - \`sextant_related\` — imports + dependents of a file (blast radius before editing).
-  - \`sextant_explain\` — a file's fan-in/fan-out, exports, role.
+  - \`sextant_explain\` — a file's fan-in/fan-out, exports, role; or a directory's aggregate shape (trailing \`/\`).
   - \`sextant_health\` — index resolution % + freshness (check before trusting ranks).
   - \`sextant_scope\` — what's excluded from the index (vendored subtrees).
 `;

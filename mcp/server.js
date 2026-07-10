@@ -53,13 +53,18 @@ const TOOLS = [
   {
     name: "sextant_explain",
     description:
-      "Explain a file's role in the codebase. Returns fan-in (how many files depend on it), " +
-      "fan-out (how many files it imports), its exports, imports, detected type, and size. " +
-      "Use to quickly understand what a file does and how important it is.",
+      "Explain a file's role in the codebase, or a directory's aggregate shape. " +
+      "File: fan-in (how many files depend on it), fan-out, exports, imports, type, size. " +
+      "Directory (path ending in '/', e.g. lib/): file/type counts, top fan-in hotspots inside, " +
+      "inbound/outbound import edges grouped by sibling dir, and git co-change coupling to other dirs. " +
+      "Use to quickly understand what a file does or how a subsystem sits in the architecture.",
     inputSchema: {
       type: "object",
       properties: {
-        file: { type: "string", description: "Relative file path (e.g. lib/intel.js)" },
+        file: {
+          type: "string",
+          description: "Relative file path (e.g. lib/intel.js) or directory (e.g. lib/ — trailing slash forces dir mode)",
+        },
       },
       required: ["file"],
     },
@@ -217,6 +222,35 @@ async function handleExplain(params) {
   }
 
   const db = await graph.loadDb(_root);
+
+  // Dir mode (docs/021 form c): a trailing "/" forces it; otherwise a file
+  // match wins below and the dir aggregate is the fallback (so `lib` works
+  // too).  Same aggregation the CLI `sextant explain <dir>/` uses.
+  const wantsDir = file.endsWith("/");
+  const dirInfo = () => require("../lib/structure").explainDir(db, rel);
+  if (wantsDir) {
+    const info = dirInfo();
+    if (info) {
+      return { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] };
+    }
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              dir: rel,
+              notIndexed: true,
+              hint: "No indexed files under this directory. Check the path (relative to project root) or run: sextant scan --force",
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
   const meta = graph.getFileMeta(db, rel);
 
   // WHY: without this branch, querying a file that isn't in the graph
@@ -224,8 +258,13 @@ async function handleExplain(params) {
   // indistinguishable from a real-but-isolated file.  Claude would treat
   // the empty result as authoritative.  Make the "not indexed" case
   // explicit so the caller can decide whether to re-scan or correct the
-  // path.
+  // path.  A no-slash directory (e.g. "lib") falls through to the dir
+  // aggregate before giving up.
   if (!meta) {
+    const info = dirInfo();
+    if (info) {
+      return { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] };
+    }
     return {
       content: [
         {

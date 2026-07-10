@@ -110,7 +110,7 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
 11. **MCP Server** (`mcp/server.js`) — JSON-RPC 2.0 over stdio, replaces standalone Zoekt MCP
     - `sextant_search` — wraps full `retrieve()` pipeline (graph + zoekt + rg + scoring)
     - `sextant_related` — calls `graph.neighbors()`
-    - `sextant_explain` — fan-in, exports, imports for a file
+    - `sextant_explain` — fan-in, exports, imports for a file; or a directory's aggregate shape (trailing `/` or no-slash dir fallback — same `explainDir` the CLI uses, docs/021 form c)
     - `sextant_health` — index resolution, file count, age
     - `sextant_scope` — vendored exclusions with detection reason (auto-detected nested-git-repo / vendor-dirname / tarball-name, plus user-config)
     - Registered per-project via `.mcp.json` by `sextant init`
@@ -191,6 +191,7 @@ When something needs action: `◆ 60% · 5 files · ⏸ off  ⚠ run: sextant wa
 - `ctx = { argv, roots, root }` — commands import `flag(argv, name)` and `hasFlag(argv, name)` from `lib/cli.js`, calling them with `process.argv`
 - Hook commands (`hook-sessionstart.js`, `hook-refresh.js`, `hook-posttooluse.js`) bypass `rootsFromArgs` and use `process.cwd()` (whitelisted in `test/command-conventions.test.js`)
 - `scan.js` handles both `scan` and `rescan` (checks `ctx.argv[0]` for `pruneMissing`)
+- `explain.js` — `sextant explain <file|dir/>` (docs/021 form c): file mode = fan-in/fan-out/exports/imports; dir mode (trailing `/` forces it, no-slash dirs fall through) = `lib/structure.js:explainDir` aggregate — file/type counts, top fan-in hotspots inside, inbound/outbound import edges grouped by sibling dir, git co-change coupling by dir. `--json` for machine-readable. Unknown target exits 1 explicitly (never an empty aggregate)
 - Shared utilities in `lib/cli.js`: `stripUnsafeXmlTags`, `getWatcherStatus`, `renderBanner`, `renderStatusLine`, `readStdinJson`, etc.
 - `sextant mcp` launches the MCP server (`mcp/server.js`) over stdio for Claude Code integration
 - `sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]` — the offline benefit-proof harness (component 15b); replays real session transcripts and reports retrieval open-rate lift vs a permutation null. Reads `~/.claude/projects` by default, NOT a repo root

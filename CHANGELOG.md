@@ -2,6 +2,12 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-10 — dir-level explain (docs/021 form c)
+
+`sextant explain <file|dir/>` — new CLI command, plus dir mode in the MCP `sextant_explain` tool. Dir mode (trailing `/` forces it; a no-slash dir falls through after the file lookup misses) returns the aggregate the Structure section can't fit: file/type counts, top fan-in hotspots inside the dir, inbound/outbound import edges grouped by sibling dir, internal edge count, and git co-change coupling to other dirs (from the 016 cochange tables). File mode is the compact fan-in/fan-out/exports/imports view the MCP tool already had, now reachable from the CLI. Unknown targets fail explicitly (exit 1 / `notIndexed: true`) — never an empty aggregate a caller could mistake for a real isolated dir.
+
+Live on sextant's own graph: `sextant explain lib/` → "36 files, hotspots graph.js 32 / cli.js 24 / intel.js 21, inbound 172 from test/ (81) + commands/ (68), outbound 0, co-changes with test/ (68 commits)" — the "lib/ is the bottom layer everything sits on" fact, stated in five lines. Aggregation lives in `lib/structure.js:explainDir` (pure graph.db, shared by CLI and MCP). Gates: unit 886/886, integration green, self-eval byte-identical.
+
 ## 2026-07-10 — blast-radius dir rollups (docs/021 form b)
 
 The blast-radius note's bare `(+N more)` tail becomes a per-dir rollup when ≥4 dependents go unnamed: `31 files import it; not yet opened: commands/doctor.js, … (+28 more: test/ 19, lib/ 5, commands/ 1, …)` — the 019 "digestibility" form, live-verified on sextant's own graph. Top 3 dirs by count, `./` for root-level files, small remainders (<4) byte-identical to before. The surfaced `{path, source}` set is unchanged (dirs aren't openable paths), so open-attribution semantics stay identical; `blastradius.injected` now carries `rollup: true|false` and `sextant telemetry` splits the injected count by it — the pre-registered before/after open-rate comparison has its instrument. Gates: unit 876/876, integration green, self-eval byte-identical.

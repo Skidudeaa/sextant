@@ -161,6 +161,12 @@ Acceptable debt v1:
 - No per-package health/resolution split (form d — needs a dogfooded monorepo).
 - No dir-level `sextant explain lib/` (form c — separate small feature; the
   aggregation in `lib/structure.js` should be exported with it in mind).
+  **SHIPPED 2026-07-10** — `explainDir` in `lib/structure.js`, CLI
+  `sextant explain <file|dir/>` (`commands/explain.js`, `--json`), and dir
+  mode in the MCP `sextant_explain` (trailing `/` forces; no-slash dirs fall
+  through after the file lookup misses). Live: `sextant explain lib/` on
+  sextant reports 172 inbound / 0 outbound — the "lib/ is the bottom layer"
+  fact in one line.
 - Blast-radius dir rollups (form b) ship separately: replace the note's
   `(+N more)` with a dir rollup when N ≥ 4 (`"used by commands/ (9), test/ (14)"`),
   measured by the now-live `blastradius.path_hit` open-attribution before/after.

@@ -16,6 +16,7 @@ Usage:
   sextant health [--root <path>] [--pretty]
   sextant doctor [--root <path>]
   sextant query <imports|dependents|exports> --file <relPath> [--root <path>]
+  sextant explain <file|dir/> [--root <path>] [--json]
   sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old]
   sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
   sextant tune [--projects <path>] [--repo <name>] [--json]
@@ -40,6 +41,7 @@ const commandMap = {
   health: "../commands/health",
   doctor: "../commands/doctor",
   query: "../commands/query",
+  explain: "../commands/explain",
   telemetry: "../commands/telemetry",
   "eval-trajectory": "../commands/eval-trajectory",
   tune: "../commands/tune",

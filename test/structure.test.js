@@ -15,7 +15,7 @@ const path = require("path");
 const os = require("os");
 
 const graphMod = require("../lib/graph");
-const { computeStructure, renderStructureSection } = require("../lib/structure");
+const { computeStructure, renderStructureSection, explainDir } = require("../lib/structure");
 
 function mkTmp(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sextant-struct-${tag}-`));
@@ -229,5 +229,66 @@ describe("renderStructureSection — grammar, budget, escaping", () => {
 
   it("returns null for null structure (omission rule pass-through)", () => {
     assert.equal(renderStructureSection(null), null);
+  });
+});
+
+describe("explainDir — dir-level aggregate (docs/021 form c)", () => {
+  let dir, db;
+  before(async () => { dir = mkTmp("explain"); db = await graphMod.loadDb(dir); });
+  after(() => { if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("splits import edges into internal / inbound-by-dir / outbound-by-dir; ranks hotspots", () => {
+    populate(db, {
+      "lib/core.js": "js", "lib/util.js": "js",
+      "commands/a.js": "js", "commands/b.js": "js",
+      "test/t.js": "js",
+      "vendorish/v.js": "js",
+    }, [
+      ["lib/util.js", "lib/core.js"],      // internal
+      ["commands/a.js", "lib/core.js"],    // inbound from commands/
+      ["commands/b.js", "lib/core.js"],    // inbound from commands/
+      ["test/t.js", "lib/util.js"],        // inbound from test/
+      ["lib/core.js", "vendorish/v.js"],   // outbound to vendorish/
+    ]);
+    const info = explainDir(db, "lib/");
+    assert.equal(info.files, 2);
+    assert.deepEqual(info.types, [{ type: "js", count: 2 }]);
+    assert.equal(info.internalEdges, 1);
+    assert.equal(info.inbound.total, 3);
+    assert.deepEqual(info.inbound.byDir, [
+      { dir: "commands/", count: 2 },
+      { dir: "test/", count: 1 },
+    ]);
+    assert.deepEqual(info.outbound, { total: 1, byDir: [{ dir: "vendorish/", count: 1 }] });
+    // core has fan-in 3 (1 internal + 2 inbound), util has 1
+    assert.deepEqual(info.hotspots[0], { path: "lib/core.js", fanIn: 3 });
+    assert.deepEqual(info.hotspots[1], { path: "lib/util.js", fanIn: 1 });
+  });
+
+  it("no-slash prefix is normalized; unknown prefix returns null (not an empty aggregate)", () => {
+    populate(db, { "lib/a.js": "js", "other/b.js": "js" });
+    assert.equal(explainDir(db, "lib").dir, "lib/");
+    assert.equal(explainDir(db, "nope/"), null);
+    // prefix must not match sibling dirs sharing the string prefix
+    assert.equal(explainDir(db, "li"), null);
+  });
+
+  it("aggregates co-change coupling to other dirs (one-side-inside pairs only)", () => {
+    populate(db, { "lib/a.js": "js", "lib/b.js": "js", "commands/c.js": "js", "test/t.js": "js" });
+    graphMod.replaceCoChangePairs(
+      db,
+      [
+        { a: "lib/a.js", b: "commands/c.js", count: 5, confidence: 0.7 },
+        { a: "lib/b.js", b: "commands/c.js", count: 2, confidence: 0.5 },
+        { a: "lib/a.js", b: "lib/b.js", count: 9, confidence: 0.9 },   // both inside → excluded
+        { a: "test/t.js", b: "lib/b.js", count: 3, confidence: 0.6 },  // inside on the b side
+      ],
+      new Map()
+    );
+    const info = explainDir(db, "lib/");
+    assert.deepEqual(info.cochange, [
+      { dir: "commands/", count: 7 },
+      { dir: "test/", count: 3 },
+    ]);
   });
 });
