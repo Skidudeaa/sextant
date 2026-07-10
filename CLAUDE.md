@@ -72,8 +72,10 @@ The watcher auto-starts on next Claude Code session. To start manually: `sextant
    - Separates re-exports from regular exports during indexing
 
 5. **Summary** (`lib/summary.js`) generates bounded markdown summaries (~2200 chars max)
-   - Health metrics, module types, dependency hotspots, public-API outline (exported symbols of hotspot files, 009 #6), entry points, recent git changes
+   - Health metrics, dependency hotspots, public-API outline (exported symbols of hotspot files, 009 #6), entry points, recent git changes
+   - **Structure section** (`lib/structure.js`, docs/021): the directory skeleton — per-dir file counts + dominant type, junk-filtered monorepo package expansion (≥3 manifest subdirs passing junk-hint/nested-git/≥1-indexed-file), and a source→source flow line (asym ≥0.6, no `.` endpoints, no test-sourced flows). DISPLACES the Module types section (subsumed by per-dir types); on <2 non-root dirs the flat Module types list renders instead — one or the other, never both. Internal byte cap 320B (420B monorepo); computed at summary time from files/imports tables + a depth≤2 manifest walk, no schema change. Evidence: docs/020 recon (skeleton 5/5 recognizable, flows 69–100% directed, subproject FP 0/32)
    - Emits `ALERT:` lines when resolution < 90% or index is stale
+   - Section order = clamp priority (the 2200 clamp truncates from the END); on cap-bound repos the tail sections (Recent changes, entry points) absorb Structure's net cost — accepted v1 trade, on the post-ship metrics watchlist
 
 6. **Retrieve** (`lib/retrieve.js`) provides ranked search — three layers:
    - **Layer 1: rg text search** — two-phase (source files first, then docs/config), 5x raw limit

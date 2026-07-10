@@ -1,6 +1,11 @@
 # 021 — Summary "Structure" section: design
 
-Date: 2026-07-10, main @ ac208a5. Status: **DESIGN — not built.** Evidence base:
+Date: 2026-07-10, main @ ac208a5. Status: **BUILT 2026-07-10** (`lib/structure.js`
++ summary wiring; 15 unit + 3 integration tests; dogfooded on sextant, somaNotes,
+vue-core — all three render the designed output; ship blockers all met).
+Operational note from the build: a live OLD-code watcher overwrites the new
+summary on its next flush — the Sprint-1 "restart watcher after upgrades" rule
+applies to summary-shape changes too, not just schema changes. Evidence base:
 `docs/020-dirmap-recon.md` (all four 019 probes passed; design notes D1–D5
 inherited from there and treated as requirements below). This doc designs form
 (a) of the dir-mapping track — the summary Structure section — and sketches the

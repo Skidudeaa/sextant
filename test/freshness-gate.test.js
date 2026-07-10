@@ -190,6 +190,7 @@ describe("buildStaleBody invariants (direct unit test)", () => {
       /Dependency hotspots/,
       /Likely entry points/,
       /Module types/,
+      /### Structure/, // docs/021 — the dir skeleton is graph-derived
       /Indexed files/,
       /Health.*resolution/,
       /fan-in/i,

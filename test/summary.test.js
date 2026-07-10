@@ -423,10 +423,13 @@ describe("summary ### Commands block (007 T1.4)", () => {
     assert.ok(md.includes("`build` — tsc -p ."), md);
     assert.ok(md.includes("`test` — node --test"), md);
     assert.ok(md.includes("`lint` — eslint ."), md);
-    // Placed high (right after Signals, before Module types) so it survives the clamp.
+    // Placed high (right after Signals, before Structure/Module types) so it
+    // survives the clamp, which truncates from the END.
     const cmdIdx = md.indexOf("### Commands");
     const typesIdx = md.indexOf("### Module types");
     if (typesIdx !== -1) assert.ok(cmdIdx < typesIdx, "Commands must precede Module types");
+    const structIdx = md.indexOf("### Structure");
+    if (structIdx !== -1) assert.ok(cmdIdx < structIdx, "Commands must precede Structure");
   });
 
   it("N-caps long script lists and truncates long command bodies", () => {
@@ -449,6 +452,67 @@ describe("summary ### Commands block (007 T1.4)", () => {
     populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
     const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
     assert.ok(!md.includes("### Commands"), "must not emit an empty Commands block");
+  });
+});
+
+// ─── Structure section (docs/021): displacement + omission ─────────────────
+
+describe("summary ### Structure section (docs/021)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-summary-struct-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+    db = await graphMod.loadDb(tmpDir);
+  });
+  after(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("multi-dir repo: Structure renders and DISPLACES Module types (D5 — never both)", () => {
+    populateGraphFromIndex(db, {
+      "lib/a.js": { type: "js", imports: [] },
+      "lib/b.js": { type: "js", imports: [] },
+      "commands/x.js": {
+        type: "js",
+        imports: [{ specifier: "../lib/a", resolved: "lib/a.js", kind: "relative" }],
+      },
+      "commands/y.js": {
+        type: "js",
+        imports: [{ specifier: "../lib/b", resolved: "lib/b.js", kind: "relative" }],
+      },
+    });
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Structure"), `expected a Structure section; got:\n${md}`);
+    assert.ok(!md.includes("### Module types"), "Module types must be displaced (never both)");
+    assert.match(md, /- `lib\/` — 2 files \(js\)/);
+    assert.match(md, /- Flow: commands\/ → lib\//);
+  });
+
+  it("single-dir repo: omission rule falls back to Module types (never neither)", () => {
+    populateGraphFromIndex(db, {
+      "lib/a.js": { type: "js", imports: [] },
+      "lib/b.js": { type: "js", imports: [] },
+    });
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(!md.includes("### Structure"), "1 non-root dir must not get a Structure section");
+    assert.ok(md.includes("### Module types"), "Module types is the fallback");
+  });
+
+  it("summary stays within the 2200 clamp with Structure present", () => {
+    const files = {};
+    for (let i = 0; i < 12; i++) {
+      for (let j = 0; j < 5; j++) {
+        files[`directory-number-${i}/file-${j}.js`] = {
+          type: "js",
+          imports: j > 0 ? [{ specifier: "./file-0", resolved: `directory-number-${i}/file-0.js`, kind: "relative" }] : [],
+        };
+      }
+    }
+    populateGraphFromIndex(db, files);
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Structure"));
+    assert.ok(md.length <= 2200, `summary must stay clamped, got ${md.length}`);
   });
 });
 
