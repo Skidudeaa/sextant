@@ -7,7 +7,8 @@ somaNotes (1403), jan25 (495), defGen2 (112), vuejs/core shallow clone (525, tru
 pnpm monorepo — scanned in scratchpad), plus glasshud / open-interpreter-fork /
 manus-api-mcp / cairn for probe 3 breadth.
 
-**Verdict up front: GO for design.** Neither pre-registered kill criterion fired.
+**Verdict up front: GO for design** (design written 2026-07-10:
+`docs/021-structure-section-design.md`). Neither pre-registered kill criterion fired.
 The flow signal is far stronger than feared, subproject detection is clean with
 three existing guards, and the benefit headroom is real but modest and now has a
 dated baseline. Design notes below are load-bearing — three of them were found by
