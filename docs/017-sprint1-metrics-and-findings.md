@@ -96,7 +96,10 @@ nothing pushes orientation at them. Research + plan for the active-pull design:
 1. **Blast-radius open-attribution** (small): a PostToolUse-side scorer matching
    subsequent opens against the emitted `{path, source}` sets → `blastradius.path_hit`
    → per-signal open rates in `telemetry`/`tune`. Mirrors 009 #1; substrate already
-   persisted.
+   persisted. **DONE 2026-07-10** — lane 1b in `hook-posttooluse` (union of the
+   session's note sets, first-wins attribution, score-before-emit so the
+   triggering edit never self-scores); `sextant telemetry` renders blast-radius
+   open-precision + per-source split with the correlational caveat.
 2. **Subagent orientation v1** (medium): per docs/018.
 3. **Holdback-arm decision** (tiny but a decision): widen or declare dormant.
 4. Watcher-restart ergonomics after upgrades (old-code watcher persists over new

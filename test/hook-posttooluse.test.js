@@ -33,6 +33,7 @@ const {
   extractFilePath,
   injectedPathsFile,
   readInjectedRaw,
+  buildEmittedMap,
 } = require("../commands/hook-posttooluse");
 const { buildInjectedPaths } = require("../commands/hook-refresh");
 
@@ -110,6 +111,25 @@ describe("hook-posttooluse — pure helpers", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("buildEmittedMap: union across notes, first-wins attribution, null when empty", () => {
+    assert.equal(buildEmittedMap(null), null);
+    assert.equal(buildEmittedMap({ touched: [], emitted: {} }), null);
+    const state = {
+      touched: [],
+      emitted: {
+        "lib/core.js": { ts: 100, paths: [{ path: "lib/a.js", source: "dependent" }] },
+        "lib/solo.js": { ts: 200, paths: [
+          { path: "lib/a.js", source: "cochange" }, // duplicate — earlier note's attribution must win
+          { path: "lib/b.js", source: "cochange" },
+        ] },
+      },
+    };
+    const map = buildEmittedMap(state);
+    assert.equal(map.get("lib/a.js"), "dependent", "first-wins on a path two notes surfaced");
+    assert.equal(map.get("lib/b.js"), "cochange");
+    assert.equal(map.size, 2);
   });
 
   it("extractFilePath: file_path, notebook_path, or empty", () => {
@@ -584,5 +604,139 @@ describe("telemetry summarize — outcome substrate aggregation", () => {
     ]));
     assert.match(out, /baseline pending/);
     assert.match(out, /never surfaced|precision-flavored|not.*coverage/);
+  });
+
+  // Blast-radius open-attribution (docs/017 lever #1) aggregation + render.
+  it("aggregates blastradius path events into open-precision with per-source split", () => {
+    const b = summarize([
+      { ts: 1, name: "blastradius.injected", dependents: 3, cochange: 1 },
+      { ts: 2, name: "blastradius.path_hit", source: "dependent", tool: "Read" },
+      { ts: 3, name: "blastradius.path_hit", source: "cochange", tool: "Edit" },
+      { ts: 4, name: "blastradius.path_miss", tool: "Read" },
+      { ts: 5, name: "blastradius.path_miss", tool: "Read" },
+    ]).blastradius;
+    assert.equal(b.pathHits, 2);
+    assert.equal(b.pathMisses, 2);
+    assert.equal(b.openPrecision, 0.5);
+    assert.deepEqual(b.pathHitsBySource, { dependent: 1, cochange: 1 });
+  });
+
+  it("printSummary renders blast-radius open-precision with its caveat, per-source rows", () => {
+    const out = printSummary("/x", summarize([
+      { ts: 1, name: "blastradius.injected", dependents: 3, cochange: 1 },
+      { ts: 2, name: "blastradius.path_hit", source: "dependent", tool: "Read" },
+      { ts: 3, name: "blastradius.path_miss", tool: "Read" },
+    ]));
+    assert.match(out, /open-precision: 50\.0%  \(1 hit \/ 2 scored file-touches after a note\)/);
+    assert.match(out, /correlational \(no holdback on this lane\)/);
+    assert.match(out, /- dependent/);
+  });
+
+  // Same VH-1 shape as retrieval: path events stranded in a window whose
+  // injected events rotated to .old must still render the section.
+  it("printSummary shows the blast-radius section when injected===0 but path events exist", () => {
+    const out = printSummary("/x", summarize([
+      { ts: 1, name: "blastradius.path_hit", source: "dependent", tool: "Read" },
+    ]));
+    assert.match(out, /Blast radius \(post-edit injections\)/);
+    assert.match(out, /open-precision: 100\.0%/);
+  });
+
+  it("no blast-radius open-precision lines when no path events (day-zero installs unchanged)", () => {
+    const out = printSummary("/x", summarize([
+      { ts: 1, name: "blastradius.injected", dependents: 3, cochange: 1 },
+    ]));
+    assert.match(out, /Blast radius \(post-edit injections\)/);
+    assert.doesNotMatch(out, /scored file-touches/);
+  });
+});
+
+// ─── (E) blast-radius open-attribution end-to-end (docs/017 lever #1) ───────
+//
+// The lane-1b loop: a note names dependents/partners; subsequent file-touches
+// in the SAME session score hit (with the surfacing source) or miss, out-of-
+// band. The note-triggering edit itself must never score against its own note.
+
+function brPathEvents(dir) {
+  return telemetry
+    .readEvents(dir)
+    .filter((e) => e.name === "blastradius.path_hit" || e.name === "blastradius.path_miss");
+}
+
+describe("hook-posttooluse — blast-radius open-attribution end-to-end", () => {
+  let dir;
+  const SESSION_BR = "attr-1";
+  before(async () => {
+    dir = await buildBlastFixture();
+  });
+  after(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("the note-triggering Edit itself scores nothing (score-before-emit)", () => {
+    const res = runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "core.js") },
+      session_id: SESSION_BR,
+    });
+    parseEnvelope(res.stdout); // the note fired…
+    assert.equal(brPathEvents(dir).length, 0, "…but no emitted set existed at scoring time → no event");
+  });
+
+  it("Read of a note-named dependent emits blastradius.path_hit{source:dependent}, stdout silent", () => {
+    const res = runPost(dir, {
+      tool_name: "Read",
+      tool_input: { file_path: path.join(dir, "lib", "a.js") },
+      session_id: SESSION_BR,
+    });
+    assert.equal(res.stdout || "", "", "scoring is out-of-band");
+    const evs = brPathEvents(dir);
+    assert.equal(evs.length, 1);
+    assert.equal(evs[0].name, "blastradius.path_hit");
+    assert.equal(evs[0].source, "dependent");
+    assert.equal(evs[0].tool, "Read");
+  });
+
+  it("touch of a file no note ever named emits blastradius.path_miss", () => {
+    const before = brPathEvents(dir).length;
+    runPost(dir, {
+      tool_name: "Read",
+      tool_input: { file_path: path.join(dir, "lib", "leaf.js") },
+      session_id: SESSION_BR,
+    });
+    const evs = brPathEvents(dir);
+    assert.equal(evs.length, before + 1);
+    assert.equal(evs[evs.length - 1].name, "blastradius.path_miss");
+    assert.equal(evs[evs.length - 1].tool, "Read");
+  });
+
+  it("a co-change-named partner attributes source:cochange", () => {
+    const session = "attr-cc";
+    const res = runPost(dir, {
+      tool_name: "Write",
+      tool_input: { file_path: path.join(dir, "lib", "solo.js") },
+      session_id: session,
+    });
+    parseEnvelope(res.stdout); // solo's note names lib/a.js as a co-change partner
+    const before = brPathEvents(dir).length;
+    runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "a.js") },
+      session_id: session,
+    });
+    const evs = brPathEvents(dir);
+    assert.equal(evs.length, before + 1);
+    assert.equal(evs[evs.length - 1].name, "blastradius.path_hit");
+    assert.equal(evs[evs.length - 1].source, "cochange");
+  });
+
+  it("a session with no notes scores nothing (no denominator without an emission)", () => {
+    const before = brPathEvents(dir).length;
+    runPost(dir, {
+      tool_name: "Read",
+      tool_input: { file_path: path.join(dir, "lib", "a.js") },
+      session_id: "attr-empty",
+    });
+    assert.equal(brPathEvents(dir).length, before, "no emitted set for that session → no event");
   });
 });

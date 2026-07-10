@@ -2,6 +2,14 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-10 — blast-radius open-attribution (docs/017 lever #1) + dir-mapping recon (docs/020)
+
+**Open-attribution closes the blast-radius measurement loop.** The lane's notes have persisted their surfaced `{path, source}` sets since Sprint 1; now a scorer reads them. Lane 1b in `hook-posttooluse`: after ≥1 note this session, every file-touch scores against the UNION of the session's note-surfaced sets — `blastradius.path_hit { source, tool }` when the agent goes and looks at a file a note named (attributed dependent vs cochange, first-wins when two notes named the same path), `blastradius.path_miss { tool }` otherwise. Score-before-emit ordering guarantees the note-triggering edit never scores against its own note; a session with no notes emits nothing (no denominator). `sextant telemetry` renders blast-radius open-precision + per-source split, gated on emissions OR scored opens (the VH-1 rotation lesson), with the correlational caveat attached (this lane has no holdback arm). Unlike the retrieval substrate, scoring is session-cumulative: notes are independent per-file facts that stay actionable all session, so they accumulate instead of overwriting.
+
+**Directory-mapping recon (the docs/019 probes) — GO for design.** Four probes against sextant/somaNotes/jan25/defGen2/vuejs-core (+4 more repos for subproject breadth); scripts at `docs/recon/019-dirmap/`, synthesis at `docs/020-dirmap-recon.md`. Skeleton recognizable 5/5 at 305–355B (538B monorepo); cross-dir import flows 69–100% directed mass share (not mush — real architecture falls out: `routes/ → services/`, vue's `runtime-core → reactivity`); subproject detection FP 0/32 across 9 repos with the junk-hint + nested-git + indexed-files>0 guard triplet; wrong-dir-start rate 39.4% on 33 real sessions, scaling with dir breadth (59% on 33-top-dir somaNotes vs 0% on 1-top-dir glasshud), first-touch p90=4. Neither pre-registered kill criterion fired. Design inherits five load-bearing notes (D1–D5), including: Structure section displaces the fully-subsumed Module-types section (net ~210–260B).
+
+Gates: unit suite green (+6 attribution tests: score-before-emit, dependent/cochange attribution, no-denominator silence, aggregation, VH-1 render, day-zero render), self-eval byte-identical.
+
 ## 2026-07-01 — blast-radius lane: action-time injection after edits (docs/016 Sprint 1)
 
 Sextant's first ACTION-TIME injection: after the agent edits a file, the PostToolUse hook may emit one factual note — the file's dependents not yet touched this session plus its top git co-change partners — via the `hookSpecificOutput.additionalContext` JSON envelope. This targets the "missed blast radius" orientation-failure class named in the project mission but previously unserved: prompt-time retrieval answers "where is X", not "what breaks if I change X".

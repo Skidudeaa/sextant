@@ -102,11 +102,16 @@ function summarize(events) {
   const pathMissesByArm = new Map();
 
   // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
-  // edit.  Counts emissions and the surfaced-path volume split by signal so a
-  // future open-attribution pass has its denominator shape ready.
+  // edit.  Counts emissions and the surfaced-path volume split by signal.
   let brInjected = 0;
   let brDependents = 0;
   let brCochange = 0;
+  // Blast-radius open-attribution (docs/017 lever #1): did the agent go look
+  // at a file a note named?  Session-cumulative and precision-flavored (see
+  // hook-posttooluse lane 1b); no arm split — the lane has no holdback.
+  let brPathHits = 0;
+  let brPathMisses = 0;
+  const brHitsBySource = new Map();
 
   for (const e of events) {
     const name = e.name || "(unknown)";
@@ -169,6 +174,16 @@ function summarize(events) {
       brInjected++;
       brDependents += typeof e.dependents === "number" ? e.dependents : 0;
       brCochange += typeof e.cochange === "number" ? e.cochange : 0;
+    }
+
+    if (name === "blastradius.path_hit") {
+      brPathHits++;
+      const source = e.source || "(unknown)";
+      brHitsBySource.set(source, (brHitsBySource.get(source) || 0) + 1);
+    }
+
+    if (name === "blastradius.path_miss") {
+      brPathMisses++;
     }
   }
 
@@ -256,11 +271,20 @@ function summarize(events) {
     },
     // Blast-radius lane (docs/016 Sprint 1): post-edit additionalContext
     // injections.  dependentsSurfaced/cochangeSurfaced are path VOLUMES (how
-    // many files the notes named), the future denominator for open-attribution.
+    // many files the notes named) — the open-attribution denominator.
+    // pathHits/pathMisses (docs/017 lever #1) mirror the retrieval outcome
+    // substrate: openPrecision = hits / scored file-touches after >=1 note
+    // this session.  Precision-flavored + correlational (no holdback arm on
+    // this lane); per-source split answers WHICH signal earns its opens
+    // (dependent vs cochange).
     blastradius: {
       injected: brInjected,
       dependentsSurfaced: brDependents,
       cochangeSurfaced: brCochange,
+      pathHits: brPathHits,
+      pathMisses: brPathMisses,
+      openPrecision: brPathHits + brPathMisses ? brPathHits / (brPathHits + brPathMisses) : null,
+      pathHitsBySource: Object.fromEntries(brHitsBySource),
     },
   };
 }
@@ -382,9 +406,15 @@ function printSummary(rootAbs, sum) {
     }
   }
 
-  // Blast-radius lane (docs/016): shown only once emissions exist, so a
-  // pre-lane install's output is unchanged.
-  if (sum.blastradius && sum.blastradius.injected > 0) {
+  // Blast-radius lane (docs/016): shown only once lane events exist, so a
+  // pre-lane install's output is unchanged.  Gated on emissions OR scored
+  // opens (the VH-1 lesson: rotation can strand path events in a window whose
+  // injected events moved to .old — never hide the number exactly when volume
+  // is high).
+  const bScored = sum.blastradius
+    ? sum.blastradius.pathHits + sum.blastradius.pathMisses
+    : 0;
+  if (sum.blastradius && (sum.blastradius.injected > 0 || bScored > 0)) {
     lines.push("");
     lines.push("Blast radius (post-edit injections)");
     const b = sum.blastradius;
@@ -392,6 +422,23 @@ function printSummary(rootAbs, sum) {
     lines.push(
       `  surfaced paths: ${b.dependentsSurfaced} dependents, ${b.cochangeSurfaced} co-change partners`
     );
+    // Open-attribution (docs/017 lever #1).  Same VH-2 discipline as the
+    // retrieval substrate: the caveat travels with the number.
+    if (bScored > 0) {
+      lines.push(
+        `  open-precision: ${fmtPct(b.pathHits, bScored)}  (${b.pathHits} hit / ${bScored} scored file-touches after a note)`
+      );
+      lines.push(
+        `  caveat: correlational (no holdback on this lane) + session-cumulative precision — ` +
+        `misses include touches of files no note ever named; a low % is not "the notes are wrong."`
+      );
+      if (Object.keys(b.pathHitsBySource).length) {
+        lines.push("  path_hit by source:");
+        for (const [src, c] of Object.entries(b.pathHitsBySource).sort((a2, b2) => b2[1] - a2[1])) {
+          lines.push(`    - ${src.padEnd(28)} ${c}  (${fmtPct(c, b.pathHits)})`);
+        }
+      }
+    }
   }
 
   // 009 #1 outcome substrate — did the agent open what we surfaced?

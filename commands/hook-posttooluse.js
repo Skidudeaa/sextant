@@ -243,6 +243,30 @@ function writeBrState(root, sessionKey, state) {
   }
 }
 
+// Open-attribution map for the blast-radius lane (docs/017 lever #1): the
+// UNION of every note's surfaced {path, source} this session → Map<path,
+// source>.  Unlike lane 1 (most-recent injection only — retrieval sets
+// overwrite each other), blast-radius notes are independent per-file facts
+// that stay actionable all session, so they accumulate.  First-wins on a
+// path surfaced by two notes (attribution goes to whichever note surfaced it
+// first).  null when no note has been emitted yet — an unscoreable open, not
+// a miss (same no-denominator rule as lane 1).
+function buildEmittedMap(brState) {
+  if (!brState || !brState.emitted || typeof brState.emitted !== "object") return null;
+  const notes = Object.values(brState.emitted)
+    .filter((n) => n && Array.isArray(n.paths))
+    .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const map = new Map();
+  for (const note of notes) {
+    for (const entry of note.paths) {
+      if (entry && typeof entry.path === "string" && !map.has(entry.path)) {
+        map.set(entry.path, typeof entry.source === "string" ? entry.source : "dependent");
+      }
+    }
+  }
+  return map.size ? map : null;
+}
+
 // Pure note composer.  Returns null when there's nothing worth saying —
 // silence is the default; the note must earn its context budget.  Facts only,
 // no imperatives (R1: command-like hook output can trip injection defenses).
@@ -397,6 +421,26 @@ async function run() {
     // seen); emission only for mutations.  The file being edited is excluded
     // from its own note inside the composer, so touch-ordering is immaterial.
     const brState = readBrState(root, sessionKey);
+
+    // --- Lane 1b: blast-radius open-attribution (docs/017 lever #1) ---
+    // Same question as lane 1, asked of the notes: did the agent go look at a
+    // file a blast-radius note named?  Scored against the state AS READ —
+    // before this call's own emission is recorded below — so the edit that
+    // triggers a note can never score against that note's own surfaced set.
+    // Session-cumulative and precision-flavored (misses include opens of files
+    // no note ever named), same caveats as lane 1; no arm (no holdback here).
+    const emittedMap = buildEmittedMap(brState);
+    if (emittedMap) {
+      const brVerdict = classifyOpen(emittedMap, repoRel);
+      if (brVerdict) {
+        if (brVerdict.hit) {
+          recordEvent(root, "blastradius.path_hit", { source: brVerdict.source, tool });
+        } else {
+          recordEvent(root, "blastradius.path_miss", { tool });
+        }
+      }
+    }
+
     const alreadyTouched = brState.touched.includes(repoRel);
     let emitted = false;
     if (MUTATE_TOOLS.has(tool)) {
@@ -420,5 +464,6 @@ module.exports = {
   buildInjectedMap,
   readInjectedArm,
   injectedPathsFile,
+  buildEmittedMap,
   FILE_TOOLS,
 };
