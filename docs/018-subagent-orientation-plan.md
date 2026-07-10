@@ -1,4 +1,13 @@
-# 018 — Subagent orientation: research + plan (NOT started; next-session handoff)
+# 018 — Subagent orientation: research + plan
+
+> **Phase 0 recon RAN 2026-07-10 — GO.** Results + verdicts:
+> `docs/022-subagent-recon.md`. R-A PASS (updatedInput works end-to-end for
+> general-purpose AND Explore; `subagent_type` visible at hook time), R-B
+> falsified the "Explore/Plan omit CLAUDE.md" docs claim (all types get it;
+> none get hook injection), R-C PASS (MCP reachable from subagents). NEW
+> load-bearing constraint: the injected block must be FACTS-ONLY — an
+> instruction-shaped block was explicitly discounted as untrusted by the
+> Explore agent. Next step: build Lane A per this plan + 022's revisions.
 
 Date: 2026-07-02. Track 3 of the 2026-07-01 ideation, re-scoped by Phase 0 recon
 (`docs/016-phase0-recon.md` R4): **no passive hook channel to subagents exists** —

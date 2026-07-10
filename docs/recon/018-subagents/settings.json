@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "SXRA_LOG=/tmp/claude-0/-root-sextant/2b23e6e9-9164-49af-a2d6-89bc7bd1c0b9/scratchpad/ra-probe/pretask-log.jsonl node /root/sextant/docs/recon/018-subagents/pretask-hook.js"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook sessionstart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook refresh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook posttooluse"
+          }
+        ]
+      }
+    ]
+  }
+}
