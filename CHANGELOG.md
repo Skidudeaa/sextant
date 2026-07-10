@@ -2,6 +2,10 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-10 — blast-radius dir rollups (docs/021 form b)
+
+The blast-radius note's bare `(+N more)` tail becomes a per-dir rollup when ≥4 dependents go unnamed: `31 files import it; not yet opened: commands/doctor.js, … (+28 more: test/ 19, lib/ 5, commands/ 1, …)` — the 019 "digestibility" form, live-verified on sextant's own graph. Top 3 dirs by count, `./` for root-level files, small remainders (<4) byte-identical to before. The surfaced `{path, source}` set is unchanged (dirs aren't openable paths), so open-attribution semantics stay identical; `blastradius.injected` now carries `rollup: true|false` and `sextant telemetry` splits the injected count by it — the pre-registered before/after open-rate comparison has its instrument. Gates: unit 876/876, integration green, self-eval byte-identical.
+
 ## 2026-07-10 — summary Structure section: the directory skeleton (docs/021, built same day as designed)
 
 The summary now carries a **Structure section** — the repo's directory skeleton: per-dir file counts with dominant module type, junk-filtered monorepo package expansion, and a source→source import-flow line (`- Flow: api/ → services/; commands/ → lib/`). Targets the wrong-directory-start failure class the 020 recon measured (39.4% of scored real sessions, scaling with dir breadth: 59% on 33-top-dir somaNotes vs 0% on 1-top-dir glasshud). New `lib/structure.js`, computed at summary time from existing tables + a depth≤2 manifest walk — **no schema change**.

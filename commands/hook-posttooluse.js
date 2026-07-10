@@ -70,6 +70,12 @@ const BR_MIN_FANIN = 3;
 const BR_PARTNER_MIN_CONFIDENCE = 0.4;
 const BR_MAX_PARTNERS = 2;
 const BR_MAX_DEP_NAMES = 3;
+// Dir rollup (docs/021 form b, evidence docs/019/020): a bare "(+24 more)" tail
+// wastes its bytes — "(+24 more: test/ 14, commands/ 9, …)" is digestible at
+// nearly the same cost.  Only a remainder >= BR_ROLLUP_MIN earns the rollup
+// (below that, the tail is short enough that dir grouping adds nothing).
+const BR_ROLLUP_MIN = 4;
+const BR_ROLLUP_DIRS = 3;
 const BR_STATE_TTL_MS = 24 * 60 * 60 * 1000; // matches INJECTED_SET_TTL_MS rationale
 const BR_MAX_TOUCHED = 500;
 
@@ -267,6 +273,21 @@ function buildEmittedMap(brState) {
   return map.size ? map : null;
 }
 
+// Per-dir rollup of a path list: "test/ 14, commands/ 9, …" — top dirs by
+// count desc (name asc on ties), capped at BR_ROLLUP_DIRS with a "…" tail.
+// Root-level files group under "./".
+function dirRollup(paths) {
+  const byDir = new Map();
+  for (const p of paths) {
+    const i = p.indexOf("/");
+    const dir = i === -1 ? "./" : p.slice(0, i + 1);
+    byDir.set(dir, (byDir.get(dir) || 0) + 1);
+  }
+  const sorted = [...byDir.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  const shown = sorted.slice(0, BR_ROLLUP_DIRS).map(([d, n]) => `${d} ${n}`);
+  return shown.join(", ") + (sorted.length > BR_ROLLUP_DIRS ? ", …" : "");
+}
+
 // Pure note composer.  Returns null when there's nothing worth saying —
 // silence is the default; the note must earn its context budget.  Facts only,
 // no imperatives (R1: command-like hook output can trip injection defenses).
@@ -282,11 +303,23 @@ function composeBlastRadiusNote(repoRel, { dependents, partners, touchedSet }) {
 
   const parts = [];
   const surfaced = [];
+  let rollup = false;
   if (depWorthy) {
     const names = untouchedDeps.slice(0, BR_MAX_DEP_NAMES);
-    const more = untouchedDeps.length - names.length;
+    const rest = untouchedDeps.slice(names.length);
+    // Dir rollup (docs/021 form b): a large remainder gets grouped by top-level
+    // dir instead of a bare count.  The SURFACED set is unchanged — dirs are
+    // not openable paths, so open-attribution semantics stay identical; the
+    // rollup only makes the tail informative.
+    rollup = rest.length >= BR_ROLLUP_MIN;
+    const tail =
+      rest.length === 0
+        ? ""
+        : rollup
+          ? ` (+${rest.length} more: ${dirRollup(rest)})`
+          : ` (+${rest.length} more)`;
     parts.push(
-      `${dependents.length} files import it; not yet opened this session: ${names.join(", ")}${more > 0 ? ` (+${more} more)` : ""}`
+      `${dependents.length} files import it; not yet opened this session: ${names.join(", ")}${tail}`
     );
     surfaced.push(...names.map((p) => ({ path: p, source: "dependent" })));
   }
@@ -305,6 +338,9 @@ function composeBlastRadiusNote(repoRel, { dependents, partners, touchedSet }) {
     surfaced,
     dependentCount: depWorthy ? Math.min(untouchedDeps.length, BR_MAX_DEP_NAMES) : 0,
     cochangeCount: partnerWorthy ? Math.min(freshPartners.length, BR_MAX_PARTNERS) : 0,
+    // Stamped onto blastradius.injected so the open-rate comparison the 021
+    // measurement plan calls for (rollup vs non-rollup notes) has its split.
+    rollup,
   };
 }
 
@@ -373,6 +409,7 @@ async function maybeEmitBlastRadius(root, sessionKey, repoRel, brState) {
     recordEvent(root, "blastradius.injected", {
       dependents: composed.dependentCount,
       cochange: composed.cochangeCount,
+      rollup: composed.rollup === true,
     });
     return true;
   } catch {
@@ -465,5 +502,7 @@ module.exports = {
   readInjectedArm,
   injectedPathsFile,
   buildEmittedMap,
+  composeBlastRadiusNote,
+  dirRollup,
   FILE_TOOLS,
 };

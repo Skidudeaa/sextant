@@ -111,6 +111,7 @@ function summarize(events) {
   // hook-posttooluse lane 1b); no arm split — the lane has no holdback.
   let brPathHits = 0;
   let brPathMisses = 0;
+  let brRollupNotes = 0;
   const brHitsBySource = new Map();
 
   for (const e of events) {
@@ -174,6 +175,7 @@ function summarize(events) {
       brInjected++;
       brDependents += typeof e.dependents === "number" ? e.dependents : 0;
       brCochange += typeof e.cochange === "number" ? e.cochange : 0;
+      if (e.rollup === true) brRollupNotes++; // docs/021 form b: dir-rollup tail
     }
 
     if (name === "blastradius.path_hit") {
@@ -281,6 +283,7 @@ function summarize(events) {
       injected: brInjected,
       dependentsSurfaced: brDependents,
       cochangeSurfaced: brCochange,
+      rollupNotes: brRollupNotes,
       pathHits: brPathHits,
       pathMisses: brPathMisses,
       openPrecision: brPathHits + brPathMisses ? brPathHits / (brPathHits + brPathMisses) : null,
@@ -418,7 +421,9 @@ function printSummary(rootAbs, sum) {
     lines.push("");
     lines.push("Blast radius (post-edit injections)");
     const b = sum.blastradius;
-    lines.push(`  injected:       ${b.injected}`);
+    lines.push(
+      `  injected:       ${b.injected}${b.rollupNotes > 0 ? `  (${b.rollupNotes} with dir rollup)` : ""}`
+    );
     lines.push(
       `  surfaced paths: ${b.dependentsSurfaced} dependents, ${b.cochangeSurfaced} co-change partners`
     );

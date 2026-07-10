@@ -34,6 +34,8 @@ const {
   injectedPathsFile,
   readInjectedRaw,
   buildEmittedMap,
+  composeBlastRadiusNote,
+  dirRollup,
 } = require("../commands/hook-posttooluse");
 const { buildInjectedPaths } = require("../commands/hook-refresh");
 
@@ -130,6 +132,44 @@ describe("hook-posttooluse — pure helpers", () => {
     assert.equal(map.get("lib/a.js"), "dependent", "first-wins on a path two notes surfaced");
     assert.equal(map.get("lib/b.js"), "cochange");
     assert.equal(map.size, 2);
+  });
+
+  it("dirRollup: groups by top dir, count desc, caps at 3 dirs with …, './' for root files", () => {
+    assert.equal(
+      dirRollup(["test/a.js", "test/b.js", "test/c.js", "commands/x.js", "commands/y.js", "root.js"]),
+      "test/ 3, commands/ 2, ./ 1"
+    );
+    assert.equal(
+      dirRollup(["a/1.js", "b/1.js", "c/1.js", "d/1.js"]),
+      "a/ 1, b/ 1, c/ 1, …" // 4 dirs, cap 3, name-asc on tied counts
+    );
+  });
+
+  it("composeBlastRadiusNote: remainder < 4 keeps the plain tail; >= 4 earns the dir rollup", () => {
+    const base = { partners: [], touchedSet: new Set() };
+    // 3 named + 2 remainder → plain tail, rollup:false
+    const small = composeBlastRadiusNote("lib/core.js", {
+      ...base,
+      dependents: ["lib/a.js", "lib/b.js", "lib/c.js", "lib/d.js", "lib/e.js"],
+    });
+    assert.match(small.note, /\(\+2 more\)\./);
+    assert.doesNotMatch(small.note, /more:/);
+    assert.equal(small.rollup, false);
+    // 3 named + 5 remainder across dirs → rollup tail, rollup:true
+    const big = composeBlastRadiusNote("lib/core.js", {
+      ...base,
+      dependents: [
+        "lib/a.js", "lib/b.js", "lib/c.js", // named
+        "test/t1.js", "test/t2.js", "test/t3.js", "commands/c1.js", "commands/c2.js",
+      ],
+    });
+    assert.match(big.note, /\(\+5 more: test\/ 3, commands\/ 2\)\./);
+    assert.equal(big.rollup, true);
+    // The SURFACED set is unchanged by the rollup — still the named top-3 only.
+    assert.deepEqual(
+      big.surfaced.map((s) => s.path),
+      ["lib/a.js", "lib/b.js", "lib/c.js"]
+    );
   });
 
   it("extractFilePath: file_path, notebook_path, or empty", () => {
@@ -649,6 +689,21 @@ describe("telemetry summarize — outcome substrate aggregation", () => {
     assert.match(out, /Blast radius \(post-edit injections\)/);
     assert.doesNotMatch(out, /scored file-touches/);
   });
+
+  it("counts rollup notes and renders the split only when present (docs/021 form b)", () => {
+    const withRollup = summarize([
+      { ts: 1, name: "blastradius.injected", dependents: 3, cochange: 0, rollup: true },
+      { ts: 2, name: "blastradius.injected", dependents: 2, cochange: 1, rollup: false },
+    ]);
+    assert.equal(withRollup.blastradius.rollupNotes, 1);
+    assert.match(printSummary("/x", withRollup), /injected:       2  \(1 with dir rollup\)/);
+    // pre-rollup events (no field) render the plain line
+    const without = summarize([
+      { ts: 1, name: "blastradius.injected", dependents: 3, cochange: 1 },
+    ]);
+    assert.equal(without.blastradius.rollupNotes, 0);
+    assert.doesNotMatch(printSummary("/x", without), /dir rollup/);
+  });
 });
 
 // ─── (E) blast-radius open-attribution end-to-end (docs/017 lever #1) ───────
@@ -738,5 +793,82 @@ describe("hook-posttooluse — blast-radius open-attribution end-to-end", () => 
       session_id: "attr-empty",
     });
     assert.equal(brPathEvents(dir).length, before, "no emitted set for that session → no event");
+  });
+});
+
+// ─── (F) blast-radius dir rollup (docs/021 form b) ──────────────────────────
+//
+// A wide-fan-in edit's "(+N more)" tail becomes a per-dir rollup when the
+// remainder is >= 4.  Surfaced-set semantics unchanged (dirs aren't openable);
+// the injected telemetry event carries rollup:true for the open-rate split.
+
+async function buildWideFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-rollup-"));
+  fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
+  for (const d of ["lib", "test", "cmd"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  const write = (rel, content) => fs.writeFileSync(path.join(dir, rel), content);
+  write("lib/core.js", "module.exports = {};\n");
+  const deps = [
+    "lib/d1.js", "lib/d2.js", "lib/d3.js",
+    "test/t1.js", "test/t2.js", "test/t3.js",
+    "cmd/c1.js", "cmd/c2.js",
+  ];
+  for (const d of deps) write(d, "require('../lib/core');\n");
+  const git = (...a) =>
+    execFileSync("git", a, {
+      cwd: dir,
+      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-qm", "fixture");
+
+  const db = await graph.loadDb(dir);
+  graph.upsertFile(db, { relPath: "lib/core.js", type: "js", sizeBytes: 10, mtimeMs: 1 });
+  for (const d of deps) {
+    graph.upsertFile(db, { relPath: d, type: "js", sizeBytes: 10, mtimeMs: 1 });
+    graph.replaceImports(db, d, [{ specifier: "../lib/core", toPath: "lib/core.js", kind: "relative" }]);
+  }
+  freshness.recordScanState(db, dir);
+  await graph.persistDb(dir);
+  return dir;
+}
+
+describe("hook-posttooluse — blast-radius dir rollup end-to-end", () => {
+  let dir;
+  before(async () => {
+    dir = await buildWideFixture();
+  });
+  after(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("wide-fan-in edit emits the rollup tail and stamps rollup:true on telemetry", () => {
+    const res = runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "core.js") },
+      session_id: "rollup-1",
+    });
+    const note = parseEnvelope(res.stdout);
+    assert.match(note, /8 files import it/);
+    // 3 named + 5 remainder → rollup with per-dir counts.  Named order follows
+    // the dependents query; assert the rollup shape, not the named order.
+    assert.match(note, /\(\+5 more: [^)]*\)/);
+    assert.match(note, /more: .*\b(lib|test|cmd)\/ \d/);
+    assert.ok(note.length < 600, `note must stay compact, got ${note.length}`);
+    const evs = blastEvents(dir);
+    assert.equal(evs.length, 1);
+    assert.equal(evs[0].rollup, true, "injected event must carry the rollup stamp");
+  });
+
+  it("small-remainder note stays byte-identical (rollup:false)", () => {
+    // The original 3-dependent fixture semantics: no remainder → no rollup.
+    const composed = composeBlastRadiusNote("lib/core.js", {
+      dependents: ["lib/a.js", "lib/b.js", "lib/c.js"],
+      partners: [],
+      touchedSet: new Set(),
+    });
+    assert.equal(composed.note, "Blast radius of lib/core.js: 3 files import it; not yet opened this session: lib/a.js, lib/b.js, lib/c.js.");
+    assert.equal(composed.rollup, false);
   });
 });

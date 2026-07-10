@@ -164,6 +164,10 @@ Acceptable debt v1:
 - Blast-radius dir rollups (form b) ship separately: replace the note's
   `(+N more)` with a dir rollup when N ≥ 4 (`"used by commands/ (9), test/ (14)"`),
   measured by the now-live `blastradius.path_hit` open-attribution before/after.
+  **SHIPPED 2026-07-10** — `dirRollup` in `hook-posttooluse` (remainder ≥4 →
+  `(+28 more: test/ 19, lib/ 5, commands/ 1, …)`, top 3 dirs, `./` for root
+  files); surfaced set unchanged; `blastradius.injected` stamped `rollup` for
+  the before/after open-rate split; live-verified on `lib/graph.js` (31 deps).
 - Flow line on repos where nothing passes the exclusions: simply absent (no
   fallback to weaker pairs).
 
