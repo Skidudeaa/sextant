@@ -422,6 +422,11 @@ async function run() {
   // must never be the reason a tool-use errors.
   try {
     const root = process.cwd();
+    // WHY: hooks adopt cwd — never score or annotate from a refused root
+    // (home dir / non-project dir; see lib/root-guard.js). Out-of-band lane,
+    // so the exit is silent by construction.
+    const { checkRoot } = require("../lib/root-guard");
+    if (!checkRoot(root, { requireMarker: true }).ok) return;
     const data = await readStdinJson();
 
     const tool = data && data.tool_name;

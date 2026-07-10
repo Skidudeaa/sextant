@@ -9,6 +9,20 @@ async function run() {
   const src = data.source;
   if (src && !["startup", "resume"].includes(src)) process.exit(0);
 
+  // WHY: hooks ADOPT cwd as the project root — refuse before intel.init so a
+  // session launched from $HOME (or any non-project dir) never grows sextant
+  // state, a watcher, or a zoekt index there (the 101 GB home-dir incident).
+  // The one-line block keeps the absence honest: the model is told there is
+  // no map rather than being left to hallucinate one.
+  const { checkRoot } = require("../lib/root-guard");
+  const guard = checkRoot(root, { requireMarker: true });
+  if (!guard.ok) {
+    process.stdout.write(
+      `<codebase-intelligence>\nsextant: codebase intelligence is OFF for this session — ${guard.message}\n</codebase-intelligence>`
+    );
+    process.exit(0);
+  }
+
   await intel.init(root);
   const rawSummary = intel.readSummary(root);
 

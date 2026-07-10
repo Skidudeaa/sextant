@@ -161,6 +161,15 @@ async function run() {
   const root = process.cwd();
   const data = await readStdinJson();
 
+  // WHY: hooks adopt cwd — a session running in $HOME / a non-project dir
+  // must not grow sextant state here (see lib/root-guard.js). Silent exit:
+  // SessionStart already told the model intelligence is OFF for this session,
+  // and a per-prompt repeat would be pure noise.
+  {
+    const { checkRoot } = require("../lib/root-guard");
+    if (!checkRoot(root, { requireMarker: true }).ok) process.exit(0);
+  }
+
   // WHY: Kicked off concurrently (not awaited here) so intel.health's ~140ms
   // doesn't serialize with the main pipeline. We await it at the end of run()
   // so the process doesn't exit before settings.json writes land — earlier

@@ -2,6 +2,17 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-10 — root-sanity guard + zoekt scope/circuit-breaker (the 101 GB home-dir incident)
+
+Field incident: a Claude Code session launched from a user's macOS home directory made the hooks adopt `/Users/<name>` as a project root; the auto-started watcher then fed the whole home dir to `zoekt-index` (whose only default exclusions are `.git/.hg/.svn`) every ~3 minutes, growing a **101 GB** search index at `.planning/intel/zoekt/index` — and regrowing it after manual deletion (25 GiB within hours), with orphaned watchers accumulating. Four fixes, all shipped together:
+
+1. **Root-sanity guard** (`lib/root-guard.js`): home dir / filesystem root / home's parent are refused everywhere (even with project markers); hooks and the watcher — the surfaces that adopt `cwd` automatically — additionally require a project marker (`.git`, manifest, `.codebase-intel.json`, or existing `.planning/intel`). Refused hooks exit before `intel.init` (zero state created; SessionStart emits a one-line honest-absence note); `sextant init` is guarded hard because running it in `$HOME` wires hooks into the GLOBAL `~/.claude/settings.json`. Overrides: `--allow-unsafe-root` / `SEXTANT_ALLOW_UNSAFE_ROOT=1` / `"allowUnsafeRoot": true`.
+2. **Zoekt build scoping** (`lib/zoekt-scope.js`): the non-git `zoekt-index` path now passes `-ignore_dirs` (node_modules, `.planning` — the index no longer indexes itself — vendored/build/cache dirs, and user-machine dirs like `Library`) and runs an early-exit corpus pre-check (default 512 MiB, `zoektMaxCorpusBytes`) that refuses to index BEFORE a shard is written.
+3. **Index-size circuit breaker**: at trigger time and after each run, an index dir past the cap (default 2 GiB, `zoektMaxIndexBytes`) is deleted and the lane disabled via `zoekt/.disabled.json` + `zoekt.disabled` telemetry; `sextant doctor` shows the reason, the current index size vs cap, and the re-enable command (`sextant zoekt index --force`). Search degrades to rg while disabled.
+4. **Orphan hygiene**: `*.tmp` shards leaked by interrupted zoekt runs are age-gated deleted at every trigger; a stuck-but-alive previous indexer (>10 min) is identity-verified (`ps` command contains "zoekt") and SIGKILLed instead of being run alongside — overlapping full rebuilds were a growth compounder.
+
+Verified live: scoped `buildIndex` on a fixture with `node_modules` indexes the source and zero vendored content; cap-trip → disabled marker → `--force` re-enable round-trips. Gates: unit 919/919 (+33 new in `test/root-guard.test.js`, `test/zoekt-scope.test.js`), integration green, self-eval byte-identical (21/21, MRR 0.900 / nDCG 0.920 / lift +0.012).
+
 ## 2026-07-10 — dir-level explain (docs/021 form c)
 
 `sextant explain <file|dir/>` — new CLI command, plus dir mode in the MCP `sextant_explain` tool. Dir mode (trailing `/` forces it; a no-slash dir falls through after the file lookup misses) returns the aggregate the Structure section can't fit: file/type counts, top fan-in hotspots inside the dir, inbound/outbound import edges grouped by sibling dir, internal edge count, and git co-change coupling to other dirs (from the 016 cochange tables). File mode is the compact fan-in/fan-out/exports/imports view the MCP tool already had, now reachable from the CLI. Unknown targets fail explicitly (exit 1 / `notIndexed: true`) — never an empty aggregate a caller could mistake for a real isolated dir.

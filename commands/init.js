@@ -256,6 +256,18 @@ async function run(ctx) {
   const codex = hasFlag(process.argv, "--codex");
   let codexMcp = null;
   for (const r of ctx.roots) {
+    // WHY guard init hard: `sextant init` in $HOME writes hooks into
+    // ~/.claude/settings.json — which Claude Code treats as GLOBAL settings,
+    // wiring sextant into every session in every directory. That global
+    // wiring is exactly how the home-dir indexing incident started.
+    {
+      const { checkRoot } = require("../lib/root-guard");
+      const guard = checkRoot(r, { argv: process.argv });
+      if (!guard.ok) {
+        process.stderr.write(`[sextant] ${guard.message}\n`);
+        process.exit(2);
+      }
+    }
     await intel.init(r);
     const mcp = ensureMcpJson(r);
     const hooks = checkClaudeHooks(r);

@@ -244,6 +244,21 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
   const lockedRoots = [];
 
   for (const root of roots) {
+    // WHY: the watcher is what turned a mis-adopted root into a 101 GB zoekt
+    // index (home-dir incident, 2026-07-10) — it reindexes continuously, so it
+    // gets the strict guard. `sextant scan`/`init` (deliberate, non-strict)
+    // create .planning/intel, which counts as a marker, so "scan first" opts a
+    // markerless dir in.
+    {
+      const { checkRoot } = require("./lib/root-guard");
+      const guard = checkRoot(root, { requireMarker: true, argv: process.argv });
+      if (!guard.ok) {
+        process.stderr.write(`[intel] ${guard.message}\n`);
+        for (const r of lockedRoots) releasePidLock(r);
+        process.exit(2);
+      }
+    }
+
     // WHY: Claim the PID lockfile before any expensive init. If another watcher
     // already owns this root, exit cleanly rather than accumulating duplicates.
     if (!claimPidLock(root)) {

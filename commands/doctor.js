@@ -56,6 +56,39 @@ async function run(ctx) {
   }
 
   const actions = [];
+
+  // Root-sanity guard (lib/root-guard.js): tell the user when sextant refuses
+  // this root outright, or when the CLI works here but hooks stay dark (no
+  // project marker) — otherwise "sextant is silent" is undiagnosable.
+  {
+    const { checkRoot } = require("../lib/root-guard");
+    const hard = checkRoot(rootAbs);
+    if (!hard.ok) {
+      actions.push({ msg: `Root refused (${hard.reason}) — ${hard.message}`, cmd: null });
+    } else {
+      const strict = checkRoot(rootAbs, { requireMarker: true });
+      if (!strict.ok) {
+        actions.push({
+          msg: "Hooks inactive here — no project marker (hooks only adopt directories that look like projects)",
+          cmd: "sextant init",
+        });
+      }
+    }
+  }
+
+  // Zoekt lane disabled (corpus/index-size cap — lib/zoekt-scope.js): search
+  // silently degrades to rg, so the reason + re-enable path must be loud here.
+  {
+    const zscope = require("../lib/zoekt-scope");
+    const zdisabled = zscope.readDisabled(rootAbs);
+    if (zdisabled) {
+      actions.push({
+        msg: `Zoekt search disabled (${zdisabled.reason}): ${zdisabled.detail || ""} — fix scope/caps in .codebase-intel.json (zoektMaxCorpusBytes / zoektMaxIndexBytes), then re-enable`,
+        cmd: "sextant zoekt index --force",
+      });
+    }
+  }
+
   if (!fs.existsSync(sd)) {
     actions.push({ msg: "State dir missing — sextant not initialized in this repo", cmd: "sextant init" });
   } else if (!fs.existsSync(graphDb)) {
@@ -272,11 +305,28 @@ async function run(ctx) {
   // Zoekt per-project index status
   if (zoektInstalled) {
     const zoektIdxDir = path.join(sd, "zoekt", "index");
+    const zscope = require("../lib/zoekt-scope");
     let hasZoektShards = false;
     try {
       hasZoektShards = fs.existsSync(zoektIdxDir) && fs.readdirSync(zoektIdxDir).some(f => f.endsWith(".zoekt"));
     } catch {}
-    lines.push(viz.metric("zoekt index", hasZoektShards ? viz.status("ok", "exists") : viz.status("warn", "missing (run sextant scan)")));
+    const zdisabled = zscope.readDisabled(rootAbs);
+    if (zdisabled) {
+      lines.push(viz.metric("zoekt index", viz.status("error", `disabled (${zdisabled.reason}) — see Actions above`)));
+    } else {
+      lines.push(viz.metric("zoekt index", hasZoektShards ? viz.status("ok", "exists") : viz.status("warn", "missing (run sextant scan)")));
+    }
+    if (hasZoektShards) {
+      // Size next to the caps — the 101 GB incident was invisible until the
+      // user's disk filled; a growing index should be visible on demand.
+      try {
+        const idxBytes = zscope.dirSizeBytes(zoektIdxDir);
+        const capBytes = zscope.readZoektCaps(rootAbs).maxIndexBytes;
+        const mb = (n) => `${Math.round(n / (1024 * 1024))} MiB`;
+        const sizeStatus = idxBytes > capBytes * 0.8 ? viz.status("warn", `${mb(idxBytes)} (cap ${mb(capBytes)})`) : viz.dim(`${mb(idxBytes)} (cap ${mb(capBytes)})`);
+        lines.push(viz.metric("zoekt index size", sizeStatus));
+      } catch {}
+    }
 
     // Webserver status — check daemon.json, PID, and probe
     const zoekt = require("../lib/zoekt");

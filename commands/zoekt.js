@@ -13,6 +13,12 @@ async function run(ctx) {
     const force = hasFlag(process.argv, "--force");
     const res = zoekt.buildIndex(r, { force });
     process.stdout.write(JSON.stringify(res, null, 2) + "\n");
+    if (res && res.disabled) {
+      console.error(
+        `zoekt indexing disabled (${res.reason}). Raise zoektMaxCorpusBytes / zoektMaxIndexBytes in .codebase-intel.json (or fix the scope), then rerun with --force.`
+      );
+      process.exit(1);
+    }
     return;
   }
 

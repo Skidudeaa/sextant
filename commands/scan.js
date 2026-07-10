@@ -22,6 +22,21 @@ async function run(ctx) {
   // scanPauseProtocol field — AND the user hasn't forced it. --allow-concurrent
   // still bypasses everything (manual override). The marker is written
   // regardless, so even a forced concurrent run gets the watcher to defer.
+  // WHY non-strict (home/fs-root only): scan is a deliberate user action, so
+  // a markerless scratch dir is allowed — but the always-wrong roots (home
+  // directory, filesystem root) are refused even here. Override:
+  // --allow-unsafe-root. See lib/root-guard.js for the incident this guards.
+  {
+    const { checkRoot } = require("../lib/root-guard");
+    for (const r of ctx.roots) {
+      const guard = checkRoot(r, { argv: process.argv });
+      if (!guard.ok) {
+        process.stderr.write(`[sextant] ${guard.message}\n`);
+        process.exit(2);
+      }
+    }
+  }
+
   if (!allowConcurrent) {
     for (const r of ctx.roots) {
       const ws = getWatcherStatus(r);
