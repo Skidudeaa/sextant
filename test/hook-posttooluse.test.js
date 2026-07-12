@@ -237,7 +237,7 @@ function installSextantShim() {
 // into holdback turns and tag the persisted set arm:"holdback". Captured
 // per-spawn because installSextantShim() mutates process.env.PATH.
 function hookEnv() {
-  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "" };
+  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "", SEXTANT_SYNC_RESCAN: "0" };
 }
 function runRefresh(dir, prompt) {
   return spawnSync(process.execPath, [BIN, "hook", "refresh"], {

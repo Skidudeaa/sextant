@@ -51,8 +51,15 @@ function installSextantShim() {
   fs.chmodSync(path.join(shimDir, "sextant"), 0o755);
   const prevPath = process.env.PATH;
   process.env.PATH = shimDir + path.delimiter + prevPath;
+  // Hermetic: an ambient SEXTANT_SYNC_RESCAN=1 (dogfooding shell) would make
+  // the stale-path tests attempt an in-hook sync rescan against the shim
+  // instead of the blackout shape they assert on. Pin the arm off in-process.
+  const prevSync = process.env.SEXTANT_SYNC_RESCAN;
+  process.env.SEXTANT_SYNC_RESCAN = "0";
   return () => {
     process.env.PATH = prevPath;
+    if (prevSync === undefined) delete process.env.SEXTANT_SYNC_RESCAN;
+    else process.env.SEXTANT_SYNC_RESCAN = prevSync;
     try { fs.rmSync(shimDir, { recursive: true, force: true }); } catch {}
   };
 }

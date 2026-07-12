@@ -199,6 +199,16 @@ function summarize(events) {
   const staleHits = byName.get("freshness.stale_hit") || 0;
   const blackoutTurns = byName.get("freshness.blackout_turn") || 0;
   const totalReads = freshHits + staleHits;
+  // Option-5 sync-rescan arm.  A RESCUE is a stale read that got a fresh body
+  // instead of a blackout — counted from stale_hit{rescanState:"sync"}, which
+  // only records after the post-scan recheck passed (an ok sync_rescan whose
+  // recheck stayed stale is an attempt, not a rescue).
+  let syncAttempts = 0;
+  let syncRescues = 0;
+  for (const e of events) {
+    if (e.name === "freshness.sync_rescan") syncAttempts += 1;
+    else if (e.name === "freshness.stale_hit" && e.rescanState === "sync") syncRescues += 1;
+  }
 
   const scanStats = (durations) => {
     if (durations.length === 0) return null;
@@ -227,6 +237,8 @@ function summarize(events) {
       totalReads,
       staleRate: totalReads ? staleHits / totalReads : null,
       blackoutRate: totalReads ? blackoutTurns / totalReads : null,
+      syncAttempts,
+      syncRescues,
       reasons: Object.fromEntries(staleByReason),
     },
     scans: {
@@ -357,6 +369,12 @@ function printSummary(rootAbs, sum) {
   lines.push(`  fresh_hit:      ${f.freshHits}`);
   lines.push(`  stale_hit:      ${f.staleHits}  (${fmtPct(f.staleHits, f.totalReads)} of ${f.totalReads} reads)`);
   lines.push(`  blackout_turn:  ${f.blackoutTurns}  (${fmtPct(f.blackoutTurns, f.totalReads)} of reads)`);
+  if (f.syncAttempts > 0) {
+    lines.push(
+      `  sync rescues:   ${f.syncRescues} of ${f.syncAttempts} sync-rescan attempts ` +
+      `(stale reads converted to fresh injections in-hook)`
+    );
+  }
   if (Object.keys(f.reasons).length) {
     lines.push("  reasons (stale_hit):");
     for (const [r, c] of Object.entries(f.reasons).sort((a, b) => b[1] - a[1])) {

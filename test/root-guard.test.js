@@ -33,6 +33,7 @@ function guardEnv(home, extra = {}) {
     SEXTANT_ALLOW_UNSAFE_ROOT: "",
     SEXTANT_HOLDBACK_PCT: "0",
     SEXTANT_HOLDBACK_FORCE: "",
+    SEXTANT_SYNC_RESCAN: "0",
     ...extra,
   };
 }

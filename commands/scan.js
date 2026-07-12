@@ -69,9 +69,13 @@ async function run(ctx) {
   // pipeline split scan-duration percentiles and success rates by source
   // -- gate-triggered rescans are the ones whose latency Option 5 will
   // need to reason about.
+  // freshness_gate_sync = the Option-5 adaptive arm ran this scan INSIDE the
+  // hook (lib/cli.js applyFreshnessGate); its durations get their own
+  // percentile bucket in the audit so sync-arm latency is visible separately.
   const trigger =
-    process.env.SEXTANT_RESCAN_TRIGGER === "freshness_gate"
-      ? "freshness_gate"
+    process.env.SEXTANT_RESCAN_TRIGGER === "freshness_gate" ||
+    process.env.SEXTANT_RESCAN_TRIGGER === "freshness_gate_sync"
+      ? process.env.SEXTANT_RESCAN_TRIGGER
       : "manual";
 
   for (const r of ctx.roots) {

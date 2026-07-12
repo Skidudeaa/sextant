@@ -12,6 +12,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd)"
 # this test asserts on. Pin the arm to the default-off state.
 export SEXTANT_HOLDBACK_PCT=0
 export SEXTANT_HOLDBACK_FORCE=
+# Same hermetic reasoning for the Option-5 sync-rescan arm: a stale turn in a
+# root with fast recorded scans would rescan INSIDE the hook and return a
+# fresh body where this test expects the blackout shape.
+export SEXTANT_SYNC_RESCAN=0
 
 fail() {
   echo "FAIL: $1" >&2

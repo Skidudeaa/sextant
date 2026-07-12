@@ -119,7 +119,7 @@ async function setScanState(dir, mode) {
 // background rescan resolve the REAL sextant and write into the fixture mid-
 // teardown (ENOTEMPTY race).
 function hookEnv() {
-  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "" };
+  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "", SEXTANT_SYNC_RESCAN: "0" };
 }
 function runHook(dir, prompt) {
   const res = spawnSync(process.execPath, [BIN, "hook", "refresh"], {

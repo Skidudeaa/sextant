@@ -92,7 +92,7 @@ function installSextantShim() {
 // hook-refresh-freshness.test.js for the full story). Captured per-spawn, not
 // at module load, because installSextantShim() mutates process.env.PATH.
 function hookEnv() {
-  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "" };
+  return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "", SEXTANT_SYNC_RESCAN: "0" };
 }
 function runHook(dir, prompt) {
   const res = spawnSync(process.execPath, [BIN, "hook", "refresh"], {
