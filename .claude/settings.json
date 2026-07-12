@@ -35,6 +35,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook pretask"
+          }
+        ]
+      }
     ]
   }
 }

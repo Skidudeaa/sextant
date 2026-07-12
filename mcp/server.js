@@ -80,6 +80,24 @@ const TOOLS = [
     },
   },
   {
+    name: "sextant_orient",
+    description:
+      "Get a compact orientation block for this repo: root, index health, dependency " +
+      "hotspots, and (when a task description is provided) the files whose exported " +
+      "symbols/paths match it. Designed as a first call when starting work in an " +
+      "unfamiliar repo. Returns nothing structural when the index is stale (silent " +
+      "absence — stale claims are withheld rather than served).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "Optional: what you're about to work on — used to surface task-relevant files",
+        },
+      },
+    },
+  },
+  {
     name: "sextant_scope",
     description:
       "Inspect what got cut from the index. Returns the vendored subtrees that were " +
@@ -398,6 +416,32 @@ async function handleScope() {
   };
 }
 
+// Lane B of the subagent-orientation track (docs/018 + 022): the pull
+// counterpart to the pretask hook's push. Same builder, same freshness gate
+// (content-stale → honest absence message, never stale structural claims).
+async function handleOrient(args) {
+  await ensureInit();
+  const { buildOrientationBlock } = require("../lib/orient");
+  const built = await buildOrientationBlock(
+    _root,
+    typeof args?.task === "string" ? args.task : ""
+  );
+  if (!built) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "Orientation unavailable: the index is stale or absent for this repo " +
+            "(structural claims are withheld rather than served stale). " +
+            "`sextant scan` rebuilds it.",
+        },
+      ],
+    };
+  }
+  return { content: [{ type: "text", text: built.block }] };
+}
+
 // --- Dispatch table -----------------------------------------------------
 
 const toolHandlers = {
@@ -405,6 +449,7 @@ const toolHandlers = {
   sextant_related: handleRelated,
   sextant_explain: handleExplain,
   sextant_health: handleHealth,
+  sextant_orient: handleOrient,
   sextant_scope: handleScope,
 };
 

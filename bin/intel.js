@@ -23,6 +23,7 @@ Usage:
   sextant hook sessionstart
   sextant hook refresh
   sextant hook posttooluse
+  sextant hook pretask
   sextant inject
   sextant retrieve <query>
   sextant zoekt <index|serve|search>
@@ -75,6 +76,11 @@ const commandMap = {
     }
     if (sub === "posttooluse") {
       const { run } = require("../commands/hook-posttooluse");
+      await run();
+      return;
+    }
+    if (sub === "pretask") {
+      const { run } = require("../commands/hook-pretask");
       await run();
       return;
     }
