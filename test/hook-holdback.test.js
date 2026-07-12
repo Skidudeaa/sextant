@@ -24,7 +24,7 @@ const freshness = require("../lib/freshness");
 const telemetry = require("../lib/telemetry");
 const { decideArm } = require("../commands/hook-refresh");
 const { readInjectedArm } = require("../commands/hook-posttooluse");
-const { summarize } = require("../commands/telemetry");
+const { summarize, printSummary } = require("../commands/telemetry");
 
 const BIN = path.resolve(__dirname, "..", "bin", "intel.js");
 
@@ -130,6 +130,31 @@ describe("telemetry — open-precision split by arm + benefitDelta", () => {
     const s = summarize(events);
     assert.deepEqual(Object.keys(s.retrieval.armCounts), ["armed", "holdback"]);
     assert.deepEqual(Object.keys(s.retrieval.openPrecisionByArm), ["armed", "holdback"]);
+  });
+  it("printSummary gates the causal BENEFIT DELTA claim on >=30 scored per arm", () => {
+    // benefitDelta computes from the first scored open per arm, but rendering an
+    // n=1 precision as "the causal lift" misleads (73 days at 20%-on-one-repo
+    // accrued exactly 1 holdback turn). JSON keeps the raw value; the summary
+    // must print DORMANT with the raw counts until both arms reach volume.
+    const ev = (name, arm) => ({ ts: 1752000000000, name, source: "path_match", arm });
+    const lowN = [
+      ...Array.from({ length: 40 }, () => ev("retrieval.path_hit", "armed")),
+      ev("retrieval.path_miss", "holdback"),
+    ];
+    const low = printSummary("/x", summarize(lowN));
+    assert.match(low, /benefit delta: DORMANT \(accruing\) — holdback n=1, armed n=40 scored/);
+    assert.doesNotMatch(low, /BENEFIT DELTA/);
+    assert.doesNotMatch(low, /counterfactual present/);
+    // at volume (>=30 per arm) the causal line renders
+    const atVolume = [
+      ...Array.from({ length: 30 }, () => ev("retrieval.path_hit", "armed")),
+      ...Array.from({ length: 30 }, () => ev("retrieval.path_miss", "holdback")),
+    ];
+    const ok = printSummary("/x", summarize(atVolume));
+    assert.match(ok, /BENEFIT DELTA \(armed − holdback\): 100\.0 pts/);
+    assert.doesNotMatch(ok, /DORMANT/);
+    // per-arm rows carry the sample size either way
+    assert.match(ok, /armed {6}open-precision 100\.0% {2}\(n=30 scored\)/);
   });
 });
 

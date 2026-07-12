@@ -18,6 +18,12 @@ const path = require("path");
 const { hasFlag, flag } = require("../lib/cli");
 const telemetry = require("../lib/telemetry");
 
+// Minimum scored opens PER ARM before the human-readable summary renders
+// benefitDelta as a causal claim. Mirrors check-holdback-benefit.sh's
+// SEXTANT_HOLDBACK_MIN default and `sextant tune`'s n>=30 prior-eligibility
+// floor. Below this the summary prints a DORMANT line with the raw counts.
+const HOLDBACK_MIN_SCORED = 30;
+
 function readAllEvents(rootAbs, includeOld) {
   const events = [];
   // .old first so chronological order is preserved when concatenated.
@@ -464,9 +470,19 @@ function printSummary(rootAbs, sum) {
       `(${r.pathHits} hit / ${r.pathHits + r.pathMisses} scored opens)`
     );
     // The "baseline pending" half of the caveat is only honest UNTIL a holdback
-    // arm provides the counterfactual; once benefitDelta exists, drop it and keep
-    // only the precision-flavored half (still load-bearing — VH-2).
-    if (r.benefitDelta == null) {
+    // arm provides the counterfactual; once benefitDelta exists AT VOLUME, drop
+    // it and keep only the precision-flavored half (still load-bearing — VH-2).
+    // Volume gate mirrors check-holdback-benefit.sh's SEXTANT_HOLDBACK_MIN:
+    // benefitDelta computes from the first scored open per arm, but a precision
+    // at n=1 is noise — rendering it as "the causal lift" misleads (73 days of
+    // 20%-on-one-repo accrued exactly 1 holdback turn). JSON keeps the raw
+    // value; only the human-readable claim is gated.
+    const counts = r.armCounts || {};
+    const armedScored = (counts.armed || {}).scored || 0;
+    const holdbackScored = (counts.holdback || {}).scored || 0;
+    const deltaAtVolume =
+      r.benefitDelta != null && armedScored >= HOLDBACK_MIN_SCORED && holdbackScored >= HOLDBACK_MIN_SCORED;
+    if (!deltaAtVolume) {
       lines.push(
         `  caveat: baseline pending (no injection-OFF arm yet) AND precision-flavored — ` +
         `misses include opens of files we never surfaced, NOT coverage; a low % is not "retrieval is wrong."`
@@ -492,12 +508,21 @@ function printSummary(rootAbs, sum) {
       lines.push("  by arm (injection-OFF holdback):");
       for (const arm of ["armed", "holdback"]) {
         if (arms[arm] == null && !(arm in arms)) continue;
-        lines.push(`    - ${arm.padEnd(10)} open-precision ${arms[arm] == null ? "n/a" : (arms[arm] * 100).toFixed(1) + "%"}`);
+        const n = (counts[arm] || {}).scored || 0;
+        lines.push(
+          `    - ${arm.padEnd(10)} open-precision ${arms[arm] == null ? "n/a" : (arms[arm] * 100).toFixed(1) + "%"}` +
+          `  (n=${n} scored)`
+        );
       }
-      if (r.benefitDelta != null) {
+      if (deltaAtVolume) {
         lines.push(
           `  BENEFIT DELTA (armed − holdback): ${(r.benefitDelta * 100).toFixed(1)} pts` +
           ` — the causal open-rate lift the injection buys (counterfactual present).`
+        );
+      } else if (r.benefitDelta != null) {
+        lines.push(
+          `  benefit delta: DORMANT (accruing) — holdback n=${holdbackScored}, armed n=${armedScored} scored; ` +
+          `need >=${HOLDBACK_MIN_SCORED} per arm before the armed−holdback delta is citable.`
         );
       }
     }
