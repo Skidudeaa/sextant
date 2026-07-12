@@ -143,7 +143,21 @@ That's it. On the next Claude Code session:
 
 1. The **SessionStart hook** injects the codebase summary and starts the file watcher
 2. The **UserPromptSubmit hook** classifies each prompt and injects code-relevant context
-3. The **watcher** keeps the index fresh as you edit files
+3. The **PostToolUse hook** scores whether the agent opened what was surfaced, and after an edit may inject a one-line blast-radius note (untouched dependents + co-change partners)
+4. The **watcher** keeps the index fresh as you edit files
+
+Everything is automatic from here — staleness detection, rescans (in-hook when the repo's own scan history proves they're fast, background otherwise), and telemetry all run inside the hooks. The only manual command you'll ever be prompted for is whatever `sextant doctor` or the status line explicitly tells you to run.
+
+### Codex CLI (optional)
+
+Codex doesn't read Claude Code's settings or `.mcp.json`, so a plain `init` leaves sextant dark there. One flag wires the Codex-side surfaces:
+
+```bash
+cd your-project
+sextant init --codex   # writes .codex/hooks.json, AGENTS.md section, and a global [mcp_servers.sextant] in ~/.codex/config.toml
+```
+
+Codex requires persisted hook trust: restart Codex once after wiring and accept the prompt (or `codex exec --dangerously-bypass-hook-trust` for automation). Verified end-to-end on Codex CLI 0.141.0 — including the freshness gate serving the honest minimal body through Codex.
 
 ## What You'll See
 
@@ -174,7 +188,7 @@ root@host ~/project (main) ◆ 60% · 12 files · ⏸ off  ⚠ run: sextant watc
 Sextant runs in the background, so when something goes wrong you might not remember whether to scan, rescan, init, or restart the watcher. Two surfaces solve this without taking any action on your behalf:
 
 - **Status line action slot** — appears only when an actionable condition is detected (watcher off/stale, resolution below 90%) and carries the literal command to copy. Highest-priority action shown alone; fix it, the next one appears next render.
-- **`sextant doctor` Actions block** — top-of-output checklist that exhaustively lists every applicable item (state-dir missing, graph.db missing/empty, watcher dead or stale, resolution degraded, settings.json missing) with a `→ sextant <cmd>` line under each.
+- **`sextant doctor` Actions block** — top-of-output checklist that exhaustively lists every applicable item (state-dir missing, graph.db missing/empty, watcher dead or stale, **watcher running outdated code after an upgrade** — the heartbeat carries a code-version stamp, so a live watcher that would rewrite state in an old format gets flagged with the restart command — resolution degraded, settings.json missing, zoekt lane disabled) with a `→ sextant <cmd>` line under each.
 
 Detection and recommendation live in code; execution stays in your hands. Sextant never auto-runs a scan or restarts a watcher.
 
@@ -195,12 +209,14 @@ There is no channel that both the user and Claude see simultaneously.
 - **Benefit proof, not just no-regression** -- `sextant eval-trajectory` replays real session history to measure whether the agent opened what sextant surfaced (permutation-null open-rate lift); the injection-OFF holdback arm makes it causal over time
 - **Health-gated scoring** -- graph boosts disabled when import resolution drops below 90%
 - **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; an atomic single-flight rescan is enqueued in the background
+- **Adaptive sync rescan** -- when a repo's own recorded scan history proves rescans are fast (p95 ≤ 2.5s over ≥5 scans), a stale read runs the rescan *inside* the hook and injects a fresh body instead of the minimal one — ~1–2s of prompt latency instead of an orientation-less turn. Evidence-based per repo; slow or unknown repos keep the background path unchanged
+- **Subagent orientation** -- subagents (Task/Agent tool) receive no hook injection of their own; a PreToolUse hook appends a compact facts-only orientation block (repo, health, hotspots, task-relevant files) to the spawning prompt, byte-capped and freshness-gated. Paired with the `sextant_orient` MCP tool for on-demand pulls
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
 - **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
 - **Query-aware hooks** -- classifies each prompt, retrieves code-relevant context in <200ms
 - **AST export extraction** -- JS/TS via @babel/parser with regex fallback on parse failure
 - **TS ESM Node16 awareness** -- `.ts` source importing `./foo.js` resolves to `./foo.ts` per the NodeNext convention; opt-in via importer extension so pure-JS projects keep literal semantics
-- **MCP server** -- 5 tools (search, related, explain, health, scope) registered per-project via `.mcp.json`
+- **MCP server** -- 6 tools (search, related, explain, health, orient, scope) registered per-project via `.mcp.json`
 - **Definition over hub** -- definition-site scoring beats high fan-in hub files
 - **Source-first search** -- source files searched before docs/config to prevent changelog saturation
 - **Re-export chain tracing** -- follows barrel-file re-exports up to 5 hops to find original definitions
@@ -210,7 +226,7 @@ There is no channel that both the user and Claude see simultaneously.
 
 | Command | Description |
 |---------|-------------|
-| `sextant init` | Create `.planning/intel/`, wire Claude Code hooks, register MCP server |
+| `sextant init [--codex]` | Create `.planning/intel/`, wire Claude Code hooks, register MCP server; `--codex` additionally wires Codex CLI (`.codex/hooks.json`, `AGENTS.md`, global `~/.codex/config.toml` MCP entry) |
 | `sextant scan [--force]` | Index imports/exports, build dependency graph |
 | `sextant rescan [--force]` | Scan + prune deleted files |
 | `sextant watch` | Live file watching with terminal dashboard |
@@ -219,17 +235,20 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant health [--pretty]` | Resolution %, index age, top unresolved |
 | `sextant doctor` | Visual diagnostic with trends and hints |
 | `sextant summary` | Print what Claude sees |
+| `sextant explain <file\|dir/>` | File mode: fan-in/fan-out/exports/imports. Dir mode (trailing `/`): aggregate shape — file/type counts, internal hotspots, import edges by sibling dir, co-change coupling. `--json` available |
 | `sextant retrieve <query>` | Ranked search with graph context |
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |
 | `sextant inject` | Print the current `<codebase-intelligence>` body to stdout (freshness-gated, same contract as the hooks) |
 | `sextant update --file <relPath>` | Re-extract a single file and update the graph (used by the watcher; useful for ad-hoc reindex) |
 | `sextant telemetry [--json \| --tail N] [--include-old]` | Audit the dataset: stale rate, scan percentiles, open-precision + per-arm holdback `benefitDelta` |
 | `sextant eval-trajectory [--json] [--repo <name>] [--size-matched]` | Replay real session history → retrieval open-rate lift vs a permutation null (the benefit proof) |
+| `sextant tune [--json] [--repo <name>]` | Reporting-only per-source open-rate diagnostics from trajectory replay (Wilson intervals; no scoring weight reads it) |
 | `sextant zoekt <index\|serve\|search>` | Manage Zoekt code search (optional) |
 | `sextant mcp` | Start the MCP server (stdio, used by Claude Code) |
 | `sextant hook sessionstart` | SessionStart hook entry point |
 | `sextant hook refresh` | UserPromptSubmit hook entry point (retrieval + holdback arm) |
-| `sextant hook posttooluse` | PostToolUse hook — scores whether the agent opened what was surfaced |
+| `sextant hook posttooluse` | PostToolUse hook — scores whether the agent opened what was surfaced; emits blast-radius notes after edits |
+| `sextant hook pretask` | PreToolUse hook (matcher `Task\|Agent`) — appends the subagent orientation block to spawning Task prompts (dogfood wiring; not yet added by `sextant init`) |
 
 ## Configuration
 
@@ -242,6 +261,8 @@ Optional `.codebase-intel.json` at project root:
   "vendored": ["mcp-servers"],
   "vendoredDetection": true,
   "gitignoreHonoring": true,
+  "coverageDiagnostics": true,
+  "syncRescan": true,
   "summaryEverySec": 5
 }
 ```
@@ -253,6 +274,8 @@ Optional `.codebase-intel.json` at project root:
 | `vendored` | `[]` | Explicit subdirs to exclude from indexing (always honored, additive to auto-detection) |
 | `vendoredDetection` | `true` | Auto-detect vendored subtrees at depth=1 (nested `.git/`, conventional dirnames like `vendor/`/`Pods/`/`Carthage/`/`target/`, GitHub-tarball naming). Set to `false` to disable. |
 | `gitignoreHonoring` | `true` | Honor the project's root `.gitignore` (semantics-correct via the `ignore` npm package, including negations and anchored patterns). Set to `false` to ignore the file. |
+| `coverageDiagnostics` | `true` | Warn loudly (scan output, summary ALERT, doctor) when the index is empty or covers <50% of supported sources. Set to `false` for deliberately-narrowed globs (e.g. one package of a monorepo). |
+| `syncRescan` | `true` | Allow the freshness gate to run a rescan synchronously inside the hook when this repo's recorded scan history proves it's fast (p95 ≤ 2.5s). Set to `false` to always take the background-rescan path. `SEXTANT_SYNC_RESCAN=0` is the env-level kill switch. |
 | `summaryEverySec` | `5` | Minimum interval (seconds) between summary regenerations |
 
 The summary header lists detected vendored exclusions (`Vendored excluded: N (path1, path2, …)`) so you can audit and override when the heuristic guesses wrong.
@@ -303,13 +326,16 @@ PostToolUse hook scores opens on both arms; `sextant telemetry` then reports:
 
 ```
   by arm (injection-OFF holdback):
-    - armed      open-precision XX%
-    - holdback   open-precision YY%
+    - armed      open-precision XX%  (n=NNN scored)
+    - holdback   open-precision YY%  (n=NNN scored)
   BENEFIT DELTA (armed − holdback): ZZ pts — the causal open-rate lift the injection buys
 ```
 
 Default-off (`SEXTANT_HOLDBACK_PCT` unset → byte-identical to normal behavior). Opt
-in on a repo to earn the causal baseline. See [docs/010-benefit-proof.md](docs/010-benefit-proof.md).
+in on a repo to earn the causal baseline. The summary refuses to render the delta
+as a causal claim until **both arms have ≥30 scored opens** — below that it prints
+`benefit delta: DORMANT (accruing)` with the raw counts, so a noise-level number
+never gets quoted. See [docs/010-benefit-proof.md](docs/010-benefit-proof.md).
 
 ## Eval Results
 
@@ -320,7 +346,7 @@ in on a repo to earn the causal baseline. See [docs/010-benefit-proof.md](docs/0
 These all run from a clean clone in under a minute (Vapor benchmark excluded — it's manual-trigger only):
 
 ```bash
-npm run test:unit                                                                                         # 763 pass on a clean run (a few spawn-based tests can flake under full-suite concurrency; they pass in isolation / on re-run)
+npm run test:unit                                                                                         # 948 pass on a clean run (a few spawn-based tests can flake under full-suite concurrency; they pass in isolation / on re-run)
 npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.900, nDCG 0.920
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture

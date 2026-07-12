@@ -43,7 +43,7 @@ lib/
   zoekt.js                Zoekt HTTP backend (optional)
   cli.js                  shared CLI utilities
   extractors/             JS/TS (regex imports, AST exports), Python (AST)
-mcp/server.js             JSON-RPC 2.0 MCP server (5 tools)
+mcp/server.js             JSON-RPC 2.0 MCP server (6 tools)
 watch.js                  chokidar file watcher + heartbeat + dashboard
 test/                     node:test unit tests
 scripts/
