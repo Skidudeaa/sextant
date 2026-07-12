@@ -6,6 +6,7 @@ const intel = require("./lib/intel");
 const viz = require("./lib/terminal-viz");
 const { shouldReindex, triggerReindex } = require("./lib/zoekt-reindex");
 const freshness = require("./lib/freshness");
+const { codeVersionStamp } = require("./lib/utils");
 
 // WHY: advertised in the heartbeat so `sextant scan` can tell whether the
 // running watcher honors the .scan_in_progress pause marker. A watcher started
@@ -43,6 +44,11 @@ function writeHeartbeat(root, lastFile, activity) {
       lastFlushMs: activity?.lastFlushMs ?? null,
       totalUpdates: activity?.totalUpdates ?? null,
       scanPauseProtocol: SCAN_PAUSE_PROTOCOL,
+      // WHY: identity of the code this watcher process is RUNNING (baked at
+      // startup via the module-load cache). doctor recomputes the stamp from
+      // disk and flags a mismatch — an old-code watcher rewrites summary.md
+      // in the old shape on its next flush (017 lever #4).
+      codeVersion: codeVersionStamp(),
     };
     fs.writeFileSync(
       path.join(dir, ".watcher_heartbeat"),

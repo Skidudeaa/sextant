@@ -116,6 +116,18 @@ describe("getWatcherStatus", () => {
     assert.equal(status.running, true);
     assert.equal(status.scanPauseProtocol, null);
   });
+
+  // 017 lever #4: codeVersion identifies the code the watcher process is
+  // RUNNING; doctor compares it to the code on disk to flag old-code watchers
+  // (whose next flush rewrites summary.md in the old shape).
+  it("surfaces codeVersion from the heartbeat payload; null when absent (pre-stamp watcher)", () => {
+    const hbPath = path.join(tmpDir, ".planning", "intel", ".watcher_heartbeat");
+    const iso = new Date().toISOString();
+    fs.writeFileSync(hbPath, iso + "\n" + JSON.stringify({ pid: 123, codeVersion: "1.2.3@abc1234" }) + "\n");
+    assert.equal(getWatcherStatus(tmpDir).codeVersion, "1.2.3@abc1234");
+    fs.writeFileSync(hbPath, iso + "\n" + JSON.stringify({ pid: 123 }) + "\n");
+    assert.equal(getWatcherStatus(tmpDir).codeVersion, null);
+  });
 });
 
 // ---------------------------------------------------------------------------

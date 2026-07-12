@@ -243,3 +243,28 @@ describe("watch-stop CLI --root flag", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// writeHeartbeat codeVersion stamp (017 lever #4)
+// ---------------------------------------------------------------------------
+
+describe("writeHeartbeat — codeVersion stamp", () => {
+  const { writeHeartbeat } = require("../watch");
+  const { codeVersionStamp } = require("../lib/utils");
+  let tmpDir;
+
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-watch-hb-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+  });
+  after(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("bakes the current code stamp into the heartbeat payload", () => {
+    writeHeartbeat(tmpDir, null, null);
+    const body = fs.readFileSync(path.join(tmpDir, ".planning", "intel", ".watcher_heartbeat"), "utf8");
+    const payload = JSON.parse(body.split("\n").find((l) => l.trim().startsWith("{")));
+    assert.equal(payload.codeVersion, codeVersionStamp());
+  });
+});

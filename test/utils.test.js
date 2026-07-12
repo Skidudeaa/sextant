@@ -95,3 +95,16 @@ test("isIndexable accepts .mts and .cts files outside excluded dirs", () => {
   assert.equal(isIndexable("pkg/dist/api.mts"), false);
   assert.equal(isIndexable("pkg/build/api.cts"), false);
 });
+
+// ─── codeVersionStamp (017 lever #4): watcher/doctor code-identity stamp ─
+
+test("codeVersionStamp returns a stable non-empty stamp (pkg version, git HEAD when present)", () => {
+  const { codeVersionStamp } = require("../lib/utils");
+  const s = codeVersionStamp();
+  assert.ok(typeof s === "string" && s.length > 0);
+  // starts with the package version; @shortHEAD suffix when the checkout has .git
+  const pkg = require("../package.json").version;
+  assert.ok(s === pkg || s.startsWith(pkg + "@"), `stamp ${s} should derive from pkg version ${pkg}`);
+  // cached — repeated calls are identical (the watcher bakes it at startup)
+  assert.equal(codeVersionStamp(), s);
+});

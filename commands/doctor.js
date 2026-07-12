@@ -114,6 +114,20 @@ async function run(ctx) {
     } else {
       actions.push({ msg: "Watcher not running", cmd: "sextant watch-start" });
     }
+  } else {
+    // 017 lever #4: a live watcher running pre-upgrade code rewrites
+    // summary.md in the OLD shape on its next flush (bitten twice on
+    // somaNotes). The heartbeat carries the stamp the watcher baked in at
+    // startup; compare against the code on disk NOW. A running watcher with
+    // no stamp predates stamping entirely — same fix.
+    const currentCode = require("../lib/utils").codeVersionStamp();
+    if (watcher.codeVersion !== currentCode) {
+      const ran = watcher.codeVersion || "pre-stamp";
+      actions.push({
+        msg: `Watcher running outdated code (${ran}, current ${currentCode}) — its next flush rewrites summary.md in the old shape`,
+        cmd: "sextant watch-stop && sextant watch-start",
+      });
+    }
   }
   if (pct > 0 && pct < 90) {
     actions.push({ msg: `Resolution degraded (${pct}%) — graph boosts gated below 90%`, cmd: "sextant scan --force" });
