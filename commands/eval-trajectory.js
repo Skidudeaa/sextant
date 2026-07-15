@@ -82,6 +82,25 @@ function printReport(report) {
   }
   out.push("");
 
+  const reg = report.regions;
+  if (reg && reg.scored > 0) {
+    out.push("REGION SUBSTRATE — did the EDIT land in the region we surfaced? (docs/025 Phase A)");
+    out.push(`  in-region edit rate: ${pct(reg.precisionPct)}  (${reg.inRegion} in-region / ${reg.scored} scored edits of surfaced files)`);
+    out.push(`  headroom (wrong region): ${pct(reg.wrongRegionPct)}  — right file, DIFFERENT region = reclaimable within-file navigation`);
+    out.push(`  median opens before the in-region edit: ${reg.medianNavBeforeEdit == null ? "n/a" : reg.medianNavBeforeEdit}`);
+    const rsrc = Object.entries(reg.bySource).sort((x, y) => (y[1].inRegion + y[1].wrongRegion) - (x[1].inRegion + x[1].wrongRegion));
+    if (rsrc.length) {
+      out.push("  by source:");
+      for (const [src, v] of rsrc) {
+        out.push(`    ${pad(src, 18)}${pad(pct(v.precisionPct), 10)}(${v.inRegion}/${v.inRegion + v.wrongRegion})`);
+      }
+    }
+    out.push("  KILL-CRITERION READ: near-100% in-region + low headroom → no region gap to reclaim (stop the");
+    out.push("  region direction). A material wrong-region share → Phase B (Task Capsule) has a target.");
+    out.push("  NOTE: immediate in-region rate; retained-to-final-diff survival is the next refinement.");
+    out.push("");
+  }
+
   out.push("CAVEATS — read before citing");
   out.push("  • Correlational: no per-turn injection-OFF counterfactual yet (the holdback arm is the");
   out.push("    upgrade). The permutation null controls for \"plausible repo files\" but not for \"the");

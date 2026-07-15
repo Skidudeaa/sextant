@@ -196,6 +196,36 @@ describe("hook-posttooluse — pure helpers", () => {
     ]);
     assert.deepEqual(buildInjectedPaths(null), []);
   });
+
+  it("buildInjectedPaths: carries line/symbol breadcrumb (docs/025 Phase A)", () => {
+    const out = buildInjectedPaths([
+      // swift decl: startLine + parentName; export symbol → symbol carried
+      { path: "A.swift", graphSignal: "swift_decl_type", startLine: 44, parentName: "UI", matchedTerms: ["Widget"] },
+      // js export via zoekt line + matched term
+      { path: "lib/a.js", graphSignal: "exported_symbol", zoektHit: { lineNumber: 12 }, matchedTerms: ["foo"] },
+      // path_match: has a term but it's a filename token → NO symbol carried
+      { path: "lib/b.js", graphSignal: "path_match", matchedTerms: ["config"], zoektHit: { lineNumber: 3 } },
+    ]);
+    assert.deepEqual(out[0], { path: "A.swift", source: "swift_decl_type", line: 44, symbol: "Widget" });
+    assert.deepEqual(out[1], { path: "lib/a.js", source: "exported_symbol", line: 12, symbol: "foo" });
+    // path_match keeps its line but never a symbol (filename term ≠ code symbol)
+    assert.deepEqual(out[2], { path: "lib/b.js", source: "path_match", line: 3 });
+  });
+
+  it("readInjectedRegion: returns breadcrumb by line OR symbol, null when neither", () => {
+    const { readInjectedRegion } = require("../commands/hook-posttooluse");
+    const parsed = {
+      paths: [
+        { path: "lib/a.js", source: "exported_symbol", line: 12, symbol: "foo" },
+        { path: "lib/b.js", source: "exported_symbol", symbol: "bar" }, // symbol only
+        { path: "lib/c.js", source: "text_only" }, // no breadcrumb
+      ],
+    };
+    assert.deepEqual(readInjectedRegion(parsed, "lib/a.js"), { source: "exported_symbol", line: 12, symbol: "foo" });
+    assert.deepEqual(readInjectedRegion(parsed, "lib/b.js"), { source: "exported_symbol", line: null, symbol: "bar" });
+    assert.equal(readInjectedRegion(parsed, "lib/c.js"), null, "no line/symbol → unscoreable");
+    assert.equal(readInjectedRegion(parsed, "lib/z.js"), null, "not surfaced → null");
+  });
 });
 
 // ─── (B) end-to-end surfaced → opened loop ──────────────────────────────────
@@ -319,6 +349,35 @@ describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
     assert.equal(evs.length, before + 1);
     assert.equal(evs[evs.length - 1].name, "retrieval.path_miss");
     assert.equal(evs[evs.length - 1].tool, "Edit");
+  });
+
+  it("PostToolUse Edit landing in the surfaced region emits retrieval.region_hit (docs/025)", () => {
+    const RSESSION = "pt-region";
+    // Deterministic injected set: surface the exporter WITH a symbol breadcrumb.
+    fs.writeFileSync(
+      injectedPathsFile(dir, RSESSION),
+      JSON.stringify({
+        ts: Date.now(),
+        arm: "armed",
+        paths: [{ path: "lib/resolveImportPath.js", source: "exported_symbol", symbol: "resolveImportPath" }],
+      })
+    );
+    const content = fs.readFileSync(path.join(dir, "lib", "resolveImportPath.js"), "utf8");
+    const regionEvents = () =>
+      telemetry.readEvents(dir).filter((e) => e.name === "retrieval.region_hit" || e.name === "retrieval.region_miss");
+    const before = regionEvents().length;
+    runPost(dir, {
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(dir, "lib", "resolveImportPath.js"), old_string: "return spec;" },
+      tool_response: { content, structuredPatch: [{ newStart: 1, newLines: 1 }] },
+      session_id: RSESSION,
+    });
+    const evs = regionEvents();
+    assert.equal(evs.length, before + 1, "expected exactly one region event");
+    const ev = evs[evs.length - 1];
+    assert.equal(ev.name, "retrieval.region_hit", "edit inside resolveImportPath → in-region");
+    assert.equal(ev.source, "exported_symbol");
+    assert.equal(ev.tool, "Edit");
   });
 
   it("a different session (no injected set) scores nothing", () => {

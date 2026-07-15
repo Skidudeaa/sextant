@@ -51,6 +51,7 @@ const path = require("path");
 const { deriveSessionKey } = require("../lib/session");
 const { readStdinJson } = require("../lib/cli");
 const { recordEvent } = require("../lib/telemetry");
+const regionsLib = require("../lib/regions");
 
 // Tools that target a concrete file we may have surfaced.  file_path lives in
 // tool_input for Read/Edit/Write/MultiEdit; NotebookEdit uses notebook_path.
@@ -194,6 +195,35 @@ function classifyOpen(injectedMap, repoRel) {
   if (!injectedMap || !repoRel) return null;
   if (injectedMap.has(repoRel)) return { hit: true, source: injectedMap.get(repoRel) };
   return { hit: false, source: null };
+}
+
+// REGION LANE (docs/025 Phase A): the surfaced breadcrumb for one path in the
+// most-recent injection set — { source, line, symbol } — or null when the path
+// wasn't surfaced or carries no line to score against.  Exact-path match, same
+// keying as buildInjectedMap/classifyOpen.
+function readInjectedRegion(parsed, repoRel) {
+  if (!parsed || !Array.isArray(parsed.paths) || !repoRel) return null;
+  for (const entry of parsed.paths) {
+    if (entry && entry.path === repoRel) {
+      const line = typeof entry.line === "number" && entry.line > 0 ? entry.line : null;
+      const symbol = typeof entry.symbol === "string" && entry.symbol ? entry.symbol : null;
+      if (line == null && symbol == null) return null; // no breadcrumb to score
+      return {
+        source: typeof entry.source === "string" ? entry.source : "text_only",
+        line,
+        symbol,
+      };
+    }
+  }
+  return null;
+}
+
+function safeReadFile(absPath) {
+  try {
+    return fs.readFileSync(absPath, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +486,50 @@ async function run() {
           recordEvent(root, "retrieval.path_miss", { tool, arm });
         }
       }
+
+      // --- Lane 1r: region-level attribution (docs/025 Phase A) ---
+      // Sharper than the path hit: on a MUTATION of a file we surfaced, did the
+      // edit land in the REGION we pointed at (region_hit) or in a DIFFERENT
+      // region of the right file (region_miss = reclaimable within-file
+      // navigation, the Phase-A headroom signal)?  In-process languages only on
+      // the hot path (allowSpawn:false → no python3 spawn); python/swift edits
+      // score OFFLINE in eval-trajectory.  Additive — never replaces path events;
+      // wrapped so a resolution failure can never break the hook.
+      if (verdict && verdict.hit && MUTATE_TOOLS.has(tool)) {
+        try {
+          const region = readInjectedRegion(parsed, repoRel);
+          if (region) {
+            const tr = data.tool_response || data.toolUseResult || null;
+            // Post-edit content: prefer the tool_response payload; else read disk
+            // (PostToolUse fires AFTER the edit applied, so disk is post-edit too).
+            let content =
+              tr && typeof tr.content === "string"
+                ? tr.content
+                : tr && typeof tr.originalFile === "string"
+                  ? tr.originalFile
+                  : null;
+            if (content == null) content = safeReadFile(path.resolve(root, repoRel));
+            if (content != null) {
+              const editedLines = regionsLib.deriveEditedLines(data.tool_input, tr, content);
+              const regions = regionsLib.editedRegions(repoRel, content, editedLines, {
+                allowSpawn: false,
+              });
+              const rv = regionsLib.scoreEditedRegion(region.line, region.symbol, regions);
+              if (rv) {
+                const evt = rv.hit ? "retrieval.region_hit" : "retrieval.region_miss";
+                recordEvent(root, evt, {
+                  source: region.source,
+                  tool,
+                  arm,
+                  regionKind: rv.regionKind,
+                });
+              }
+            }
+          }
+        } catch {
+          // region lane is best-effort; path events above already recorded.
+        }
+      }
     }
 
     // --- Lane 2: blast-radius emitter (docs/016 Sprint 1) ---
@@ -505,6 +579,7 @@ module.exports = {
   readInjectedRaw,
   buildInjectedMap,
   readInjectedArm,
+  readInjectedRegion,
   injectedPathsFile,
   buildEmittedMap,
   composeBlastRadiusNote,

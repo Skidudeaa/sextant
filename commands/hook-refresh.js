@@ -22,7 +22,34 @@ function buildInjectedPaths(includedFiles) {
   const out = [];
   for (const f of includedFiles || []) {
     if (!f || typeof f.path !== "string") continue;
-    out.push({ path: f.path, source: f.graphSignal || "text_only" });
+    const entry = { path: f.path, source: f.graphSignal || "text_only" };
+    // REGION SUBSTRATE (docs/025 Phase A): carry the positional breadcrumb we
+    // ALREADY computed (shown to Claude as `L<n>` / `defines X L<n>`) so the
+    // PostToolUse hook can score region-level opens without re-resolving at
+    // injection time — hot-path cost stays exactly zero. `line` = the Swift decl
+    // start OR the matched zoekt line; `symbol` = the matched term / enclosing
+    // type. Purely additive: path-keyed consumers ignore both keys.
+    const line =
+      typeof f.startLine === "number" && f.startLine > 0
+        ? f.startLine
+        : f.zoektHit && typeof f.zoektHit.lineNumber === "number" && f.zoektHit.lineNumber > 0
+          ? f.zoektHit.lineNumber
+          : null;
+    if (line != null) entry.line = line;
+    // symbol carried only for symbol-BEARING signals (export/decl/re-export) —
+    // a path_match's term is a filename token, not a code symbol, so it must not
+    // region-match by name (mirrors trajectory.detailSymbol's path_match exclusion).
+    const SYMBOL_SOURCES = new Set([
+      "exported_symbol",
+      "swift_decl_type",
+      "swift_decl_other",
+      "reexport_chain",
+    ]);
+    if (SYMBOL_SOURCES.has(f.graphSignal)) {
+      const symbol = (Array.isArray(f.matchedTerms) && f.matchedTerms[0]) || f.parentName || null;
+      if (symbol) entry.symbol = symbol;
+    }
+    out.push(entry);
   }
   return out;
 }

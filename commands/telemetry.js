@@ -107,6 +107,19 @@ function summarize(events) {
   const pathHitsByArm = new Map();
   const pathMissesByArm = new Map();
 
+  // REGION LANE (docs/025 Phase A): sharper than path_hit — on a mutation of a
+  // surfaced file, did the edit land in the REGION we pointed at (region_hit) or
+  // a DIFFERENT region of the right file (region_miss = reclaimable within-file
+  // navigation, the Phase-A headroom signal)?  region-precision = hits/(hits+
+  // misses); the miss rate and the armed−holdback gap are what the kill
+  // criterion reads.  In-process langs only live; python/swift score offline in
+  // eval-trajectory.
+  let regionHits = 0;
+  let regionMisses = 0;
+  const regionHitsBySource = new Map();
+  const regionHitsByArm = new Map();
+  const regionMissesByArm = new Map();
+
   // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
   // edit.  Counts emissions and the surfaced-path volume split by signal.
   let brInjected = 0;
@@ -175,6 +188,20 @@ function summarize(events) {
       pathMisses++;
       const arm = e.arm || "armed";
       pathMissesByArm.set(arm, (pathMissesByArm.get(arm) || 0) + 1);
+    }
+
+    if (name === "retrieval.region_hit") {
+      regionHits++;
+      const source = e.source || "(unknown)";
+      regionHitsBySource.set(source, (regionHitsBySource.get(source) || 0) + 1);
+      const arm = e.arm || "armed";
+      regionHitsByArm.set(arm, (regionHitsByArm.get(arm) || 0) + 1);
+    }
+
+    if (name === "retrieval.region_miss") {
+      regionMisses++;
+      const arm = e.arm || "armed";
+      regionMissesByArm.set(arm, (regionMissesByArm.get(arm) || 0) + 1);
     }
 
     if (name === "blastradius.injected") {
@@ -288,6 +315,17 @@ function summarize(events) {
       // Raw per-arm scored-open counts so a consumer (e.g. the holdback-benefit
       // cron) can gate on VOLUME, not just read a rate that's unstable at low n.
       armCounts: armCounts(pathHitsByArm, pathMissesByArm),
+      // REGION LANE (docs/025 Phase A): region-level open attribution. regionMiss
+      // = right file, wrong region — the reclaimable-navigation headroom the
+      // Phase-A kill criterion reads. regionPrecision null until an edit of a
+      // surfaced in-process-language file is scored.
+      regionHits,
+      regionMisses,
+      regionPrecision: regionHits + regionMisses ? regionHits / (regionHits + regionMisses) : null,
+      regionHitsBySource: Object.fromEntries(regionHitsBySource),
+      regionPrecisionByArm: armPrecision(regionHitsByArm, regionMissesByArm),
+      regionBenefitDelta: benefitDelta(regionHitsByArm, regionMissesByArm),
+      regionArmCounts: armCounts(regionHitsByArm, regionMissesByArm),
     },
     // Blast-radius lane (docs/016 Sprint 1): post-edit additionalContext
     // injections.  dependentsSurfaced/cochangeSurfaced are path VOLUMES (how
@@ -541,6 +579,44 @@ function printSummary(rootAbs, sum) {
         lines.push(
           `  benefit delta: DORMANT (accruing) — holdback n=${holdbackScored}, armed n=${armedScored} scored; ` +
           `need >=${HOLDBACK_MIN_SCORED} per arm before the armed−holdback delta is citable.`
+        );
+      }
+    }
+  }
+
+  // REGION LANE (docs/025 Phase A) — did the EDIT land in the region we surfaced?
+  // region_miss = right file, wrong region: the reclaimable within-file
+  // navigation the Phase-A kill criterion measures. Rendered only when an edit of
+  // a surfaced in-process-language file was actually scored.
+  if (r.regionHits + r.regionMisses > 0) {
+    const scored = r.regionHits + r.regionMisses;
+    lines.push("");
+    lines.push("Region substrate (did the edit land in the region we surfaced?)");
+    lines.push(
+      `  region-precision: ${fmtPct(r.regionHits, scored)}  ` +
+      `(${r.regionHits} in-region / ${scored} scored edits of surfaced files)`
+    );
+    lines.push(
+      `  headroom: ${fmtPct(r.regionMisses, scored)} region_miss — right file, DIFFERENT region ` +
+      `(reclaimable within-file navigation). JS/TS only live; python/swift score in eval-trajectory.`
+    );
+    if (Object.keys(r.regionHitsBySource).length) {
+      lines.push("  region_hit by source:");
+      for (const [src, c] of Object.entries(r.regionHitsBySource).sort((a, b) => b[1] - a[1])) {
+        lines.push(`    - ${src.padEnd(28)} ${c}  (${fmtPct(c, r.regionHits)})`);
+      }
+    }
+    const rArms = r.regionPrecisionByArm || {};
+    const rArmKeys = Object.keys(rArms);
+    if (rArmKeys.length > 1 || (rArmKeys.length === 1 && rArmKeys[0] !== "armed")) {
+      const rCounts = r.regionArmCounts || {};
+      lines.push("  by arm (injection-OFF holdback):");
+      for (const arm of ["armed", "holdback"]) {
+        if (rArms[arm] == null && !(arm in rArms)) continue;
+        const n = (rCounts[arm] || {}).scored || 0;
+        lines.push(
+          `    - ${arm.padEnd(10)} region-precision ${rArms[arm] == null ? "n/a" : (rArms[arm] * 100).toFixed(1) + "%"}` +
+          `  (n=${n} scored)`
         );
       }
     }

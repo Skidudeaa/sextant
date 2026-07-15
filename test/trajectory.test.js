@@ -47,10 +47,28 @@ describe("parseRetrievalBlock", () => {
     ].join("\n");
     const files = traj.parseRetrievalBlock(block);
     assert.deepEqual(files, [
-      { path: "lib/a.js", source: "exported_symbol" },
-      { path: "lib/b.js", source: "text_only" },
+      // docs/025 Phase A: export rows now carry a `symbol`, zoekt rows a `line`.
+      { path: "lib/a.js", source: "exported_symbol", symbol: "foo" },
+      { path: "lib/b.js", source: "text_only", line: 3 },
       { path: "lib/c.js", source: "text_only" },
     ]);
+  });
+
+  it("captures the surfaced line (zoekt/swift) and symbol (export/decl), not path_match term", () => {
+    const block = [
+      "<codebase-retrieval>",
+      "- `A.swift` — defines Widget (in UI) L44",
+      "- `lib/b.js` — L12: return x",
+      "- `lib/c.js` — path match: config", // filename term → NOT a symbol
+      "- `lib/d.js` — re-exports Bar",
+      "</codebase-retrieval>",
+    ].join("\n");
+    const files = traj.parseRetrievalBlock(block);
+    assert.equal(files.find((f) => f.path === "A.swift").symbol, "Widget");
+    assert.equal(files.find((f) => f.path === "A.swift").line, 44);
+    assert.equal(files.find((f) => f.path === "lib/b.js").line, 12);
+    assert.equal(files.find((f) => f.path === "lib/c.js").symbol, undefined);
+    assert.equal(files.find((f) => f.path === "lib/d.js").symbol, "Bar");
   });
 });
 
@@ -79,6 +97,63 @@ function inject(ts, mode, content, cwd = "/repo") {
 function open(ts, tool, file_path) {
   return { type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", name: tool, input: { file_path } }] } };
 }
+// An Edit tool_use (assistant, carries id) + its result (user, toolUseResult
+// keyed by tool_use_id) — the correlation analyzeRegions relies on.
+function editUse(ts, id, file_path, old_string) {
+  return { type: "assistant", timestamp: ts, message: { content: [{ type: "tool_use", id, name: "Edit", input: { file_path, old_string } }] } };
+}
+function editResult(ts, id, filePath, content, structuredPatch) {
+  return {
+    type: "user",
+    timestamp: ts,
+    message: { content: [{ type: "tool_result", tool_use_id: id }] },
+    toolUseResult: { filePath, content, structuredPatch: structuredPatch || null },
+  };
+}
+
+const REGION_JS = "function alpha() {\n  return 1;\n}\nfunction beta() {\n  const x = 2;\n  return x;\n}\n";
+
+describe("analyzeRegions (docs/025 Phase A)", () => {
+  it("scores an edit IN the surfaced region as in-region, a different region as headroom", () => {
+    const recs = [
+      // Surface lib/a.js at symbol `beta` (export row, no line).
+      inject("t1", null, "<codebase-retrieval>\n- `lib/a.js` — exports beta\n"),
+      // Agent edits inside beta().
+      editUse("t2", "id1", "/repo/lib/a.js", "const x = 2;"),
+      editResult("t3", "id1", "/repo/lib/a.js", REGION_JS, [{ newStart: 5, newLines: 1 }]),
+      // Surface lib/b.js at line 5 (beta), but the agent edits alpha() instead.
+      inject("t4", null, "<codebase-retrieval>\n- `lib/b.js` — L5: const x = 2\n"),
+      editUse("t5", "id2", "/repo/lib/b.js", "return 1;"),
+      editResult("t6", "id2", "/repo/lib/b.js", REGION_JS, [{ newStart: 2, newLines: 1 }]),
+    ];
+    const out = traj.analyzeRegions(recs, "/repo");
+    assert.equal(out.scored, 2);
+    assert.equal(out.hits, 1); // beta edit
+    assert.equal(out.misses, 1); // alpha edit against surfaced beta = headroom
+    assert.equal(out.bySource.exported_symbol.hits, 1);
+    assert.equal(out.bySource.text_only.misses, 1);
+  });
+
+  it("does not score a file that was surfaced without any breadcrumb", () => {
+    const recs = [
+      inject("t1", null, "<codebase-retrieval>\n- `lib/a.js`\n"), // no line, no symbol
+      editUse("t2", "id1", "/repo/lib/a.js", "const x = 2;"),
+      editResult("t3", "id1", "/repo/lib/a.js", REGION_JS, [{ newStart: 5, newLines: 1 }]),
+    ];
+    assert.equal(traj.analyzeRegions(recs, "/repo").scored, 0);
+  });
+
+  it("only scores the FIRST edit of a surfaced file (no double count)", () => {
+    const recs = [
+      inject("t1", null, "<codebase-retrieval>\n- `lib/a.js` — exports beta\n"),
+      editUse("t2", "id1", "/repo/lib/a.js", "const x = 2;"),
+      editResult("t3", "id1", "/repo/lib/a.js", REGION_JS, [{ newStart: 5, newLines: 1 }]),
+      editUse("t4", "id2", "/repo/lib/a.js", "return x;"),
+      editResult("t5", "id2", "/repo/lib/a.js", REGION_JS, [{ newStart: 6, newLines: 1 }]),
+    ];
+    assert.equal(traj.analyzeRegions(recs, "/repo").scored, 1);
+  });
+});
 
 describe("extractEvents", () => {
   it("orders events by timestamp and normalizes opens to repo-relative", () => {
