@@ -389,6 +389,39 @@ function emitAdditionalContext(note) {
 // Decide-and-emit for a mutating tool call.  Ordering is cheapest-first:
 // per-session dedupe (fs read) → graph queries (in-memory sqlite) → freshness
 // (two git subprocesses, only paid when a note would actually be emitted).
+// ANTI-SPRAWL (docs/030 Phase E): a NEW source file has no dependents/co-change,
+// so it falls through the blast-radius composer. Fill that slot: surface the
+// existing files whose names/symbols already match, so a parallel implementation
+// is a visible choice. Matches recorded in emitted{} with source "sprawl_match"
+// so the open-attribution lane scores whether the agent opened a suggestion
+// ("nudges ignored?"). Capsule-gated; freshness handled like blast-radius
+// (a new file self-causes drift; the MATCHES are existing graph files).
+async function maybeEmitSprawl(root, repoRel, brState, db, graph) {
+  try {
+    const AS = require("../lib/anti-sprawl");
+    const content = safeReadFile(path.resolve(root, repoRel)); // exists post-Write
+    const matches = AS.findExistingMatches(graph, db, repoRel, content);
+    if (!matches.length) return false;
+
+    const freshnessMod = require("../lib/freshness");
+    const freshness = await freshnessMod.checkFreshness(root);
+    if (freshness && freshness.fresh === false && freshness.contentChanged === true) {
+      const touchedSet = new Set([...brState.touched, repoRel]);
+      if (!freshnessMod.isSelfCausedStatusDrift(db, root, touchedSet)) return false;
+    }
+
+    emitAdditionalContext(AS.composeSprawlNote(repoRel, matches));
+    brState.emitted[repoRel] = {
+      ts: Date.now(),
+      paths: matches.map((m) => ({ path: m.path, source: "sprawl_match" })),
+    };
+    recordEvent(root, "sprawl.nudge", { path: repoRel, matchCount: matches.length });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function maybeEmitBlastRadius(root, sessionKey, repoRel, brState) {
   if (brState.emitted[repoRel]) return false; // once per (session, file)
 
@@ -397,6 +430,19 @@ async function maybeEmitBlastRadius(root, sessionKey, repoRel, brState) {
     const graph = require("../lib/graph");
     db = await graph.loadDb(root);
     if (!db) return false;
+
+    // Phase E: a NEW indexable source file → anti-sprawl (capsule-gated). Default
+    // behavior is unchanged when off (a new file emits nothing either way).
+    try {
+      const capsuleLib = require("../lib/capsule");
+      const { isNewSourceFile } = require("../lib/anti-sprawl");
+      const { isTestPath } = require("../lib/retrieve");
+      // A NEW non-test source file. New TEST files aren't sprawl (a test for X is
+      // legitimate), so they don't earn a nudge — keeps the lane low-noise.
+      if (capsuleLib.capsuleEnabled(root) && !isTestPath(repoRel) && isNewSourceFile(graph, db, repoRel)) {
+        return await maybeEmitSprawl(root, repoRel, brState, db, graph);
+      }
+    } catch {}
 
     const dependents = [
       ...new Set(graph.queryDependents(db, repoRel).map((r) => r.fromPath)),

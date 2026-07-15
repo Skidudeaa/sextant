@@ -128,6 +128,8 @@ function summarize(events) {
   let deltaInvalidated = 0;
   // STRUCTURAL DELTA (docs/029 Phase D): edits that changed observable structure.
   let structuralDeltas = 0;
+  // ANTI-SPRAWL (docs/030 Phase E): new-file nudges surfacing existing matches.
+  let sprawlNudges = 0;
 
   // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
   // edit.  Counts emissions and the surfaced-path volume split by signal.
@@ -222,6 +224,7 @@ function summarize(events) {
       deltaInvalidated += typeof e.invalidated === "number" ? e.invalidated : 0;
     }
     if (name === "structure.delta") structuralDeltas++;
+    if (name === "sprawl.nudge") sprawlNudges++;
 
     if (name === "blastradius.injected") {
       brInjected++;
@@ -372,6 +375,7 @@ function summarize(events) {
       deltaChanged,
       deltaInvalidated,
       structuralDeltas,
+      sprawlNudges,
     },
   };
 }
@@ -652,15 +656,19 @@ function printSummary(rootAbs, sum) {
 
   // CLAIM LEDGER (docs/028 Phase C) — cache coherence for agent context.
   const cl = sum.claimLedger;
-  if (cl && (cl.claimsServed > 0 || cl.contextDeltas > 0 || cl.structuralDeltas > 0)) {
+  if (cl && (cl.claimsServed > 0 || cl.contextDeltas > 0 || cl.structuralDeltas > 0 || cl.sprawlNudges > 0)) {
     lines.push("");
-    lines.push("Claim ledger + structural delta (context coherence)");
+    lines.push("Context coherence (claim ledger / structural delta / anti-sprawl)");
     lines.push(`  claims served: ${cl.claimsServed}`);
     lines.push(
       `  context-deltas emitted: ${cl.contextDeltas}  ` +
       `(${cl.deltaChanged} facts re-derived, ${cl.deltaInvalidated} invalidated)`
     );
     lines.push(`  structural deltas (edits that changed exports/imports): ${cl.structuralDeltas}`);
+    lines.push(
+      `  anti-sprawl nudges (new file → existing matches surfaced): ${cl.sprawlNudges}` +
+      `  — did the agent open a suggestion? see blastradius path_hit source=sprawl_match`
+    );
   }
 
   lines.push("");

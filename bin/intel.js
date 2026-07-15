@@ -44,6 +44,7 @@ const commandMap = {
   query: "../commands/query",
   explain: "../commands/explain",
   closure: "../commands/closure",
+  sprawl: "../commands/sprawl",
   telemetry: "../commands/telemetry",
   "eval-trajectory": "../commands/eval-trajectory",
   tune: "../commands/tune",
