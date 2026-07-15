@@ -28,11 +28,33 @@ run_refresh() {
   (cd "$dir" && printf '%s' "$payload" | sextant hook refresh 2>/dev/null)
 }
 
+# Publish fixture bytes through the same manifest commit seam that authenticates
+# production summary.md reads. A bare edit is deliberately rejected now: it is
+# not bound to the persisted graph generation and must never enter a prompt.
+publish_summary() {
+  local dir="$1"
+  local content="$2"
+  node -e "
+const fs = require('fs');
+const path = require('path');
+const graph = require('$ROOT/lib/graph');
+const binding = require('$ROOT/lib/summary-binding');
+(async () => {
+  const root = process.argv[1];
+  const raw = process.argv[2] + '\\n';
+  const db = await graph.loadDb(root);
+  fs.writeFileSync(path.join(root, '.planning', 'intel', 'summary.md'), raw);
+  if (!await binding.writeManifest(root, raw, { db, graph })) {
+    throw new Error('failed to publish bound fixture summary');
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+" "$dir" "$content"
+}
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/.planning/intel"
-echo "alpha" > "$tmp/.planning/intel/summary.md"
 
 # WHY: the freshness gate (lib/freshness.js) reads scan-state from graph.db
 # meta and falls back to a stale "no_scan_record" body when none is present
@@ -53,6 +75,7 @@ const freshness = require('$ROOT/lib/freshness');
   await graph.persistDb('$tmp');
 })().catch(e => { console.error(e); process.exit(1); });
 "
+publish_summary "$tmp" "alpha"
 
 # Test 1: emits only when changed for same session
 out1="$(run_refresh "$tmp" '{"session_id":"s1"}')"
@@ -61,12 +84,12 @@ printf '%s' "$out1" | grep -q "<codebase-intelligence>" || fail "expected initia
 out2="$(run_refresh "$tmp" '{"session_id":"s1"}')"
 [[ -z "$out2" ]] || fail "expected no emit on unchanged summary"
 
-echo "beta" > "$tmp/.planning/intel/summary.md"
+publish_summary "$tmp" "beta"
 out3="$(run_refresh "$tmp" '{"session_id":"s1"}')"
 printf '%s' "$out3" | grep -q "beta" || fail "expected emit after summary change"
 
 # Test 2: per-session dedupe (same summary, different session)
-echo "alpha" > "$tmp/.planning/intel/summary.md"
+publish_summary "$tmp" "alpha"
 out4="$(run_refresh "$tmp" '{"session_id":"s2"}')"
 printf '%s' "$out4" | grep -q "alpha" || fail "expected emit for different session"
 

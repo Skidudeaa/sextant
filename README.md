@@ -208,15 +208,16 @@ There is no channel that both the user and Claude see simultaneously.
 
 - **Benefit proof, not just no-regression** -- `sextant eval-trajectory` replays real session history to measure whether the agent opened what sextant surfaced (permutation-null open-rate lift); the injection-OFF holdback arm makes it causal over time
 - **Health-gated scoring** -- graph boosts disabled when import resolution drops below 90%
-- **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; an atomic single-flight rescan is enqueued in the background
+- **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; dirty-file bytes and stabilized HEAD/status captures close repeated-edit races, while a graph-generation manifest binds exact `summary.md` bytes to the graph validated for SessionStart/refresh/inject/summary. Missing manifests self-heal from a fresh graph; stale graphs enqueue an atomic single-flight rescan
 - **Adaptive sync rescan** -- when a repo's own recorded scan history proves rescans are fast (p95 ≤ 2.5s over ≥5 scans), a stale read runs the rescan *inside* the hook and injects a fresh body instead of the minimal one — ~1–2s of prompt latency instead of an orientation-less turn. Evidence-based per repo; slow or unknown repos keep the background path unchanged
 - **Subagent orientation** -- subagents (Task/Agent tool) receive no hook injection of their own; a PreToolUse hook appends a compact facts-only orientation block (repo, health, hotspots, task-relevant files) to the spawning prompt, byte-capped and freshness-gated. Paired with the `sextant_orient` MCP tool for on-demand pulls
+- **Task and multi-agent coherence** -- optional Task Capsules preserve the role-based workset and served claims; an independently opt-in Phase-F layer records immutable parent-delivered and child-spawn-prepared snapshots, re-checks each recorded agent's claims, and reports exact recorded workset overlap. Visibility only: integrity locks and fail-closed contention markers protect observation-state transitions, never code/work ownership, edit attribution, or coordination
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
 - **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
 - **Query-aware hooks** -- classifies each prompt, retrieves code-relevant context in <200ms
 - **AST export extraction** -- JS/TS via @babel/parser with regex fallback on parse failure
 - **TS ESM Node16 awareness** -- `.ts` source importing `./foo.js` resolves to `./foo.ts` per the NodeNext convention; opt-in via importer extension so pure-JS projects keep literal semantics
-- **MCP server** -- 6 tools (search, related, explain, health, orient, scope) registered per-project via `.mcp.json`
+- **MCP server** -- 9 tools (search, related, explain, health, orient, scope, focus, task status, closure) registered per-project via `.mcp.json`
 - **Definition over hub** -- definition-site scoring beats high fan-in hub files
 - **Source-first search** -- source files searched before docs/config to prevent changelog saturation
 - **Re-export chain tracing** -- follows barrel-file re-exports up to 5 hops to find original definitions
@@ -236,6 +237,8 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant doctor` | Visual diagnostic with trends and hints |
 | `sextant summary` | Print what Claude sees |
 | `sextant explain <file\|dir/>` | File mode: fan-in/fan-out/exports/imports. Dir mode (trailing `/`): aggregate shape — file/type counts, internal hotspots, import edges by sibling dir, co-change coupling. `--json` available |
+| `sextant closure` | Factual closure report: net structural changes, served-claim consistency, observed/unobserved witnesses and surfaces, plus recorded multi-agent overlap when present |
+| `sextant sprawl [--within N]` | Mine recent git history for source files created then abandoned; reporting-only baseline for the anti-sprawl lane |
 | `sextant retrieve <query>` | Ranked search with graph context |
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |
 | `sextant inject` | Print the current `<codebase-intelligence>` body to stdout (freshness-gated, same contract as the hooks) |
@@ -263,6 +266,8 @@ Optional `.codebase-intel.json` at project root:
   "gitignoreHonoring": true,
   "coverageDiagnostics": true,
   "syncRescan": true,
+  "capsule": false,
+  "coherence": false,
   "summaryEverySec": 5
 }
 ```
@@ -276,6 +281,8 @@ Optional `.codebase-intel.json` at project root:
 | `gitignoreHonoring` | `true` | Honor the project's root `.gitignore` (semantics-correct via the `ignore` npm package, including negations and anchored patterns). Set to `false` to ignore the file. |
 | `coverageDiagnostics` | `true` | Warn loudly (scan output, summary ALERT, doctor) when the index is empty or covers <50% of supported sources. Set to `false` for deliberately-narrowed globs (e.g. one package of a monorepo). |
 | `syncRescan` | `true` | Allow the freshness gate to run a rescan synchronously inside the hook when this repo's recorded scan history proves it's fast (p95 ≤ 2.5s). Set to `false` to always take the background-rescan path. `SEXTANT_SYNC_RESCAN=0` is the env-level kill switch. |
+| `capsule` | `false` | Render and persist role-based Task Capsules instead of the flat retrieval list. `SEXTANT_CAPSULE=1` is the env equivalent. |
+| `coherence` | `false` | Record parent-delivered and child-spawn-prepared snapshots, then surface cross-agent claim changes and exact workset overlap. Requires capsule mode; `SEXTANT_COHERENCE=1` is the env equivalent. |
 | `summaryEverySec` | `5` | Minimum interval (seconds) between summary regenerations |
 
 The summary header lists detected vendored exclusions (`Vendored excluded: N (path1, path2, …)`) so you can audit and override when the heuristic guesses wrong.
@@ -372,8 +379,9 @@ All state lives in `.planning/intel/` (add `.planning/` to `.gitignore`):
 
 | File | Purpose |
 |------|---------|
-| `graph.db` | SQLite dependency graph -- single source of truth |
+| `graph.db` | SQLite dependency graph -- single source of truth; meta includes the rotating `graph_generation` and scanned repo anchors |
 | `summary.md` | The summary injected into Claude Code |
+| `.summary-manifest.json` | Atomic SHA-256 binding from exact summary bytes to one graph generation and scanned HEAD/status |
 | `history.json` | Health trend snapshots for sparkline display |
 | `.watcher_heartbeat` | Watcher alive signal (mtime checked by status line) |
 | `.watcher_last_file` | Last file the watcher processed |

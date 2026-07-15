@@ -12,7 +12,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { execSync } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 
 const freshness = require("../lib/freshness");
 const graph = require("../lib/graph");
@@ -77,6 +77,177 @@ describe("freshness.captureCurrentState", () => {
     assert.notEqual(after, before, "untracked file should change the status fingerprint");
     fs.unlinkSync(path.join(dir, "new.js"));
   });
+
+  it("changes statusHash when an already-dirty file changes bytes again", () => {
+    const file = path.join(dir, "seed.js");
+    fs.writeFileSync(file, "dirty once\n");
+    const before = freshness.captureCurrentState(dir).statusHash;
+    fs.writeFileSync(file, "dirty twice\n");
+    const after = freshness.captureCurrentState(dir).statusHash;
+    assert.notEqual(after, before, "dirty-file content must participate in freshness");
+    fs.writeFileSync(file, "module.exports = 1;\n");
+  });
+
+  it("tracks repeated edits for space, non-ASCII, and renamed paths", () => {
+    const spaced = path.join(dir, "a b.js");
+    const unicode = path.join(dir, "café.js");
+    fs.writeFileSync(spaced, "one\n");
+    fs.writeFileSync(unicode, "one\n");
+    execSync('git add -- "a b.js" "café.js" && git commit -q -m names', { cwd: dir });
+
+    fs.writeFileSync(spaced, "dirty one\n");
+    const spacedBefore = freshness.captureCurrentState(dir).statusHash;
+    fs.writeFileSync(spaced, "dirty two\n");
+    assert.notEqual(freshness.captureCurrentState(dir).statusHash, spacedBefore);
+
+    fs.writeFileSync(unicode, "dirty one\n");
+    const unicodeBefore = freshness.captureCurrentState(dir).statusHash;
+    fs.writeFileSync(unicode, "dirty two\n");
+    assert.notEqual(freshness.captureCurrentState(dir).statusHash, unicodeBefore);
+
+    // Restore both files, then exercise porcelain -z's two-field rename form.
+    fs.writeFileSync(spaced, "one\n");
+    fs.writeFileSync(unicode, "one\n");
+    execSync('git mv -- "a b.js" "renamed file.js"', { cwd: dir });
+    const renamed = path.join(dir, "renamed file.js");
+    const renameBefore = freshness.captureCurrentState(dir).statusHash;
+    fs.writeFileSync(renamed, "changed after rename\n");
+    assert.notEqual(freshness.captureCurrentState(dir).statusHash, renameBefore);
+
+    execSync('git reset -q HEAD -- .', { cwd: dir });
+    fs.rmSync(renamed, { force: true });
+    fs.writeFileSync(spaced, "one\n");
+  });
+
+  it("returns an unverifiable fingerprint before reading an oversized dirty file", () => {
+    const file = path.join(dir, "seed.js");
+    fs.truncateSync(file, 3 * 1024 * 1024);
+    assert.equal(
+      freshness.captureCurrentState(dir).statusHash,
+      null,
+      "over-budget dirty content must fail closed instead of being read on the hook path"
+    );
+    fs.writeFileSync(file, "module.exports = 1;\n");
+  });
+
+  it("hashes invalid-UTF8 Git paths without lossy string decoding", {
+    skip: process.platform === "win32",
+  }, () => {
+    const rawPath = Buffer.concat([
+      Buffer.from(dir + path.sep),
+      Buffer.from([0xff]),
+      Buffer.from(".js"),
+    ]);
+    try {
+      fs.writeFileSync(rawPath, "one\n");
+      const before = freshness.captureCurrentState(dir).statusHash;
+      fs.writeFileSync(rawPath, "two\n");
+      const after = freshness.captureCurrentState(dir).statusHash;
+      assert.notEqual(after, before, "raw pathname bytes must still address and hash the file");
+    } finally {
+      fs.rmSync(rawPath, { force: true });
+    }
+  });
+
+  it("fails closed when HEAD moves inside one capture", () => {
+    // Run in a child so child_process.execSync can be wrapped before freshness
+    // destructures it at module load. The first rev-parse returns H0, then the
+    // wrapper commits H1 before git status; the trailing HEAD read must reject
+    // that old-HEAD/new-status hybrid.
+    const script = String.raw`
+      const fs = require("fs");
+      const path = require("path");
+      const cp = require("child_process");
+      const original = cp.execSync;
+      let armed = false;
+      let moved = false;
+      cp.execSync = function(command, options) {
+        const out = original.call(this, command, options);
+        if (armed && !moved && command === "git rev-parse HEAD") {
+          moved = true;
+          fs.writeFileSync(path.join(process.env.TEST_REPO, "seed.js"), "module.exports = 2;\n");
+          original("git add seed.js && git commit -qm moved", { cwd: process.env.TEST_REPO });
+        }
+        return out;
+      };
+      const freshness = require(process.env.FRESHNESS_MODULE);
+      armed = true;
+      process.stdout.write(JSON.stringify(freshness.captureCurrentState(process.env.TEST_REPO)));
+    `;
+    const originalHead = execSync("git rev-parse HEAD", { cwd: dir, encoding: "utf8" }).trim();
+    try {
+      const result = spawnSync(process.execPath, ["-e", script], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TEST_REPO: dir,
+          FRESHNESS_MODULE: path.resolve(__dirname, "..", "lib", "freshness.js"),
+        },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const raced = JSON.parse(result.stdout);
+      assert.equal(raced.head, null);
+      assert.equal(raced.statusHash, null, "hybrid repo observations must be unverifiable");
+    } finally {
+      // Restore the shared fixture even if the child/assertion failed.
+      execSync(`git reset --hard -q ${originalHead}`, { cwd: dir });
+    }
+  });
+
+  it("never reads more than the bounded cap when a dirty file grows after fstat", () => {
+    const file = path.join(dir, "seed.js");
+    fs.writeFileSync(file, "x");
+    const originalRead = fs.readSync;
+    let grew = false;
+    let maxRequested = 0;
+    fs.readSync = function(fd, buffer, offset, length, position) {
+      maxRequested = Math.max(maxRequested, length);
+      if (!grew) {
+        grew = true;
+        fs.truncateSync(file, 3 * 1024 * 1024);
+      }
+      return originalRead.call(this, fd, buffer, offset, length, position);
+    };
+    try {
+      assert.equal(freshness.captureCurrentState(dir).statusHash, null);
+      assert.ok(grew, "test must exercise the descriptor read");
+      assert.ok(maxRequested <= 2 * 1024 * 1024 + 1, "read request exceeded cap+1");
+    } finally {
+      fs.readSync = originalRead;
+      fs.writeFileSync(file, "module.exports = 1;\n");
+    }
+  });
+
+  it("fails closed when an early dirty file moves while later dirty files are hashed", () => {
+    const early = path.join(dir, "a-early.js");
+    const late = path.join(dir, "z-late.js");
+    fs.writeFileSync(early, "base early\n");
+    fs.writeFileSync(late, "base late\n");
+    execSync("git add a-early.js z-late.js && git commit -qm evidence-base", { cwd: dir });
+    fs.writeFileSync(early, "dirty early\n");
+    fs.writeFileSync(late, "dirty late\n");
+
+    const originalRead = fs.readSync;
+    let reads = 0;
+    fs.readSync = function(fd, buffer, offset, length, position) {
+      const n = originalRead.call(this, fd, buffer, offset, length, position);
+      reads += 1;
+      if (reads === 2) {
+        // a-early.js has already passed its own descriptor before/after check.
+        // Only the global evidence revalidation can catch this later move.
+        fs.writeFileSync(early, "foreign after early hash\n");
+      }
+      return n;
+    };
+    try {
+      assert.equal(freshness.captureCurrentState(dir).statusHash, null);
+      assert.ok(reads >= 2, "fixture must hash both dirty files");
+    } finally {
+      fs.readSync = originalRead;
+      fs.writeFileSync(early, "base early\n");
+      fs.writeFileSync(late, "base late\n");
+    }
+  });
 });
 
 describe("freshness.checkFreshness: no scan record means stale", () => {
@@ -91,6 +262,7 @@ describe("freshness.checkFreshness: no scan record means stale", () => {
     const result = await freshness.checkFreshness(dir);
     assert.equal(result.fresh, false);
     assert.equal(result.reason, "no_scan_record");
+    assert.equal(result.graphGeneration, "");
   });
 });
 
@@ -101,12 +273,52 @@ describe("freshness.checkFreshness: recorded state matches → fresh", () => {
 
   it("returns fresh after recordScanState on an unchanged repo", async () => {
     const db = await graph.loadDb(dir);
-    freshness.recordScanState(db, dir);
+    assert.equal(freshness.recordScanState(db, dir), true);
+    const generation = graph.getMetaValue(db, freshness.META_GRAPH_GENERATION);
+    assert.match(generation, /^[0-9a-f]{32}$/);
     await graph.persistDb(dir);
 
     const result = await freshness.checkFreshness(dir);
     assert.equal(result.fresh, true);
     assert.equal(result.reason, null);
+    assert.equal(result.graphGeneration, generation);
+
+    assert.equal(freshness.recordScanState(db, dir), true);
+    assert.notEqual(
+      graph.getMetaValue(db, freshness.META_GRAPH_GENERATION),
+      generation,
+      "every graph publication must receive a new generation token"
+    );
+  });
+});
+
+describe("freshness.checkFreshness: missing Git HEAD is unverifiable", () => {
+  it("refuses head=null + status=valid instead of treating null as a non-git anchor", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-unborn-head-"));
+    try {
+      gitInit(dir); // Deliberately no first commit: status works, HEAD does not.
+      fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "a.js"), "export const a = 1;\n");
+      const captured = freshness.captureCurrentState(dir);
+      assert.equal(captured.head, null);
+      assert.ok(captured.statusHash, "fixture must retain a valid porcelain fingerprint");
+
+      const db = await graph.loadDb(dir);
+      assert.equal(freshness.recordScanState(db, dir), false);
+      const invalidGeneration = graph.getMetaValue(db, freshness.META_GRAPH_GENERATION);
+      assert.match(invalidGeneration, /^[0-9a-f]{32}$/);
+      assert.equal(freshness.recordScanState(db, dir), false);
+      assert.notEqual(graph.getMetaValue(db, freshness.META_GRAPH_GENERATION), invalidGeneration);
+      const latestInvalidGeneration = graph.getMetaValue(db, freshness.META_GRAPH_GENERATION);
+      await graph.persistDb(dir);
+
+      const checked = await freshness.checkFreshness(dir);
+      assert.equal(checked.fresh, false);
+      assert.equal(checked.reason, "head_changed");
+      assert.equal(checked.graphGeneration, latestInvalidGeneration);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -443,7 +655,49 @@ describe("isSelfCausedStatusDrift (docs/016 blast-radius fix)", () => {
 
   it("recordScanState persists the dirty-path hash map (empty at a clean tree)", () => {
     const raw = graph.getMetaValue(db, freshness.META_STATUS_FILES);
-    assert.deepEqual(JSON.parse(raw), {});
+    assert.deepEqual(JSON.parse(raw), { version: 2, files: {} });
+  });
+
+  it("records the status hash and dirty-file map from one stabilized pass", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-samepass-"));
+    try {
+      fs.mkdirSync(path.join(dir2, ".planning", "intel"), { recursive: true });
+      const git = (...a) => execFileSync("git", a, {
+        cwd: dir2,
+        env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+      });
+      fs.writeFileSync(path.join(dir2, "a.js"), "base");
+      git("init", "-q");
+      git("add", "-A");
+      git("commit", "-qm", "base");
+      fs.writeFileSync(path.join(dir2, "a.js"), "dirty-A");
+      const db2 = await graph.loadDb(dir2);
+
+      const originalRead = fs.readSync;
+      let moved = false;
+      fs.readSync = function(fd, buffer, offset, length, position) {
+        const n = originalRead.call(this, fd, buffer, offset, length, position);
+        if (!moved) {
+          moved = true;
+          fs.writeFileSync(path.join(dir2, "a.js"), "foreign-B");
+        }
+        return n;
+      };
+      try {
+        assert.equal(freshness.recordScanState(db2, dir2), false);
+      } finally {
+        fs.readSync = originalRead;
+      }
+      assert.equal(graph.getMetaValue(db2, freshness.META_STATUS_HASH), "");
+      assert.equal(graph.getMetaValue(db2, freshness.META_STATUS_FILES), "");
+      assert.equal(
+        freshness.isSelfCausedStatusDrift(db2, dir2, new Set()),
+        false,
+        "an unstable pass must not leave a newer exemption map beside an older hash"
+      );
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
   });
 
   it("content re-drift on an ALREADY-dirty untouched file is FOREIGN (review MEDIUM)", async () => {

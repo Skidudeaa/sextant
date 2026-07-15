@@ -54,6 +54,7 @@ scoring change). Live: TBD in the session (edit adding an import → `structure.
 
 ## Next
 
-- Phase E — Anti-sprawl controller (detect new-source-file creation → surface existing-region
-  matches; the user's original churn/script-proliferation complaint). Treatment/control arm.
-- Phase F — graduate `servedClaims` to a shared cross-agent store for multi-agent invalidation.
+- Phase E shipped the anti-sprawl controller; see `docs/030-anti-sprawl-phase-e.md`.
+- Phase F shipped default-off immutable per-agent serve snapshots, cross-agent claim
+  invalidation, and factual workset overlap; see `docs/031-multi-agent-coherence-phase-f.md`.
+- Phase G remains parked pending live region and multi-agent outcome evidence.

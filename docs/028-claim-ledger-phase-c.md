@@ -22,10 +22,11 @@ cached subset of repo claims; sextant invalidates them when the source changes.
   `live_text` (a zoekt match, not a structural assertion). Authority is TYPED, never conflated.
 - **fileHash** (sha1 of the source file at serve time) is the invalidation anchor.
 
-**Storage**: served claims live in the per-session capsule (`capsule.servedClaims`, the Phase-B
-seam). Single-session coherence is the v1 scope; a shared cross-session/multi-agent
-`served_claims` store is the **Phase F graduation** (this v1 deliberately keeps it per-session,
-and deltas land only at the next eligible hook — no push channel, per the recon constraint).
+**Storage (Phase-C baseline)**: served claims live in the per-session capsule
+(`capsule.servedClaims`, the Phase-B seam). Phase F later graduated this baseline into immutable
+per-agent serve snapshots with cross-agent invalidation and workset-overlap visibility; see
+`docs/031-multi-agent-coherence-phase-f.md`. Delivery still occurs only at the next eligible
+hook—there is no push channel, ownership, or locking.
 
 **Invalidation + delta** (`lib/claims.js:diffClaims` → `renderContextDelta`, wired in
 `hook-refresh.js`): on the next hook event, for each prior served claim, compare its source
@@ -61,6 +62,7 @@ symbol was moved produced `CHANGED (re-derived): … span L1–3 → L3–5`; re
 
 ## Next
 
-- Phase D — Structural Delta + Closure (capture the per-file pre-image before the wholesale
-  replace; factual closure report). `touchedRegions` (capsule stub) is its seam.
-- Phase F — graduate `servedClaims` to a shared cross-agent store for multi-agent invalidation.
+- Phase D shipped the Structural Delta + Closure seam; see `docs/029-structural-delta-closure-phase-d.md`.
+- Phase F shipped default-off multi-agent visibility and invalidation; see
+  `docs/031-multi-agent-coherence-phase-f.md`.
+- Phase G remains parked pending live evidence that exact region identity is load-bearing.

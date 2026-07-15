@@ -7,8 +7,13 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { spawnSync } = require("child_process");
 
-const { summarize, percentile } = require("../commands/telemetry");
+const { summarize, percentile, printSummary } = require("../commands/telemetry");
+const telemetry = require("../lib/telemetry");
 
 describe("percentile", () => {
   it("returns null on empty input", () => {
@@ -138,5 +143,73 @@ describe("summarize: timestamp window", () => {
     assert.equal(sum.firstTs, 1000);
     assert.equal(sum.lastTs, 5000);
     assert.equal(sum.spanMs, 4000);
+  });
+});
+
+describe("summarize: Phase F multi-agent coherence", () => {
+  it("counts serve/return/report boundaries and delivered findings", () => {
+    const sum = summarize([
+      { ts: 1, name: "coherence.agent_registered", kind: "parent" },
+      { ts: 2, name: "coherence.agent_registered", kind: "child" },
+      { ts: 3, name: "coherence.agent_returned" },
+      { ts: 4, name: "coherence.report_eligible", overlaps: 2 },
+      { ts: 5, name: "coherence.delta_delivered", overlaps: 2, changed: 3, invalidated: 1 },
+      { ts: 6, name: "coherence.skipped", reason: "no_spawn_id" },
+    ]);
+    assert.deepEqual(sum.multiAgentCoherence, {
+      agentsRegistered: 2,
+      agentReturns: 1,
+      reportsEligible: 1,
+      reportsDelivered: 1,
+      overlapPairsDelivered: 2,
+      claimsChangedDelivered: 3,
+      claimsInvalidatedDelivered: 1,
+      skipped: 1,
+    });
+    const text = printSummary("/x", sum);
+    assert.match(text, /Multi-agent coherence/);
+    assert.match(text, /recorded observation only/);
+    assert.doesNotMatch(text, /coordination lock/i);
+    assert.match(text, /recorded capsule generations: 2/);
+    assert.match(text, /reports: 1\/1 delivered/);
+  });
+});
+
+describe("telemetry CLI: Phase F gate-off retention boundary", () => {
+  it("omits retained coherence events from text, JSON, and raw tail when disabled", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-telemetry-gate-"));
+    const bin = path.resolve(__dirname, "..", "bin", "intel.js");
+    try {
+      fs.writeFileSync(
+        path.join(root, ".codebase-intel.json"),
+        JSON.stringify({ taskCapsule: true, coherence: false })
+      );
+      telemetry.recordEvent(root, "coherence.agent_registered", { kind: "child" });
+      telemetry.recordEvent(root, "freshness.fresh_hit", {});
+      const run = (...args) => spawnSync(process.execPath, [bin, "telemetry", "--root", root, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 30000,
+        env: { ...process.env, SEXTANT_CAPSULE: "0", SEXTANT_COHERENCE: "0" },
+      });
+
+      const textResult = run();
+      assert.equal(textResult.status, 0, textResult.stderr);
+      assert.doesNotMatch(textResult.stdout, /coherence\.|Multi-agent coherence/);
+      assert.match(textResult.stdout, /freshness\.fresh_hit/);
+
+      const jsonResult = run("--json");
+      assert.equal(jsonResult.status, 0, jsonResult.stderr);
+      const parsed = JSON.parse(jsonResult.stdout);
+      assert.equal(parsed.eventCount, 1);
+      assert.equal(parsed.byName["coherence.agent_registered"], undefined);
+
+      const tailResult = run("--tail", "20");
+      assert.equal(tailResult.status, 0, tailResult.stderr);
+      assert.doesNotMatch(tailResult.stdout, /coherence\./);
+      assert.match(tailResult.stdout, /freshness\.fresh_hit/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

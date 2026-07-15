@@ -147,10 +147,20 @@ mkdir -p "$t3/.planning/intel"
 # Write empty string to summary.md
 printf '' > "$t3/.planning/intel/summary.md"
 
+# Bound structural summaries require a verifiable Git + scan generation. A
+# non-Git fixture is intentionally fail-closed and cannot prove regeneration.
+git init -q "$t3" 2>/dev/null
+(cd "$t3" && git config user.email "t@e.com" && git config user.name "t" && git config commit.gpgsign false && git commit --allow-empty -q -m init)
+
 out3="$(node -e "
 const intel = require('$ROOT/lib/intel');
+const graph = require('$ROOT/lib/graph');
+const freshness = require('$ROOT/lib/freshness');
 (async () => {
   await intel.init('$t3');
+  const db = await graph.loadDb('$t3');
+  if (!freshness.recordScanState(db, '$t3')) throw new Error('fixture scan state is unverifiable');
+  await graph.persistDb('$t3');
   await intel.writeSummary('$t3', { force: true });
   const s = intel.readSummary('$t3');
   if (s && s.trim().length > 0) {

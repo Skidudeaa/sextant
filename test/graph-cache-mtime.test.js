@@ -1,6 +1,6 @@
 "use strict";
 
-// Tests for the mtime-gated loadDb cache.
+// Tests for the rename-sticky file-identity loadDb cache.
 //
 // Background: graph.loadDb() caches an in-memory SQL.Database keyed by
 // rootAbs.  Before the mtime gate, that cache was process-global and never
@@ -12,7 +12,7 @@
 // These tests cover the three guarantees of the gate:
 //   1. External writers (someone else mutates graph.db) trigger reload.
 //   2. In-process mutations to the cached db are NOT lost to spurious
-//      reloads -- the cache is only evicted when disk is strictly newer.
+//      reloads while the persisted path identity is unchanged.
 //   3. Our own persistDb does not self-invalidate on the next loadDb.
 
 const { describe, it, before, after } = require("node:test");
@@ -31,7 +31,7 @@ function bumpMtime(p, secondsAhead = 2) {
   fs.utimesSync(p, future, future);
 }
 
-describe("loadDb mtime gate: external-write invalidation", () => {
+describe("loadDb identity gate: external-write invalidation", () => {
   let tmpDirA, tmpDirB;
 
   before(() => {
@@ -76,7 +76,192 @@ describe("loadDb mtime gate: external-write invalidation", () => {
   });
 });
 
-describe("loadDb mtime gate: no spurious reload on cache hit", () => {
+describe("loadDb identity gate: restored-mtime atomic replacement", () => {
+  let targetRoot, replacementRoot;
+
+  before(() => {
+    targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-identity-restored-A-"));
+    replacementRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-identity-restored-B-"));
+    fs.mkdirSync(path.join(targetRoot, ".planning", "intel"), { recursive: true });
+    fs.mkdirSync(path.join(replacementRoot, ".planning", "intel"), { recursive: true });
+  });
+
+  after(() => {
+    if (targetRoot) fs.rmSync(targetRoot, { recursive: true, force: true });
+    if (replacementRoot) fs.rmSync(replacementRoot, { recursive: true, force: true });
+  });
+
+  it("reloads an atomic replacement even when its mtime is restored below H0", async () => {
+    const h0 = await graph.loadDb(targetRoot);
+    graph.upsertFile(h0, { relPath: "h0.js", type: "js", sizeBytes: 1, mtimeMs: 1 });
+    await graph.persistDb(targetRoot);
+    const targetPath = graph.graphDbPath(targetRoot);
+    const h0Stat = fs.statSync(targetPath);
+
+    const h1 = await graph.loadDb(replacementRoot);
+    graph.upsertFile(h1, { relPath: "h1-a.js", type: "js", sizeBytes: 1, mtimeMs: 1 });
+    graph.upsertFile(h1, { relPath: "h1-b.js", type: "js", sizeBytes: 1, mtimeMs: 1 });
+    await graph.persistDb(replacementRoot);
+
+    const swap = `${targetPath}.external-swap`;
+    fs.copyFileSync(graph.graphDbPath(replacementRoot), swap);
+    fs.renameSync(swap, targetPath);
+    const restored = new Date(Math.floor(h0Stat.mtimeMs));
+    fs.utimesSync(targetPath, restored, restored);
+    assert.ok(
+      fs.statSync(targetPath).mtimeMs <= h0Stat.mtimeMs,
+      "the legacy newer-mtime gate would incorrectly retain H0"
+    );
+
+    const reloaded = await graph.loadDb(targetRoot);
+    assert.notStrictEqual(reloaded, h0);
+    assert.deepEqual(graph.allFilePaths(reloaded), ["h1-a.js", "h1-b.js"]);
+  });
+});
+
+describe("loadDb descriptor/path fence: replacement during read", () => {
+  let targetRoot, h0Root, h1Root;
+
+  before(() => {
+    targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-identity-read-target-"));
+    h0Root = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-identity-read-h0-"));
+    h1Root = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-identity-read-h1-"));
+    for (const root of [targetRoot, h0Root, h1Root]) {
+      fs.mkdirSync(path.join(root, ".planning", "intel"), { recursive: true });
+    }
+  });
+
+  after(() => {
+    for (const root of [targetRoot, h0Root, h1Root]) {
+      if (root) fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retries from H1 when graph.db is renamed after the H0 descriptor read", async () => {
+    const h0 = await graph.loadDb(h0Root);
+    graph.upsertFile(h0, { relPath: "h0.js", type: "js", sizeBytes: 1, mtimeMs: 1 });
+    await graph.persistDb(h0Root);
+    const h1 = await graph.loadDb(h1Root);
+    graph.upsertFile(h1, { relPath: "h1.js", type: "js", sizeBytes: 1, mtimeMs: 1 });
+    await graph.persistDb(h1Root);
+
+    const targetPath = graph.graphDbPath(targetRoot);
+    fs.copyFileSync(graph.graphDbPath(h0Root), targetPath);
+    const h0Identity = fs.statSync(targetPath, { bigint: true });
+    const originalRead = fs.readSync;
+    let swapped = false;
+    fs.readSync = (fd, ...args) => {
+      const count = originalRead(fd, ...args);
+      const opened = fs.fstatSync(fd, { bigint: true });
+      if (!swapped && opened.dev === h0Identity.dev && opened.ino === h0Identity.ino) {
+        swapped = true;
+        const swap = `${targetPath}.during-read`;
+        fs.copyFileSync(graph.graphDbPath(h1Root), swap);
+        fs.renameSync(swap, targetPath);
+      }
+      return count;
+    };
+    try {
+      const loaded = await graph.loadDb(targetRoot);
+      assert.equal(swapped, true, "test must replace the path during descriptor read");
+      assert.deepEqual(graph.allFilePaths(loaded), ["h1.js"]);
+    } finally {
+      fs.readSync = originalRead;
+    }
+  });
+});
+
+describe("persisted graph binding cache", () => {
+  let tmpDir;
+
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-persisted-binding-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+  });
+
+  after(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("never exposes meta mutations that have not reached graph.db", async () => {
+    const db = await graph.loadDb(tmpDir);
+    graph.setMetaValue(db, "graph_generation", "persisted-h0");
+    graph.setMetaValue(db, "scanned_head", "head-h0");
+    graph.setMetaValue(db, "scanned_status_hash", "status-h0");
+    await graph.persistDb(tmpDir);
+    assert.deepEqual(await graph.readPersistedGraphBinding(tmpDir), {
+      graphGeneration: "persisted-h0",
+      head: "head-h0",
+      statusHash: "status-h0",
+    });
+
+    graph.setMetaValue(db, "graph_generation", "unpersisted-h1");
+    graph.setMetaValue(db, "scanned_head", "head-h1");
+    graph.setMetaValue(db, "scanned_status_hash", "status-h1");
+    assert.deepEqual(
+      await graph.readPersistedGraphBinding(tmpDir),
+      {
+        graphGeneration: "persisted-h0",
+        head: "head-h0",
+        statusHash: "status-h0",
+      },
+      "identity-keyed hot cache must contain disk-derived meta, not mutable db meta"
+    );
+  });
+
+  it("binds the exported generation when the live db mutates during the write await", async () => {
+    const db = await graph.loadDb(tmpDir);
+    graph.setMetaValue(db, "graph_generation", "persisted-await-h1");
+    graph.setMetaValue(db, "scanned_head", "head-await-h1");
+    graph.setMetaValue(db, "scanned_status_hash", "status-await-h1");
+
+    const targetTmp = `${graph.graphDbPath(tmpDir)}.tmp`;
+    const originalWriteFile = fs.promises.writeFile;
+    let mutated = false;
+    fs.promises.writeFile = async function(target, ...args) {
+      const result = await originalWriteFile.call(this, target, ...args);
+      if (!mutated && path.resolve(String(target)) === path.resolve(targetTmp)) {
+        mutated = true;
+        graph.setMetaValue(db, "graph_generation", "unpersisted-await-h2");
+        graph.setMetaValue(db, "scanned_head", "head-await-h2");
+        graph.setMetaValue(db, "scanned_status_hash", "status-await-h2");
+      }
+      return result;
+    };
+    try {
+      await graph.persistDb(tmpDir);
+    } finally {
+      fs.promises.writeFile = originalWriteFile;
+    }
+    assert.equal(mutated, true, "fixture must mutate the live handle after H1 bytes are staged");
+
+    const expected = {
+      graphGeneration: "persisted-await-h1",
+      head: "head-await-h1",
+      statusHash: "status-await-h1",
+    };
+    assert.deepEqual(
+      await graph.readPersistedGraphBinding(tmpDir),
+      expected,
+      "the identity-keyed hot cache must describe the exported H1 bytes"
+    );
+
+    const freshRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-persisted-binding-copy-"));
+    try {
+      fs.mkdirSync(path.join(freshRoot, ".planning", "intel"), { recursive: true });
+      fs.copyFileSync(graph.graphDbPath(tmpDir), graph.graphDbPath(freshRoot));
+      assert.deepEqual(
+        await graph.readPersistedGraphBinding(freshRoot),
+        expected,
+        "a cache-miss parse of disk must agree with the same-process hot cache"
+      );
+    } finally {
+      fs.rmSync(freshRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("loadDb identity gate: no spurious reload on cache hit", () => {
   let tmpDir;
 
   before(() => {
@@ -100,7 +285,7 @@ describe("loadDb mtime gate: no spurious reload on cache hit", () => {
   });
 });
 
-describe("loadDb mtime gate: persist does not self-invalidate", () => {
+describe("loadDb identity gate: persist does not self-invalidate", () => {
   let tmpDir;
 
   before(() => {
@@ -117,14 +302,12 @@ describe("loadDb mtime gate: persist does not self-invalidate", () => {
     graph.upsertFile(db1, { relPath: "before.js", type: "js", sizeBytes: 1, mtimeMs: 1 });
     await graph.persistDb(tmpDir);
 
-    // Critical: persistDb just wrote to disk, so the disk mtime is
-    // strictly newer than the value we had at loadDb time.  Without the
-    // writer-side mtime bump in persistDb, the next loadDb would see
-    // "disk newer than cache" and evict our in-memory db -- discarding
-    // any subsequent unsaved mutations.  With the bump, the cache and
-    // disk are in sync after persist.
+    // Critical: persistDb just atomically replaced the inode. Without the
+    // writer-side identity update, the next loadDb would treat our own rename
+    // as an external publication and evict the in-memory db, discarding any
+    // subsequent unsaved mutations.
     const db2 = await graph.loadDb(tmpDir);
-    assert.strictEqual(db2, db1, "persistDb must update cached mtime so loadDb does not self-evict");
+    assert.strictEqual(db2, db1, "persistDb must update cached identity so loadDb does not self-evict");
 
     // Mutate again WITHOUT persisting -- this models the watcher's normal
     // flow, where multiple file events accumulate in-memory between flushes.
@@ -135,7 +318,7 @@ describe("loadDb mtime gate: persist does not self-invalidate", () => {
   });
 });
 
-describe("loadDb mtime gate: file deleted after cache populated", () => {
+describe("loadDb identity gate: file deleted after cache populated", () => {
   let tmpDir;
 
   before(() => {

@@ -2,8 +2,14 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const intel = require("../lib/intel");
-const { deriveSessionKey } = require("../lib/session");
-const { stripUnsafeXmlTags, renderStatusLine, readStdinJson, applyFreshnessGate } = require("../lib/cli");
+const { deriveSessionKey, rawSessionIdentity } = require("../lib/session");
+const {
+  stripUnsafeXmlTags,
+  renderStatusLine,
+  readStdinJson,
+  applyBoundFreshnessGateDetailed,
+  boundSummaryStillValid,
+} = require("../lib/cli");
 const { shouldRetrieve, hasIdentifierShape } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
 const { formatRetrievalDetailed } = require("../lib/format-retrieval");
@@ -127,6 +133,16 @@ function tryReadFile(p) {
   }
 }
 
+// Compare the exact HEAD/status anchors observed by checkFreshness with the
+// live repository immediately before publishing graph-derived context.
+function sameValidatedRepo(validated, current) {
+  if (!validated || !current) return false;
+  return (
+    (validated.head ?? "") === (current.head ?? "") &&
+    (validated.statusHash ?? "") === (current.statusHash ?? "")
+  );
+}
+
 /**
  * Inject the static summary.md if it has changed since last injection.
  * Routed through applyFreshnessGate so stale-state graph.db data never
@@ -137,20 +153,20 @@ function tryReadFile(p) {
  * call is async).  All three callers in this file already run inside the
  * async run() flow.
  */
-async function injectStaticSummary(root, data) {
+async function injectStaticSummary(root, data, contextPrefix = "") {
   const summaryPath = path.join(root, ".planning", "intel", "summary.md");
-
-  if (!fs.existsSync(summaryPath)) return;
-
-  const rawSummary = tryReadFile(summaryPath);
-  if (!rawSummary) return;
-
-  // WHY: applyFreshnessGate inspects HEAD + git status hash + scanner /
-  // schema versions.  If any have moved since the last persist, it
-  // discards rawSummary and returns a minimal body with only safe fields
-  // (root, git head, signals, recent commits, "rescan requested|pending"
-  // marker).  See lib/cli.js for the full contract.
-  const summary = await applyFreshnessGate(rawSummary, root);
+  let summary = "";
+  let structuralValidation = null;
+  const rawSummary = fs.existsSync(summaryPath) ? tryReadFile(summaryPath) : "";
+  // The bound gate also regenerates a missing/corrupt summary manifest from a
+  // fresh graph (never by blessing existing bytes). On stale/no-graph state it
+  // returns only the graph-free minimal body and schedules the normal rescan.
+  const gated = await applyBoundFreshnessGateDetailed(rawSummary || "", root);
+  structuralValidation = gated.validation;
+  summary = gated.body;
+  // A claim retraction is independently useful and safe even when no static
+  // summary exists. It may therefore be the entire hook output.
+  if (!summary && !contextPrefix) return false;
 
   const sessionKey = deriveSessionKey(data);
   const cachePath = path.join(
@@ -162,19 +178,32 @@ async function injectStaticSummary(root, data) {
     `.last_injected_hash.summary.${sessionKey}`
   );
 
-  const h = crypto.createHash("sha256").update(summary).digest("hex");
+  const h = crypto
+    .createHash("sha256")
+    // Preserve the legacy/default-off hash exactly when there is no delta.
+    // Existing sessions should not receive a one-time duplicate summary merely
+    // because Phase F code was installed but remains disabled.
+    .update(contextPrefix ? contextPrefix + "\0" + summary : summary)
+    .digest("hex");
   const last = tryReadFile(cachePath);
 
-  if (last === h) return;
+  if (last === h) return false;
 
+  const summaryBlock = summary
+    ? `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${stripUnsafeXmlTags(summary)}\n</codebase-intelligence>`
+    : "";
+  if (structuralValidation && !(await boundSummaryStillValid(root, structuralValidation))) {
+    recordEvent(root, "freshness.summary_withheld", { reason: "publication_moved" });
+    return false;
+  }
+  // Emit before committing the dedupe marker. If stdout fails, the next prompt
+  // must still be eligible to deliver the summary/retraction rather than see a
+  // ghost hash for context that never crossed the output boundary.
+  process.stdout.write(contextPrefix + summaryBlock);
   try {
     fs.writeFileSync(cachePath, h);
   } catch {}
-
-  const safe = stripUnsafeXmlTags(summary);
-  process.stdout.write(
-    `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${safe}\n</codebase-intelligence>`
-  );
+  return true;
 }
 
 /**
@@ -222,6 +251,101 @@ async function run() {
   const prompt =
     rawPrompt.length > MAX_PROMPT_BYTES ? rawPrompt.slice(-MAX_PROMPT_BYTES) : rawPrompt;
 
+  const sessionKey = deriveSessionKey(data);
+  const capsuleOn = capsuleEnabled(root);
+  let contextDelta = "";
+  let contextDeltaMeta = null;
+
+  // CLAIM LEDGER (Phase C): re-check the PRIOR served baseline at the start of
+  // every UserPromptSubmit, not only code-classified prompts. Retractions are
+  // disk-based historical facts, so they remain honest on content-stale turns
+  // and may be delivered with the static-summary/holdback fallback too.
+  if (capsuleOn) {
+    try {
+      const prior = require("../lib/capsule").readCapsule(root, sessionKey);
+      if (prior && Array.isArray(prior.servedClaims) && prior.servedClaims.length) {
+        const diff = require("../lib/claims").diffClaims(root, prior.servedClaims);
+        contextDelta = require("../lib/claims").renderContextDelta(diff);
+        if (contextDelta) {
+          contextDeltaMeta = {
+            changed: diff.changed.length,
+            invalidated: diff.invalidated.length,
+          };
+        }
+      }
+    } catch {
+      contextDelta = "";
+      contextDeltaMeta = null;
+    }
+  }
+  let contextPrefix = contextDelta
+    ? `<sextant-context-delta>\n${stripUnsafeXmlTags(contextDelta)}\n</sextant-context-delta>\n`
+    : "";
+
+  // PHASE F: compare immutable per-agent boundary snapshots for this task. The
+  // report describes only recorded workset overlap and claims that no longer
+  // hold; it never attributes an edit, declares a conflict, or coordinates a
+  // writer. Running children have no push channel, so this lands at the next
+  // parent UserPromptSubmit (this hook) or spawn/join surface.
+  let coherenceMeta = null;
+  let coherenceTaskId = null;
+  let parentKey = null;
+  try {
+    const coherence = require("../lib/coherence");
+    if (coherence.coherenceEnabled(root)) {
+      const cap = require("../lib/capsule").readCapsule(root, sessionKey);
+      coherenceTaskId = cap && cap.taskId
+        ? cap.taskId
+        : "task_" + require("../lib/capsule").shortHash(sessionKey);
+      parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
+      const result = coherence.analyzeCoherence(root, {
+        taskId: coherenceTaskId,
+        currentAgentKey: parentKey,
+      });
+      if (coherence.hasFindings(result)) {
+        const crossGroups = (result.agentClaims || []).filter(
+          (g) => !parentKey || g.agentKey !== parentKey
+        );
+        recordEvent(root, "coherence.report_eligible", {
+          agents: result.snapshotCount,
+          overlaps: result.overlapPairTotal,
+          changed: crossGroups.reduce((n, g) => n + (g.changed || []).length, 0),
+          invalidated: crossGroups.reduce((n, g) => n + (g.invalidated || []).length, 0),
+          surface: "parent_prompt",
+        });
+        const rendered = coherence.renderCoherenceDetailed(result, { maxChars: 800 });
+        const text = rendered.text;
+        if (text) {
+          coherenceMeta = {
+            delivered: {
+              agents: result.snapshotCount,
+              overlaps: rendered.delivered.overlapPairs,
+              changed: rendered.delivered.changed,
+              invalidated: rendered.delivered.invalidated,
+              surface: "parent_prompt",
+            },
+          };
+          contextPrefix +=
+            `<sextant-agent-coherence>\n${stripUnsafeXmlTags(text)}\n` +
+            `</sextant-agent-coherence>\n`;
+        }
+      }
+    }
+  } catch {
+    coherenceMeta = null;
+  }
+
+  const recordCoherenceDelivered = () => {
+    if (coherenceMeta) recordEvent(root, "coherence.delta_delivered", coherenceMeta.delivered);
+  };
+  const recordContextDeltaDelivered = () => {
+    if (contextDeltaMeta) recordEvent(root, "contextdelta.emitted", contextDeltaMeta);
+  };
+  const recordPrefixDelivered = () => {
+    recordContextDeltaDelivered();
+    recordCoherenceDelivered();
+  };
+
   // 1. Classify
   let classification;
   try {
@@ -230,7 +354,7 @@ async function run() {
     // Classifier failed — fall back to static summary.  No telemetry here:
     // the classifier threw, so there's no classification decision to record;
     // this is the degraded path, distinct from a deliberate retrieve:false.
-    await injectStaticSummary(root, data);
+    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
     return;
   }
 
@@ -250,7 +374,7 @@ async function run() {
 
   if (!classification.retrieve) {
     // Non-code prompt — inject static summary if changed
-    await injectStaticSummary(root, data);
+    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
     await statusLinePromise;
     return;
   }
@@ -415,12 +539,10 @@ async function run() {
   // zoekt excerpt, so the block is honest about what it is. Fresh/version-only
   // turns are unaffected (contentStale=false → byte-identical output).
   const maxChars = classification.confidence >= 0.7 ? 1000 : 600;
-  const sessionKey = deriveSessionKey(data);
   // TASK CAPSULE (docs/027 Phase B): default-off role-based, region-surfaced
   // block. On → replaces the flat list AND persists the durable capsule. A
   // content-stale turn NEVER renders a capsule (structural claims withheld —
   // same silent-absence rule as every lane); it takes the flat textOnly path.
-  const capsuleOn = capsuleEnabled(root);
   const useCapsule = capsuleOn && !contentStale;
   let output = "";
   // injectedPaths = the {path,source,line?,symbol?}[] to persist for the Phase-A
@@ -428,44 +550,32 @@ async function run() {
   // persisted set can't claim a file the cap truncated out); in capsule mode the
   // renderer already returns entries in that shape.
   let injectedPaths = [];
-  // CONTEXT DELTA (docs/028 Phase C): the retraction text prepended to the block
-  // when facts we served this session earlier have since moved/vanished. Folded
-  // into the dedupe hash below so a delta turn can't be deduped away.
-  let contextDelta = "";
-
-  // CLAIM LEDGER (Phase C): re-check the PRIOR turn's served claims against the
-  // current files and retract the stale ones. Runs whenever capsule mode is on,
-  // INCLUDING content-stale turns — the diff is disk-based (freshness-independent)
-  // and RETRACTS facts rather than asserting new ones, so it's honest (and most
-  // valuable) exactly when the tree has changed. Read BEFORE the render overwrites
-  // the capsule below. Never throws.
-  if (capsuleOn) {
-    try {
-      const prior = require("../lib/capsule").readCapsule(root, sessionKey);
-      if (prior && Array.isArray(prior.servedClaims) && prior.servedClaims.length) {
-        const diff = require("../lib/claims").diffClaims(root, prior.servedClaims);
-        contextDelta = require("../lib/claims").renderContextDelta(diff);
-        if (contextDelta) {
-          recordEvent(root, "contextdelta.emitted", {
-            changed: diff.changed.length,
-            invalidated: diff.invalidated.length,
-          });
-        }
-      }
-    } catch {
-      contextDelta = "";
-    }
-  }
-
+  // A freshly compiled capsule is only a CANDIDATE until the block survives
+  // holdback + dedupe and is actually written to stdout. Publishing it sooner
+  // falsely records unseen rows as served claims (and used to erase Phase-D
+  // touchedRegions on every new prompt).
+  let capsuleToPersist = null;
+  let parentSnapshotToPersist = null;
   try {
     if (useCapsule) {
       const { compileWorkset } = require("../lib/workset");
-      const { buildCapsule, writeCapsule } = require("../lib/capsule");
+      const { buildCapsule, readCapsule, carryForwardCapsule } = require("../lib/capsule");
       const { formatCapsule } = require("../lib/format-capsule");
       const claimsLib = require("../lib/claims");
 
       const workset = compileWorkset((merged && merged.files) || [], { root });
-      const capsule = buildCapsule({ root, sessionKey, taskText: prompt, workset });
+      const priorCapsule = readCapsule(root, sessionKey);
+      let capsule = buildCapsule({ root, sessionKey, taskText: prompt, workset });
+      // The workset came from the graph state checkFreshness validated. Do not
+      // stamp a later live fingerprint onto older facts if the tree moves
+      // between retrieval and capsule construction.
+      if (freshness.validatedRepo) {
+        capsule.repo = {
+          ...capsule.repo,
+          head: freshness.validatedRepo.head ?? null,
+          statusHash: freshness.validatedRepo.statusHash ?? null,
+        };
+      }
       const detailed = formatCapsule(capsule, { maxChars });
       output = detailed.text;
       injectedPaths = detailed.files;
@@ -476,9 +586,9 @@ async function run() {
       // carries no structural claims worth minting).
       try {
         capsule.servedClaims = claimsLib.mintClaims(root, injectedPaths, { nowMs: Date.now() });
-        recordEvent(root, "claim.served", { n: capsule.servedClaims.length });
       } catch {}
-      writeCapsule(root, sessionKey, capsule);
+      capsule = carryForwardCapsule(capsule, priorCapsule);
+      capsuleToPersist = capsule;
     } else {
       const detailed = formatRetrievalDetailed(merged, { maxChars, textOnly: contentStale });
       output = detailed.text;
@@ -497,7 +607,7 @@ async function run() {
     // retrieval.classified{retrieve:true} count gives the empty-injection rate
     // that surfaces NL-recall regressions (cf. the A4 gap).
     recordEvent(root, "retrieval.empty_fallback", {});
-    await injectStaticSummary(root, data);
+    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
     await statusLinePromise;
     return;
   }
@@ -526,7 +636,7 @@ async function run() {
       paths: injectedPaths,
     });
     recordEvent(root, "retrieval.holdback", { fileCount: injectedPaths.length });
-    await injectStaticSummary(root, data);
+    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
     await statusLinePromise;
     return;
   }
@@ -551,9 +661,9 @@ async function run() {
   // freshness state, identical bodies still dedupe as before.
   const h = crypto
     .createHash("sha256")
-    // contextDelta folded in (docs/028): a turn whose body is byte-identical to a
+    // contextPrefix folded in (docs/028/031): a turn whose body is byte-identical to a
     // prior turn but carries a NEW retraction must not dedupe the delta away.
-    .update((contentStale ? "stale:" : "fresh:") + contextDelta + output)
+    .update((contentStale ? "stale:" : "fresh:") + contextPrefix + output)
     .digest("hex");
   const last = tryReadFile(cachePath);
 
@@ -562,9 +672,84 @@ async function run() {
     return;
   }
 
+  // Close the retrieval-to-publication TOCTOU window for structural output.
+  // A concurrent child/edit can move HEAD or status after checkFreshness and
+  // graph reads but before stdout. Withhold the whole block and every staged
+  // capsule/snapshot side effect instead of presenting old facts as current.
+  if (!contentStale) {
+    let current = null;
+    try {
+      current = require("../lib/freshness").captureCurrentState(root);
+    } catch {}
+    if (!sameValidatedRepo(freshness.validatedRepo, current)) {
+      recordEvent(root, "retrieval.skipped", { reason: "fingerprint_moved" });
+      try {
+        if (require("../lib/coherence").coherenceEnabled(root)) {
+          recordEvent(root, "coherence.skipped", { reason: "fingerprint_moved" });
+        }
+      } catch {}
+      await statusLinePromise;
+      return;
+    }
+  }
+
+  // Cross the actual output boundary before minting any parent "served" state
+  // or dedupe marker. If stdout throws, staged capsule/claim/snapshot state is
+  // discarded and a later prompt remains eligible to retry the same payload.
+  const safe = stripUnsafeXmlTags(output);
+  const STALE_MARKER =
+    "⚠ index stale: repo changed since last scan — showing live text matches only, " +
+    "structural ranking suppressed; rescan triggered.\n";
+  const body = contentStale ? STALE_MARKER + safe : safe;
+  try {
+    process.stdout.write(`${contextPrefix}<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
+  } catch {
+    await statusLinePromise;
+    return;
+  }
+
   try {
     fs.writeFileSync(cachePath, h);
   } catch {}
+
+  // The block crossed the ARMED/non-deduped stdout boundary, so its claims can
+  // now be recorded as served. Holdback, dedupe, and failed-output paths above
+  // intentionally leave the prior served baseline/evidence untouched.
+  if (capsuleToPersist) {
+    try {
+      const { writeCapsulePreservingEvidence } = require("../lib/capsule");
+      if (writeCapsulePreservingEvidence(root, sessionKey, capsuleToPersist)) {
+        recordEvent(root, "claim.served", {
+          n: Array.isArray(capsuleToPersist.servedClaims)
+            ? capsuleToPersist.servedClaims.length
+            : 0,
+        });
+        try {
+          const coherence = require("../lib/coherence");
+          if (coherence.coherenceEnabled(root) && parentKey) {
+            parentSnapshotToPersist = coherence.buildSnapshot({
+              taskId: coherenceTaskId || capsuleToPersist.taskId,
+              agentKey: parentKey,
+              parentAgentKey: null,
+              spawnToolUseId: null,
+              kind: "parent",
+              agentType: null,
+              state: "served",
+              createdAt: Date.now(),
+              repo: capsuleToPersist.repo,
+              intent: capsuleToPersist.intent,
+              workset: coherence.visibleRoleWorkset(
+                capsuleToPersist.workset,
+                injectedPaths
+              ),
+              servedClaims: capsuleToPersist.servedClaims,
+              blockHash: h,
+            });
+          }
+        } catch {}
+      }
+    } catch {}
+  }
 
   // WHY: User-visible signal that retrieval actually fired with results.
   // Written only on real injection (not on dedupe, not on static-summary
@@ -610,24 +795,19 @@ async function run() {
     fileCount: mergedFiles.length,
   });
 
-  // CONTENT-STALE MARKER (T1.2): on a content-stale turn with non-empty output,
-  // prepend one honest line INSIDE the block so Claude knows the structural
-  // ranking was suppressed and these are live text matches only.  We do NOT
-  // prepend on fresh or version-only-stale turns (the cried-wolf guard — a
-  // routine scanner/schema bump must stay invisible).  Prepended to the
-  // already-stripped `safe` body so the marker text itself can't smuggle XML.
-  const safe = stripUnsafeXmlTags(output);
-  const STALE_MARKER =
-    "⚠ index stale: repo changed since last scan — showing live text matches only, " +
-    "structural ranking suppressed; rescan triggered.\n";
-  const body = contentStale ? STALE_MARKER + safe : safe;
-  // CONTEXT DELTA (docs/028 Phase C): a separate block BEFORE the retrieval block
-  // that retracts facts served earlier this session which have since moved/
-  // vanished. Its own XML strip so a repo-derived path/symbol can't smuggle tags.
-  const deltaBlock = contextDelta
-    ? `<sextant-context-delta>\n${stripUnsafeXmlTags(contextDelta)}\n</sextant-context-delta>\n`
-    : "";
-  process.stdout.write(`${deltaBlock}<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
+  if (parentSnapshotToPersist) {
+    try {
+      const coherence = require("../lib/coherence");
+      if (coherence.writeSnapshot(root, parentSnapshotToPersist)) {
+        recordEvent(root, "coherence.agent_registered", {
+          kind: "parent",
+          state: parentSnapshotToPersist.state,
+          claims: parentSnapshotToPersist.servedClaims.length,
+        });
+      }
+    } catch {}
+  }
+  recordPrefixDelivered();
   await statusLinePromise;
 }
 

@@ -65,6 +65,21 @@ async function setupTestRoot() {
   return tmpDir;
 }
 
+async function withCoherenceEnv(enabled, fn) {
+  const priorCapsule = process.env.SEXTANT_CAPSULE;
+  const priorCoherence = process.env.SEXTANT_COHERENCE;
+  process.env.SEXTANT_CAPSULE = "1";
+  process.env.SEXTANT_COHERENCE = enabled ? "1" : "0";
+  try {
+    return await fn();
+  } finally {
+    if (priorCapsule === undefined) delete process.env.SEXTANT_CAPSULE;
+    else process.env.SEXTANT_CAPSULE = priorCapsule;
+    if (priorCoherence === undefined) delete process.env.SEXTANT_COHERENCE;
+    else process.env.SEXTANT_COHERENCE = priorCoherence;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -99,6 +114,14 @@ describe("MCP server — tool definitions", () => {
     const health = TOOLS.find((t) => t.name === "sextant_health");
     assert.ok(health);
     assert.equal(health.inputSchema.required, undefined);
+  });
+
+  it("describes Phase-F readouts as optional on the static status and closure tools", () => {
+    for (const name of ["sextant_task_status", "sextant_closure"]) {
+      const tool = TOOLS.find((candidate) => candidate.name === name);
+      assert.ok(tool);
+      assert.match(tool.description, /optional Phase-F coherence mode is enabled/);
+    }
   });
 });
 
@@ -343,6 +366,202 @@ describe("MCP server — tools/call handlers", () => {
         data.warnings.some((w) => /watcher not running/.test(w)),
         "warnings include actionable 'watcher not running' hint"
       );
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("sextant_task_status surfaces recorded agent boundaries and coherence detail", async () => {
+    const capsuleLib = require("../lib/capsule");
+    const coherence = require("../lib/coherence");
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await withCoherenceEnv(true, async () => {
+        await dispatch("initialize", {});
+
+        const workset = {
+          primary: [{ path: "lib/foo.js", region: { name: "greet", kind: "function" } }],
+          support: [],
+          witnesses: [],
+          hazards: [],
+          unknowns: [],
+        };
+        const capsule = capsuleLib.buildCapsule({
+          root,
+          sessionKey: "mcp-phase-f",
+          taskText: "verify Phase F status visibility",
+          workset,
+        });
+        assert.equal(capsuleLib.writeCapsule(root, "mcp-phase-f", capsule), true);
+
+        const createdAt = Date.now();
+        assert.ok(coherence.writeSnapshot(root, coherence.buildSnapshot({
+          taskId: capsule.taskId,
+          agentKey: "parent_alpha",
+          kind: "parent",
+          createdAt: createdAt - 1,
+          repo: capsule.repo,
+          intent: capsule.intent,
+          workset,
+          servedClaims: [],
+        })));
+        assert.ok(coherence.writeSnapshot(root, coherence.buildSnapshot({
+          taskId: capsule.taskId,
+          agentKey: "child_beta",
+          parentAgentKey: "parent_alpha",
+          kind: "child",
+          agentType: "Explore",
+          createdAt,
+          repo: capsule.repo,
+          intent: capsule.intent,
+          workset: {
+            primary: [],
+            support: [{ path: "lib/foo.js", region: { name: "greet", kind: "function" } }],
+            witnesses: [],
+            hazards: [],
+            unknowns: [],
+          },
+          servedClaims: [],
+        })));
+
+        const result = await dispatch("tools/call", {
+          name: "sextant_task_status",
+          arguments: {},
+        });
+        const text = result.content[0].text;
+        assert.match(text, /Recorded agent boundaries: 2; recorded workset-overlap pairs: 1/);
+        assert.match(text, /Agent coherence:\nRecorded agent capsules: 2\./);
+        assert.match(
+          text,
+          /Recorded worksets share files for child_beta and parent_alpha: lib\/foo\.js\./
+        );
+        assert.match(
+          text,
+          /Recorded worksets share regions for child_beta and parent_alpha: lib\/foo\.js#greet\./
+        );
+      });
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("sextant_closure exposes recorded coherence without coordination or attribution", async () => {
+    const capsuleLib = require("../lib/capsule");
+    const coherence = require("../lib/coherence");
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await withCoherenceEnv(true, async () => {
+        await dispatch("initialize", {});
+
+        const workset = {
+          primary: [{ path: "lib/foo.js" }],
+          support: [],
+          witnesses: [],
+          hazards: [],
+          unknowns: [],
+        };
+        const capsule = capsuleLib.buildCapsule({
+          root,
+          sessionKey: "mcp-phase-f-closure",
+          taskText: "verify Phase F closure visibility",
+          workset,
+        });
+        assert.equal(capsuleLib.writeCapsule(root, "mcp-phase-f-closure", capsule), true);
+
+        const createdAt = Date.now();
+        assert.ok(coherence.writeSnapshot(root, coherence.buildSnapshot({
+          taskId: capsule.taskId,
+          agentKey: "closure_parent",
+          kind: "parent",
+          createdAt: createdAt - 1,
+          repo: capsule.repo,
+          intent: capsule.intent,
+          workset,
+          servedClaims: [],
+        })));
+        assert.ok(coherence.writeSnapshot(root, coherence.buildSnapshot({
+          taskId: capsule.taskId,
+          agentKey: "closure_child",
+          parentAgentKey: "closure_parent",
+          kind: "child",
+          createdAt,
+          repo: capsule.repo,
+          intent: capsule.intent,
+          workset: {
+            primary: [],
+            support: [{ path: "lib/foo.js" }],
+            witnesses: [],
+            hazards: [],
+            unknowns: [],
+          },
+          servedClaims: [],
+        })));
+
+        const result = await dispatch("tools/call", {
+          name: "sextant_closure",
+          arguments: {},
+        });
+        const text = result.content[0].text;
+        assert.match(text, /Recorded agent boundaries: 2; recorded workset-overlap pairs: 1/);
+        assert.match(
+          text,
+          /Recorded worksets share files for closure_child and closure_parent: lib\/foo\.js\./
+        );
+        assert.doesNotMatch(
+          text,
+          /\b(?:assign(?:ed|ment)?|coordinat(?:e|ed|ion)|ownership|edited by|changed by)\b/i
+        );
+      });
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
+
+  it("default-off task status and closure ignore retained coherence snapshots", async () => {
+    const capsuleLib = require("../lib/capsule");
+    const coherence = require("../lib/coherence");
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await withCoherenceEnv(false, async () => {
+        await dispatch("initialize", {});
+        const capsule = capsuleLib.buildCapsule({
+          root,
+          sessionKey: "mcp-phase-f-off",
+          taskText: "verify default-off read surfaces",
+          workset: {
+            primary: [{ path: "lib/foo.js" }],
+            support: [], witnesses: [], hazards: [], unknowns: [],
+          },
+        });
+        const sessionKey = "mcp-phase-f-off";
+        assert.equal(capsuleLib.writeCapsule(root, sessionKey, capsule), true);
+        // Make this capsule unambiguously latest in the shared MCP fixture.
+        const capsulePath = capsuleLib.capsuleFile(root, sessionKey);
+        const future = new Date(Date.now() + 1000);
+        fs.utimesSync(capsulePath, future, future);
+        assert.ok(coherence.writeSnapshot(root, coherence.buildSnapshot({
+          taskId: capsule.taskId,
+          agentKey: "retained_mcp_agent",
+          kind: "child",
+          createdAt: Date.now(),
+          repo: capsule.repo,
+          intent: capsule.intent,
+          workset: capsule.workset,
+          servedClaims: [],
+        })));
+
+        for (const name of ["sextant_task_status", "sextant_closure"]) {
+          const result = await dispatch("tools/call", { name, arguments: {} });
+          const text = result.content[0].text;
+          assert.doesNotMatch(
+            text,
+            /Recorded agent boundaries|Recorded agent capsules|Agent coherence|workset-overlap/
+          );
+        }
+      });
     } finally {
       process.cwd = origCwd;
     }

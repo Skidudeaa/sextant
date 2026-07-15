@@ -279,12 +279,13 @@ function runRefresh(dir, prompt) {
   });
 }
 
-function runPost(dir, payload) {
+function runPost(dir, payload, extraEnv = {}) {
   return spawnSync(process.execPath, [BIN, "hook", "posttooluse"], {
     cwd: dir,
     input: JSON.stringify(payload),
     encoding: "utf8",
     timeout: 20000,
+    env: { ...process.env, ...extraEnv },
   });
 }
 
@@ -349,6 +350,137 @@ describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
     assert.equal(evs.length, before + 1);
     assert.equal(evs[evs.length - 1].name, "retrieval.path_miss");
     assert.equal(evs[evs.length - 1].tool, "Edit");
+  });
+
+  it("Phase F joins a matching spawn outside the 64-agent report cap and records its return", () => {
+    const C = require("../lib/coherence");
+    const rawSession = "join/parent";
+    const toolUseId = "tool/join-1";
+    const parentKey = C.parentAgentKey(rawSession);
+    const childKey = C.childAgentKey(parentKey, toolUseId);
+    const taskId = "task_join";
+    const workset = {
+      primary: [{ path: "lib/resolveImportPath.js" }],
+      support: [], witnesses: [], hazards: [], unknowns: [],
+    };
+    const baseTime = Date.now() - 1000;
+    assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+      taskId, agentKey: parentKey, kind: "parent", state: "served",
+      createdAt: baseTime + 100, repo: {}, intent: { text: "parent" }, workset,
+      servedClaims: [], blockHash: "parent",
+    })));
+    assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+      taskId, agentKey: childKey, parentAgentKey: parentKey,
+      spawnToolUseId: toolUseId, kind: "child", agentType: "Explore",
+      state: "spawn_prepared", createdAt: baseTime, repo: {},
+      intent: { text: "child" }, workset, servedClaims: [], blockHash: "child",
+    })));
+    // Reporting is capped at 64 agents. Fill that view with newer, unrelated
+    // agents so the child is absent from listSnapshots() before the return.
+    for (let i = 0; i < 64; i++) {
+      assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+        taskId: `noise_${i}`,
+        agentKey: `join_noise_${i}`,
+        kind: "parent",
+        state: "served",
+        createdAt: baseTime + i + 1,
+        repo: {},
+        intent: { text: "noise" },
+        workset: { primary: [], support: [], witnesses: [], hazards: [], unknowns: [] },
+        servedClaims: [],
+        blockHash: `noise_${i}`,
+      })));
+    }
+    assert.equal(
+      C.listSnapshots(dir).some((s) => s.agentKey === childKey),
+      false,
+      "precondition: global reporting view drops the older child"
+    );
+
+    const res = runPost(dir, {
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
+      tool_use_id: toolUseId,
+      tool_input: { prompt: "child", subagent_type: "Explore" },
+      session_id: rawSession,
+    }, { SEXTANT_CAPSULE: "1", SEXTANT_COHERENCE: "1" });
+    assert.equal(res.status, 0);
+    const out = JSON.parse(res.stdout);
+    assert.match(out.hookSpecificOutput.additionalContext, /<sextant-agent-coherence>/);
+    assert.match(out.hookSpecificOutput.additionalContext, /Recorded worksets share files/);
+    assert.doesNotMatch(out.hookSpecificOutput.additionalContext, /\b(active|conflict|locks?|ownership)\b/i);
+    const latest = C.listSnapshots(dir, { taskId }).find((s) => s.agentKey === childKey);
+    assert.equal(latest.state, "tool_returned");
+    const events = telemetry.readEvents(dir);
+    assert.ok(events.some((e) => e.name === "coherence.agent_returned"));
+    assert.ok(events.some((e) => e.name === "coherence.report_eligible" && e.surface === "tool_return"));
+    assert.ok(events.some((e) => e.name === "coherence.delta_delivered" && e.surface === "tool_return"));
+  });
+
+  it("records an eligible tool-return report even when no whole finding fits", () => {
+    const C = require("../lib/coherence");
+    const rawSession = "join-budget-parent";
+    const toolUseId = "tool-budget-join";
+    const parentKey = C.parentAgentKey(rawSession);
+    const childKey = C.childAgentKey(parentKey, toolUseId);
+    const peerKey = C.childAgentKey(parentKey, "tool-budget-peer");
+    const taskId = "task_join_budget";
+    const shared = Array.from(
+      { length: 5 },
+      (_, i) => `long/${i}-${"y".repeat(220)}.js`
+    );
+    const workset = {
+      primary: shared.map((p) => ({ path: p })),
+      support: [], witnesses: [], hazards: [], unknowns: [],
+    };
+    const base = {
+      taskId,
+      parentAgentKey: parentKey,
+      kind: "child",
+      agentType: "Explore",
+      state: "spawn_prepared",
+      repo: {},
+      workset,
+      servedClaims: [],
+    };
+    assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+      ...base,
+      agentKey: childKey,
+      spawnToolUseId: toolUseId,
+      createdAt: Date.now() - 1,
+      intent: { text: "joining child" },
+      blockHash: "budget-child",
+    })));
+    assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+      ...base,
+      agentKey: peerKey,
+      spawnToolUseId: "tool-budget-peer",
+      createdAt: Date.now(),
+      intent: { text: "peer child" },
+      blockHash: "budget-peer",
+    })));
+
+    const before = telemetry.readEvents(dir);
+    const res = runPost(dir, {
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
+      tool_use_id: toolUseId,
+      tool_input: { prompt: "child", subagent_type: "Explore" },
+      session_id: rawSession,
+    }, { SEXTANT_CAPSULE: "1", SEXTANT_COHERENCE: "1" });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, "", "no header-only additionalContext may be emitted");
+    const added = telemetry.readEvents(dir).slice(before.length);
+    assert.equal(
+      added.filter((e) => e.name === "coherence.report_eligible" && e.surface === "tool_return").length,
+      1,
+      "render budget must not erase the eligible denominator"
+    );
+    assert.equal(
+      added.filter((e) => e.name === "coherence.delta_delivered" && e.surface === "tool_return").length,
+      0,
+      "an empty report was not delivered"
+    );
   });
 
   it("PostToolUse Edit landing in the surfaced region emits retrieval.region_hit (docs/025)", () => {

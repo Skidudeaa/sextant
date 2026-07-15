@@ -56,8 +56,8 @@ benefit must be measured where sprawl is actually high.
 
 ## Next
 
-- Phase F — Multi-agent coherence: graduate `servedClaims` to a shared cross-agent store; per-
-  agent served-claim sets + cross-agent invalidation + workset-overlap report (visibility +
-  invalidation only, no locking).
-- Phase G — stable region ABI markers (the speculative tail; build only after C proves region
-  identity is load-bearing).
+- Phase F shipped default-off immutable per-agent serve snapshots, cross-agent claim
+  invalidation, and factual workset-overlap visibility; see
+  `docs/031-multi-agent-coherence-phase-f.md`.
+- Phase G remains parked. Stable region ABI markers require live Phase-A/B region outcomes and
+  Phase-F field evidence that exact-region invalidation/overlap materially helps.

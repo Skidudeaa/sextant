@@ -62,6 +62,10 @@ const FILE_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"
 // no blast radius).  Reads still matter — they mark files "touched", which
 // subtracts them from future notes.
 const MUTATE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+// Parent-side subagent spawn tools. Phase F observes only the factual tool
+// return boundary; it does not claim a child lifecycle/session id or attribute
+// repository edits to that child.
+const AGENT_TOOLS = new Set(["Agent", "Task"]);
 
 // Emission thresholds.  MIN_FANIN keeps leaf-file edits silent (editing a
 // 1-dependent helper isn't blast radius); partner floors ride on the stored
@@ -386,6 +390,83 @@ function emitAdditionalContext(note) {
   );
 }
 
+// Phase F join report: PreToolUse recorded the exact facts prepared for this
+// spawn under top-level tool_use_id. The matching PostToolUse tells us only
+// that the parent-side tool returned; it does NOT prove which process changed
+// a file. Re-check every recorded claim now and report overlap/invalidation to
+// the parent via the already field-verified additionalContext channel.
+async function maybeReportAgentReturn(root, data) {
+  try {
+    const coherence = require("../lib/coherence");
+    if (!coherence.coherenceEnabled(root)) return;
+    const toolUseId = typeof data.tool_use_id === "string" ? data.tool_use_id : "";
+    if (!toolUseId) {
+      recordEvent(root, "coherence.skipped", { reason: "no_return_id" });
+      return;
+    }
+    const { rawSessionIdentity } = require("../lib/session");
+    const parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
+    const childKey = coherence.childAgentKey(parentKey, toolUseId);
+    if (!childKey) return;
+    // This is an identity join, not a reporting query. The matching child must
+    // remain addressable even when 64 newer peer agents fill the report cap.
+    const transition = coherence.registerReturnSnapshot(root, childKey);
+    if (transition.status === "missing") {
+      recordEvent(root, "coherence.skipped", { reason: "no_spawn_snapshot" });
+      return;
+    }
+    if (transition.status === "ambiguous") {
+      recordEvent(root, "coherence.skipped", { reason: "spawn_identity_ambiguous" });
+      return;
+    }
+    if (transition.status === "withheld") {
+      recordEvent(root, "coherence.skipped", { reason: "spawn_preparation_withheld" });
+      return;
+    }
+    if (!transition.snapshot || transition.status === "failed") {
+      recordEvent(root, "coherence.skipped", { reason: "return_transition_failed" });
+      return;
+    }
+    const child = transition.snapshot;
+    if (transition.status === "written") {
+      recordEvent(root, "coherence.agent_returned", {
+        agentType: child.agentType,
+        claims: child.servedClaims.length,
+      });
+    }
+
+    const result = coherence.analyzeCoherence(root, {
+      taskId: child.taskId,
+      currentAgentKey: parentKey,
+    });
+    if (!coherence.hasFindings(result)) return;
+    const crossGroups = result.agentClaims.filter((g) => g.agentKey !== parentKey);
+    recordEvent(root, "coherence.report_eligible", {
+      agents: result.snapshotCount,
+      overlaps: result.overlapPairTotal,
+      changed: crossGroups.reduce((n, g) => n + g.changed.length, 0),
+      invalidated: crossGroups.reduce((n, g) => n + g.invalidated.length, 0),
+      surface: "tool_return",
+    });
+    const rendered = coherence.renderCoherenceDetailed(result, { maxChars: 1000 });
+    if (!rendered.text) return;
+    const safe = require("../lib/cli").stripUnsafeXmlTags(rendered.text);
+    const deliveredMeta = {
+      agents: result.snapshotCount,
+      overlaps: rendered.delivered.overlapPairs,
+      changed: rendered.delivered.changed,
+      invalidated: rendered.delivered.invalidated,
+      surface: "tool_return",
+    };
+    emitAdditionalContext(
+      `<sextant-agent-coherence>\n${safe}\n</sextant-agent-coherence>`
+    );
+    recordEvent(root, "coherence.delta_delivered", deliveredMeta);
+  } catch {
+    // Join reporting is best-effort and may never break an Agent tool result.
+  }
+}
+
 // Decide-and-emit for a mutating tool call.  Ordering is cheapest-first:
 // per-session dedupe (fs read) → graph queries (in-memory sqlite) → freshness
 // (two git subprocesses, only paid when a note would actually be emitted).
@@ -506,6 +587,10 @@ async function run() {
     const data = await readStdinJson();
 
     const tool = data && data.tool_name;
+    if (AGENT_TOOLS.has(tool)) {
+      await maybeReportAgentReturn(root, data);
+      return;
+    }
     if (!FILE_TOOLS.has(tool)) return; // not a file-targeting tool → nothing to score
 
     const filePath = extractFilePath(data);
@@ -676,4 +761,5 @@ module.exports = {
   composeBlastRadiusNote,
   dirRollup,
   FILE_TOOLS,
+  AGENT_TOOLS,
 };

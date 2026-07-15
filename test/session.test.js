@@ -3,7 +3,7 @@
 const { describe, it, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { deriveSessionKey } = require("../lib/session");
+const { deriveSessionKey, rawSessionIdentity } = require("../lib/session");
 
 describe("deriveSessionKey", () => {
   // Save original env values to restore after tests
@@ -57,7 +57,7 @@ describe("deriveSessionKey", () => {
   it("falls back to TMUX_PANE env var", () => {
     process.env.TMUX_PANE = "%3";
     const key = deriveSessionKey({});
-    assert.equal(key, "_3");
+    assert.match(key, /^_3_[a-f0-9]{12}$/);
     delete process.env.TMUX_PANE;
   });
 
@@ -70,13 +70,23 @@ describe("deriveSessionKey", () => {
 
   it("sanitizes non-alphanumeric to underscore", () => {
     const key = deriveSessionKey({ session_id: "abc/def:ghi@jkl" });
-    assert.equal(key, "abc_def_ghi_jkl");
+    assert.match(key, /^abc_def_ghi_jkl_[a-f0-9]{12}$/);
+  });
+
+  it("retains the raw runtime identity for collision-safe hashing", () => {
+    assert.equal(rawSessionIdentity({ session_id: "abc/def" }), "abc/def");
+    assert.match(deriveSessionKey({ session_id: "abc/def" }), /^abc_def_[a-f0-9]{12}$/);
+    assert.notEqual(
+      deriveSessionKey({ session_id: "abc/def" }),
+      deriveSessionKey({ session_id: "abc_def" })
+    );
   });
 
   it("truncates to 80 chars", () => {
     const longId = "a".repeat(100);
     const key = deriveSessionKey({ session_id: longId });
     assert.equal(key.length, 80);
+    assert.match(key, /_[a-f0-9]{12}$/);
   });
 
   it("handles null data gracefully", () => {

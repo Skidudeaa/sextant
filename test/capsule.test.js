@@ -80,6 +80,20 @@ describe("capsule — envelope build/persist/fingerprint", () => {
     assert.equal(c1.intent.text, "fix loadDb");
   });
 
+  it("does not group raw session ids that collide after filename sanitization", () => {
+    const { deriveSessionKey } = require("../lib/session");
+    const slashKey = deriveSessionKey({ session_id: "session/a" });
+    const underscoreKey = deriveSessionKey({ session_id: "session_a" });
+    const a = capsuleLib.buildCapsule({ root: "/n", sessionKey: slashKey, taskText: "a" });
+    const b = capsuleLib.buildCapsule({ root: "/n", sessionKey: underscoreKey, taskText: "b" });
+    assert.notEqual(slashKey, underscoreKey);
+    assert.notEqual(a.taskId, b.taskId);
+    assert.notEqual(
+      capsuleLib.capsuleFile("/n", slashKey),
+      capsuleLib.capsuleFile("/n", underscoreKey)
+    );
+  });
+
   it("round-trips through disk and reads the latest by mtime", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sx-capsule-"));
     fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
@@ -102,6 +116,81 @@ describe("capsule — envelope build/persist/fingerprint", () => {
     // head can never equal it, so this must report stale head_changed.
     const fr = capsuleLib.capsuleFreshness(process.cwd(), cap);
     assert.equal(fr.fresh, false);
+  });
+
+  it("carries task-long edit evidence across a fresh workset compilation", () => {
+    const prior = capsuleLib.buildCapsule({
+      root: "/n",
+      sessionKey: "s1",
+      taskText: "first prompt",
+      workset: compileWorkset(HITS, { root: "/n" }),
+      nowMs: 1000,
+    });
+    prior.servedClaims = [{ id: "old" }];
+    prior.touchedRegions = [{ path: "lib/graph.js", exportsAdded: ["x"] }];
+    prior.status = "changing";
+
+    const next = capsuleLib.buildCapsule({
+      root: "/n",
+      sessionKey: "s1",
+      taskText: "second prompt",
+      workset: compileWorkset(HITS.slice(0, 2), { root: "/n" }),
+      nowMs: 2000,
+    });
+    next.servedClaims = [{ id: "new" }];
+    const carried = capsuleLib.carryForwardCapsule(next, prior);
+
+    assert.equal(carried.createdAt, 1000);
+    assert.equal(carried.status, "changing");
+    assert.deepEqual(carried.touchedRegions, prior.touchedRegions);
+    assert.deepEqual(carried.servedClaims, [{ id: "new" }], "new served baseline replaces old");
+    assert.equal(carried.intent.text, "second prompt");
+  });
+
+  it("merges edit evidence that lands after refresh staging but before publication", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-capsule-race-"));
+    fs.mkdirSync(path.join(root, ".planning", "intel"), { recursive: true });
+    const sessionKey = "capsule-race";
+    const workset = { primary: [], support: [], witnesses: [], hazards: [], unknowns: [] };
+    try {
+      const first = capsuleLib.buildCapsule({ root, sessionKey, taskText: "first", workset });
+      assert.equal(capsuleLib.writeCapsule(root, sessionKey, first), true);
+
+      // Refresh stages from the old capsule, then PostToolUse appends before the
+      // refresh publishes. The final locked merge must retain that late append.
+      const staged = capsuleLib.carryForwardCapsule(
+        capsuleLib.buildCapsule({ root, sessionKey, taskText: "refreshed", workset }),
+        first
+      );
+      assert.equal(capsuleLib.appendTouchedRegion(root, sessionKey, {
+        path: "lib/a.js",
+        exportsAdded: ["late"], exportsRemoved: [], importsAdded: [], importsRemoved: [],
+      }), true);
+      assert.equal(capsuleLib.writeCapsulePreservingEvidence(root, sessionKey, staged), true);
+      const final = capsuleLib.readCapsule(root, sessionKey);
+      assert.equal(final.intent.text, "refreshed");
+      assert.deepEqual(final.touchedRegions.map((entry) => entry.exportsAdded), [["late"]]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on an existing lock and never reaps another owner's path", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-capsule-lock-"));
+    const sessionKey = "locked-session";
+    const stateDir = path.join(root, ".planning", "intel");
+    const lock = path.join(stateDir, `.capsule-lock.${capsuleLib.shortHash(sessionKey)}`);
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(lock, "999999:other-owner");
+    // An old mtime must not authorize check-then-unlink stale recovery.
+    fs.utimesSync(lock, new Date(0), new Date(0));
+    try {
+      assert.equal(capsuleLib.writeCapsule(root, sessionKey, { taskId: "blocked" }), false);
+      assert.equal(fs.readFileSync(lock, "utf8"), "999999:other-owner");
+      assert.equal(capsuleLib.readCapsule(root, sessionKey), null);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

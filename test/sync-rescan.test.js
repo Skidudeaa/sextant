@@ -21,6 +21,7 @@ const os = require("os");
 const { execSync } = require("child_process");
 
 const freshness = require("../lib/freshness");
+const graph = require("../lib/graph");
 
 const BIN = path.resolve(__dirname, "..", "bin", "intel.js");
 
@@ -156,6 +157,25 @@ describe("syncRescan — single-flight + marker lifecycle", () => {
     assert.ok(r.durationMs >= 0);
     assert.ok(!fs.existsSync(freshness.rescanMarkerPath(root)), "marker must be cleared");
     assert.ok(fs.existsSync(path.join(root, ".planning", "intel", "graph.db")));
+  });
+
+  it("gate-triggered healing prunes a file deleted without a watcher event", async () => {
+    const root = mkRoot();
+    fs.writeFileSync(path.join(root, "a.js"), "module.exports = require('./gone');\n");
+    fs.writeFileSync(path.join(root, "gone.js"), "exports.ghost = true;\n");
+    execSync("git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm init", { cwd: root });
+    execSync(`node ${BIN} scan --root ${root} --force`, { stdio: "ignore" });
+    let db = await graph.loadDb(root);
+    assert.ok(graph.getFileMeta(db, "gone.js"));
+
+    fs.unlinkSync(path.join(root, "gone.js")); // deliberately no updateFile/watcher
+    process.env.SEXTANT_BIN = BIN;
+    const result = freshness.syncRescan(root, 30000);
+    assert.equal(result.state, "completed", JSON.stringify(result));
+
+    db = await graph.loadDb(root);
+    assert.equal(graph.getFileMeta(db, "gone.js"), null, "recovery rescan must prune the ghost row");
+    assert.equal((await freshness.checkFreshness(root)).fresh, true);
   });
 });
 

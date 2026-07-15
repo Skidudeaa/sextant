@@ -34,6 +34,15 @@
             "command": "sextant hook posttooluse"
           }
         ]
+      },
+      {
+        "matcher": "Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook posttooluse"
+          }
+        ]
       }
     ],
     "PreToolUse": [

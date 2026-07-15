@@ -121,13 +121,13 @@ async function setScanState(dir, mode) {
 function hookEnv() {
   return { ...process.env, SEXTANT_HOLDBACK_PCT: "0", SEXTANT_HOLDBACK_FORCE: "", SEXTANT_SYNC_RESCAN: "0" };
 }
-function runHook(dir, prompt) {
+function runHook(dir, prompt, extraEnv = {}) {
   const res = spawnSync(process.execPath, [BIN, "hook", "refresh"], {
     cwd: dir,
     input: JSON.stringify({ prompt, session_id: "t12-test" }),
     encoding: "utf8",
     timeout: 20000,
-    env: hookEnv(),
+    env: { ...hookEnv(), ...extraEnv },
   });
   return {
     stdout: res.stdout || "",
@@ -198,6 +198,66 @@ describe("hook-refresh freshness (T1.2) — fresh turn omits the marker (no-op)"
       undefined,
       "fresh turn must not record a retrieval.stale_hit"
     );
+  });
+});
+
+describe("hook-refresh freshness — publication-time fingerprint fence", () => {
+  let dir;
+  before(async () => {
+    dir = await buildFixture("publish-fence");
+    await setScanState(dir, "fresh");
+  });
+  after(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("withholds structural output and staged Phase-F state when the repo moves after validation", () => {
+    const target = path.join(dir, "lib", "resolveImportPath.js");
+    const preloadDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-refresh-toctou-"));
+    const preload = path.join(preloadDir, "move-after-freshness.js");
+    const freshnessPath = path.resolve(__dirname, "..", "lib", "freshness.js");
+    fs.writeFileSync(
+      preload,
+      [
+        `const fs = require("fs");`,
+        `const freshness = require(${JSON.stringify(freshnessPath)});`,
+        `const original = freshness.checkFreshness;`,
+        `let moved = false;`,
+        `freshness.checkFreshness = async (...args) => {`,
+        `  const result = await original(...args);`,
+        `  if (!moved) {`,
+        `    moved = true;`,
+        `    fs.writeFileSync(process.env.SEXTANT_TOC_MOVE_FILE, "module.exports.resolveImportPath = () => 99;\\n");`,
+        `  }`,
+        `  return result;`,
+        `};`,
+      ].join("\n")
+    );
+
+    try {
+      const result = runHook(dir, "where is resolveImportPath defined", {
+        NODE_OPTIONS: `--require=${preload}`,
+        SEXTANT_TOC_MOVE_FILE: target,
+        SEXTANT_CAPSULE: "1",
+        SEXTANT_COHERENCE: "1",
+      });
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout, "", "post-validation movement must withhold the whole block");
+      const events = telemetry.readEvents(dir);
+      assert.ok(events.some(
+        (event) => event.name === "retrieval.skipped" && event.reason === "fingerprint_moved"
+      ));
+      assert.ok(events.some(
+        (event) => event.name === "coherence.skipped" && event.reason === "fingerprint_moved"
+      ));
+      assert.equal(
+        events.some((event) => event.name === "claim.served" || event.name === "coherence.agent_registered"),
+        false,
+        "a withheld block must not mint parent claims or snapshots"
+      );
+    } finally {
+      fs.rmSync(preloadDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -9,5 +9,6 @@
     "**/.next/**"
   ],
   "summaryEverySec": 5,
-  "capsule": true
+  "capsule": true,
+  "coherence": true
 }

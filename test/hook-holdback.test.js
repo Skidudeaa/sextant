@@ -191,7 +191,12 @@ async function buildFixture(prefix) {
   freshness.recordScanState(db, dir);
   await graph.persistDb(dir);
   // Minimal static summary so the holdback fallback has something to show.
-  fs.writeFileSync(path.join(dir, ".planning", "intel", "summary.md"), "## Codebase intelligence\n- test\n");
+  const rawSummary = "## Codebase intelligence\n- test\n";
+  fs.writeFileSync(path.join(dir, ".planning", "intel", "summary.md"), rawSummary);
+  assert.equal(
+    await require("../lib/summary-binding").writeManifest(dir, rawSummary, { db, graph }),
+    true
+  );
   return dir;
 }
 
@@ -201,7 +206,15 @@ function runHook(dir, prompt, armForce, sessionId = "hb-test") {
     input: JSON.stringify({ prompt, session_id: sessionId }),
     encoding: "utf8",
     timeout: 20000,
-    env: { ...process.env, SEXTANT_HOLDBACK_FORCE: armForce },
+    env: {
+      ...process.env,
+      SEXTANT_HOLDBACK_FORCE: armForce,
+      // Exercise the Claim Ledger publication boundary too: only a block the
+      // parent actually saw may become a served-claims capsule.
+      SEXTANT_CAPSULE: "1",
+      SEXTANT_COHERENCE: "1",
+      SEXTANT_SYNC_RESCAN: "0",
+    },
   });
   const injPath = path.join(dir, ".planning", "intel", `.last_injected_paths.retrieval.${sessionId}`);
   let injected = null;
@@ -230,6 +243,15 @@ describe("hook-refresh HOLDBACK arm — withholds the block, keeps the counterfa
       assert.ok(injected.paths.length >= 1, "armed set must carry surfaced paths");
       assert.ok(events.some((e) => e.name === "retrieval.injected"), "armed turn records retrieval.injected");
       assert.ok(!events.some((e) => e.name === "retrieval.holdback"), "armed turn does not record holdback");
+      assert.ok(
+        fs.existsSync(path.join(dir, ".planning", "intel", ".capsule.hb-armed")),
+        "armed block publishes its served-claims capsule"
+      );
+      assert.ok(
+        fs.readdirSync(path.join(dir, ".planning", "intel"))
+          .some((n) => n.startsWith(".agent-capsule.parent_")),
+        "armed block publishes an immutable parent serve snapshot"
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -252,6 +274,136 @@ describe("hook-refresh HOLDBACK arm — withholds the block, keeps the counterfa
         "holdback turn must record a retrieval.holdback event");
       assert.ok(!events.some((e) => e.name === "retrieval.injected"),
         "holdback turn must NOT record retrieval.injected (nothing was injected)");
+      assert.ok(
+        !fs.existsSync(path.join(dir, ".planning", "intel", ".capsule.hb-hold")),
+        "holdback must not record unseen rows as served claims"
+      );
+      assert.ok(
+        !fs.readdirSync(path.join(dir, ".planning", "intel"))
+          .some((n) => n.startsWith(".agent-capsule.")),
+        "holdback must not publish an unseen parent serve snapshot"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivers a child-claim invalidation on a conversational/static-summary prompt", async () => {
+    const dir = await buildFixture("coherence-static");
+    const sessionId = "coh-static";
+    try {
+      const armed = runHook(
+        dir,
+        "where is resolveImportPath defined",
+        "armed",
+        sessionId
+      );
+      assert.match(armed.stdout, /<codebase-retrieval>/);
+      const cap = JSON.parse(fs.readFileSync(
+        path.join(dir, ".planning", "intel", `.capsule.${sessionId}`),
+        "utf8"
+      ));
+      const C = require("../lib/coherence");
+      const claims = require("../lib/claims");
+      const parentKey = C.parentAgentKey(sessionId);
+      const childKey = C.childAgentKey(parentKey, "tool-child");
+      const rel = "lib/resolveImportPath.js";
+      const childClaims = claims.mintClaims(dir, [{
+        path: rel,
+        source: "exported_symbol",
+        symbol: "resolveImportPath",
+        line: 1,
+      }]);
+      assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+        taskId: cap.taskId,
+        agentKey: childKey,
+        parentAgentKey: parentKey,
+        spawnToolUseId: "tool-child",
+        kind: "child",
+        state: "spawn_prepared",
+        createdAt: Date.now(),
+        repo: cap.repo,
+        intent: { text: "inspect child" },
+        workset: { primary: [{ path: rel }], support: [], witnesses: [], hazards: [], unknowns: [] },
+        servedClaims: childClaims,
+        blockHash: "child",
+      })));
+      fs.writeFileSync(
+        path.join(dir, rel),
+        "function renamedImportPath(spec) { return spec; }\nmodule.exports = { renamedImportPath };\n"
+      );
+
+      const conversational = runHook(dir, "thanks", "armed", sessionId);
+      assert.match(conversational.stdout, /<sextant-context-delta>/);
+      assert.match(conversational.stdout, /<sextant-agent-coherence>/);
+      assert.match(conversational.stdout, /Claim prepared for recorded spawn no longer holds for child_/);
+      assert.doesNotMatch(conversational.stdout, /Claim served no longer holds for child_/);
+      assert.match(conversational.stdout, /<codebase-intelligence>/);
+      const events = telemetry.readEvents(dir);
+      assert.ok(events.some((e) => e.name === "contextdelta.emitted" && e.invalidated >= 1));
+      assert.ok(events.some((e) => e.name === "coherence.report_eligible"));
+      assert.ok(events.some((e) => e.name === "coherence.delta_delivered"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("records an eligible parent-prompt report even when no whole finding fits", async () => {
+    const dir = await buildFixture("coherence-budget");
+    const sessionId = "coh-budget";
+    try {
+      const armed = runHook(
+        dir,
+        "where is resolveImportPath defined",
+        "armed",
+        sessionId
+      );
+      assert.match(armed.stdout, /<codebase-retrieval>/);
+      const cap = JSON.parse(fs.readFileSync(
+        path.join(dir, ".planning", "intel", `.capsule.${sessionId}`),
+        "utf8"
+      ));
+      const C = require("../lib/coherence");
+      const parentKey = C.parentAgentKey(sessionId);
+      const shared = Array.from(
+        { length: 5 },
+        (_, i) => `long/${i}-${"x".repeat(220)}.js`
+      );
+      const workset = {
+        primary: shared.map((p) => ({ path: p })),
+        support: [], witnesses: [], hazards: [], unknowns: [],
+      };
+      for (const toolId of ["budget-a", "budget-b"]) {
+        assert.ok(C.writeSnapshot(dir, C.buildSnapshot({
+          taskId: cap.taskId,
+          agentKey: C.childAgentKey(parentKey, toolId),
+          parentAgentKey: parentKey,
+          spawnToolUseId: toolId,
+          kind: "child",
+          state: "spawn_prepared",
+          createdAt: Date.now(),
+          repo: cap.repo,
+          intent: { text: toolId },
+          workset,
+          servedClaims: [],
+          blockHash: toolId,
+        })));
+      }
+
+      const before = telemetry.readEvents(dir);
+      const conversational = runHook(dir, "thanks", "armed", sessionId);
+      const added = telemetry.readEvents(dir).slice(before.length);
+      assert.doesNotMatch(conversational.stdout, /<sextant-agent-coherence>/);
+      assert.equal(
+        added.filter((e) => e.name === "coherence.report_eligible" && e.surface === "parent_prompt").length,
+        1,
+        "render budget must not erase the eligible denominator"
+      );
+      assert.equal(
+        added.filter((e) => e.name === "coherence.delta_delivered" && e.surface === "parent_prompt").length,
+        0,
+        "a header-only/empty report was not delivered"
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

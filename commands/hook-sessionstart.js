@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const intel = require("../lib/intel");
-const { stripUnsafeXmlTags, getWatcherStatus, renderBanner, readStdinJson, applyFreshnessGate } = require("../lib/cli");
+const { stripUnsafeXmlTags, getWatcherStatus, renderBanner, readStdinJson, applyBoundFreshnessGate } = require("../lib/cli");
 
 async function run() {
   const root = process.cwd();
@@ -39,7 +39,7 @@ async function run() {
   // But the gate is also what triggers the background rescan -- calling it
   // unconditionally ensures the first sextant scan is enqueued on first
   // SessionStart, not silently skipped.
-  const summary = await applyFreshnessGate(rawSummary || "", root);
+  const summary = await applyBoundFreshnessGate(rawSummary || "", root);
   if (!summary || !summary.trim()) process.exit(0);
 
   // stdout → Claude context

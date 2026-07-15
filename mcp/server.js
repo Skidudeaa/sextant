@@ -134,8 +134,9 @@ const TOOLS = [
     description:
       "Report the most-recent Task Capsule for this repo: its task id, intent, the repo " +
       "version it was compiled against and whether that fingerprint is still current " +
-      "(HEAD/status unchanged), and the workset counts by role. Use to check whether the " +
-      "capsule's structural claims may have gone stale since it was compiled.",
+      "(HEAD/status unchanged), and workset counts by role. When optional Phase-F coherence " +
+      "mode is enabled, it also reports recorded parent-delivered / child-spawn-prepared boundaries with workset overlap " +
+      "or invalidated claims. Visibility only; it does not assign files or coordinate writers.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -147,9 +148,11 @@ const TOOLS = [
       "A factual task-closure report for the current task: which files changed in observable " +
       "structure (exports/imports added/removed), whether the facts sextant served still hold, " +
       "which directly-connected tests/fixtures were vs were NOT observed, which affected " +
-      "surfaces were NOT inspected, and what sextant cannot verify. States evidence and gaps " +
-      "only — it does NOT assert the change is correct, complete, or safe to merge. Use before " +
-      "declaring a task done to see the connected surfaces you haven't touched.",
+      "surfaces were NOT inspected, and what sextant cannot verify. When optional Phase-F " +
+      "coherence mode is enabled, it also includes recorded parent-delivered / child-spawn-prepared boundaries with workset " +
+      "overlap or invalidated claims. States evidence and gaps only — it does NOT assert the " +
+      "change is correct, complete, or safe to merge. Use before declaring a task done to see " +
+      "the connected surfaces you haven't touched.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -568,6 +571,20 @@ async function handleTaskStatus() {
     ];
     if (count("primary")) lines.push("Primary: " + ws.primary.map((e) => e.path).join(", "));
     if (count("hazards")) lines.push("Hazards: " + ws.hazards.join("; "));
+    try {
+      const coherence = require("../lib/coherence");
+      if (coherence.coherenceEnabled(_root)) {
+        const result = coherence.analyzeCoherence(_root, { taskId: cap.taskId });
+        lines.push(
+          `Recorded agent boundaries: ${result.snapshotCount}; recorded workset-overlap pairs: ` +
+          `${result.overlapPairTotal}`
+        );
+        if (coherence.hasFindings(result)) {
+          const detail = coherence.renderCoherence(result, { maxChars: 1000 });
+          if (detail) lines.push("Agent coherence:\n" + detail);
+        }
+      }
+    } catch {}
     return textResult(lines.join("\n"));
   } catch {
     return textResult("Task status unavailable (internal error).");

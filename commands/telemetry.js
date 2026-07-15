@@ -130,6 +130,17 @@ function summarize(events) {
   let structuralDeltas = 0;
   // ANTI-SPRAWL (docs/030 Phase E): new-file nudges surfacing existing matches.
   let sprawlNudges = 0;
+  // MULTI-AGENT COHERENCE (docs/031 Phase F): immutable parent-delivered and
+  // child-prepared boundary records plus
+  // bounded reports delivered at parent prompt/spawn/tool-return boundaries.
+  let coherenceAgentsRegistered = 0;
+  let coherenceAgentReturns = 0;
+  let coherenceReportsEligible = 0;
+  let coherenceReportsDelivered = 0;
+  let coherenceOverlapPairs = 0;
+  let coherenceChanged = 0;
+  let coherenceInvalidated = 0;
+  let coherenceSkipped = 0;
 
   // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
   // edit.  Counts emissions and the surfaced-path volume split by signal.
@@ -225,6 +236,16 @@ function summarize(events) {
     }
     if (name === "structure.delta") structuralDeltas++;
     if (name === "sprawl.nudge") sprawlNudges++;
+    if (name === "coherence.agent_registered") coherenceAgentsRegistered++;
+    if (name === "coherence.agent_returned") coherenceAgentReturns++;
+    if (name === "coherence.report_eligible") coherenceReportsEligible++;
+    if (name === "coherence.delta_delivered") {
+      coherenceReportsDelivered++;
+      coherenceOverlapPairs += typeof e.overlaps === "number" ? e.overlaps : 0;
+      coherenceChanged += typeof e.changed === "number" ? e.changed : 0;
+      coherenceInvalidated += typeof e.invalidated === "number" ? e.invalidated : 0;
+    }
+    if (name === "coherence.skipped") coherenceSkipped++;
 
     if (name === "blastradius.injected") {
       brInjected++;
@@ -376,6 +397,16 @@ function summarize(events) {
       deltaInvalidated,
       structuralDeltas,
       sprawlNudges,
+    },
+    multiAgentCoherence: {
+      agentsRegistered: coherenceAgentsRegistered,
+      agentReturns: coherenceAgentReturns,
+      reportsEligible: coherenceReportsEligible,
+      reportsDelivered: coherenceReportsDelivered,
+      overlapPairsDelivered: coherenceOverlapPairs,
+      claimsChangedDelivered: coherenceChanged,
+      claimsInvalidatedDelivered: coherenceInvalidated,
+      skipped: coherenceSkipped,
     },
   };
 }
@@ -671,6 +702,23 @@ function printSummary(rootAbs, sum) {
     );
   }
 
+  const ma = sum.multiAgentCoherence;
+  if (ma && (ma.agentsRegistered > 0 || ma.reportsEligible > 0 || ma.reportsDelivered > 0 || ma.skipped > 0)) {
+    lines.push("");
+    lines.push("Multi-agent coherence (recorded observation only)");
+    lines.push(
+      `  recorded capsule generations: ${ma.agentsRegistered}; parent-side tool returns: ${ma.agentReturns}`
+    );
+    lines.push(
+      `  reports: ${ma.reportsDelivered}/${ma.reportsEligible} delivered; ` +
+      `${ma.overlapPairsDelivered} recorded workset-overlap pair(s)`
+    );
+    lines.push(
+      `  cross-agent claim changes delivered: ${ma.claimsChangedDelivered} changed, ` +
+      `${ma.claimsInvalidatedDelivered} invalidated; skipped: ${ma.skipped}`
+    );
+  }
+
   lines.push("");
   lines.push("All event types");
   for (const [name, count] of Object.entries(sum.byName).sort((a, b) => b[1] - a[1])) {
@@ -685,18 +733,25 @@ async function run(ctx) {
   const wantJson = hasFlag(process.argv, "--json");
   const includeOld = hasFlag(process.argv, "--include-old");
   const tailN = flag(process.argv, "--tail");
+  let exposeCoherence = false;
+  try {
+    exposeCoherence = require("../lib/coherence").coherenceEnabled(root);
+  } catch {}
+  const visibleEvents = (events) => exposeCoherence
+    ? events
+    : events.filter((event) => !String(event && event.name || "").startsWith("coherence."));
 
   if (tailN) {
     // Raw-event mode: print the last N events as JSON lines, no aggregation.
     // Useful for `jq` post-processing or eyeballing recent activity.
     const n = Math.max(1, parseInt(tailN, 10) || 50);
-    const events = readAllEvents(root, includeOld);
+    const events = visibleEvents(readAllEvents(root, includeOld));
     const slice = events.slice(-n);
     for (const e of slice) process.stdout.write(JSON.stringify(e) + "\n");
     return;
   }
 
-  const events = readAllEvents(root, includeOld);
+  const events = visibleEvents(readAllEvents(root, includeOld));
   const summary = summarize(events);
 
   if (wantJson) {

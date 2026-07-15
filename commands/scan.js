@@ -62,7 +62,7 @@ async function run(ctx) {
   }
 
   // WHY trigger detection: the freshness gate (lib/freshness.js) spawns
-  // `sextant scan --allow-concurrent --force` with SEXTANT_RESCAN_TRIGGER
+  // `sextant rescan --allow-concurrent --force` with SEXTANT_RESCAN_TRIGGER
   // set when its async rescan path fires.  Every other invocation is
   // either user-initiated or fired by an internal tool (e.g. session
   // bootstrap).  Recording the trigger on scan.completed lets the audit
