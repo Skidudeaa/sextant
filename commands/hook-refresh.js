@@ -429,24 +429,65 @@ async function run() {
   // block. On → replaces the flat list AND persists the durable capsule. A
   // content-stale turn NEVER renders a capsule (structural claims withheld —
   // same silent-absence rule as every lane); it takes the flat textOnly path.
-  const useCapsule = capsuleEnabled(root) && !contentStale;
+  const capsuleOn = capsuleEnabled(root);
+  const useCapsule = capsuleOn && !contentStale;
   let output = "";
   // injectedPaths = the {path,source,line?,symbol?}[] to persist for the Phase-A
   // outcome substrate. In flat mode it's derived from the RENDERED subset (so the
   // persisted set can't claim a file the cap truncated out); in capsule mode the
   // renderer already returns entries in that shape.
   let injectedPaths = [];
+  // CONTEXT DELTA (docs/028 Phase C): the retraction text prepended to the block
+  // when facts we served this session earlier have since moved/vanished. Folded
+  // into the dedupe hash below so a delta turn can't be deduped away.
+  let contextDelta = "";
+
+  // CLAIM LEDGER (Phase C): re-check the PRIOR turn's served claims against the
+  // current files and retract the stale ones. Runs whenever capsule mode is on,
+  // INCLUDING content-stale turns — the diff is disk-based (freshness-independent)
+  // and RETRACTS facts rather than asserting new ones, so it's honest (and most
+  // valuable) exactly when the tree has changed. Read BEFORE the render overwrites
+  // the capsule below. Never throws.
+  if (capsuleOn) {
+    try {
+      const prior = require("../lib/capsule").readCapsule(root, sessionKey);
+      if (prior && Array.isArray(prior.servedClaims) && prior.servedClaims.length) {
+        const diff = require("../lib/claims").diffClaims(root, prior.servedClaims);
+        contextDelta = require("../lib/claims").renderContextDelta(diff);
+        if (contextDelta) {
+          recordEvent(root, "contextdelta.emitted", {
+            changed: diff.changed.length,
+            invalidated: diff.invalidated.length,
+          });
+        }
+      }
+    } catch {
+      contextDelta = "";
+    }
+  }
+
   try {
     if (useCapsule) {
       const { compileWorkset } = require("../lib/workset");
       const { buildCapsule, writeCapsule } = require("../lib/capsule");
       const { formatCapsule } = require("../lib/format-capsule");
+      const claimsLib = require("../lib/claims");
+
       const workset = compileWorkset((merged && merged.files) || [], { root });
       const capsule = buildCapsule({ root, sessionKey, taskText: prompt, workset });
-      writeCapsule(root, sessionKey, capsule);
       const detailed = formatCapsule(capsule, { maxChars });
       output = detailed.text;
       injectedPaths = detailed.files;
+      // Mint claims from the rows ACTUALLY served (what Claude saw) into the
+      // capsule so the NEXT turn can re-check them (the served_claims ledger).
+      // Only on a FRESH capsule turn — the last good orientation stays the
+      // baseline through intervening content-stale turns (whose textOnly block
+      // carries no structural claims worth minting).
+      try {
+        capsule.servedClaims = claimsLib.mintClaims(root, injectedPaths, { nowMs: Date.now() });
+        recordEvent(root, "claim.served", { n: capsule.servedClaims.length });
+      } catch {}
+      writeCapsule(root, sessionKey, capsule);
     } else {
       const detailed = formatRetrievalDetailed(merged, { maxChars, textOnly: contentStale });
       output = detailed.text;
@@ -519,7 +560,9 @@ async function run() {
   // freshness state, identical bodies still dedupe as before.
   const h = crypto
     .createHash("sha256")
-    .update((contentStale ? "stale:" : "fresh:") + output)
+    // contextDelta folded in (docs/028): a turn whose body is byte-identical to a
+    // prior turn but carries a NEW retraction must not dedupe the delta away.
+    .update((contentStale ? "stale:" : "fresh:") + contextDelta + output)
     .digest("hex");
   const last = tryReadFile(cachePath);
 
@@ -587,7 +630,13 @@ async function run() {
     "⚠ index stale: repo changed since last scan — showing live text matches only, " +
     "structural ranking suppressed; rescan triggered.\n";
   const body = contentStale ? STALE_MARKER + safe : safe;
-  process.stdout.write(`<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
+  // CONTEXT DELTA (docs/028 Phase C): a separate block BEFORE the retrieval block
+  // that retracts facts served earlier this session which have since moved/
+  // vanished. Its own XML strip so a repo-derived path/symbol can't smuggle tags.
+  const deltaBlock = contextDelta
+    ? `<sextant-context-delta>\n${stripUnsafeXmlTags(contextDelta)}\n</sextant-context-delta>\n`
+    : "";
+  process.stdout.write(`${deltaBlock}<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
   await statusLinePromise;
 }
 

@@ -120,6 +120,13 @@ function summarize(events) {
   const regionHitsByArm = new Map();
   const regionMissesByArm = new Map();
 
+  // CLAIM LEDGER (docs/028 Phase C): claims served + context-deltas emitted
+  // (a delta RETRACTS a fact that moved/vanished since we served it).
+  let claimsServed = 0;
+  let contextDeltas = 0;
+  let deltaChanged = 0;
+  let deltaInvalidated = 0;
+
   // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
   // edit.  Counts emissions and the surfaced-path volume split by signal.
   let brInjected = 0;
@@ -202,6 +209,15 @@ function summarize(events) {
       regionMisses++;
       const arm = e.arm || "armed";
       regionMissesByArm.set(arm, (regionMissesByArm.get(arm) || 0) + 1);
+    }
+
+    if (name === "claim.served") {
+      claimsServed += typeof e.n === "number" ? e.n : 0;
+    }
+    if (name === "contextdelta.emitted") {
+      contextDeltas++;
+      deltaChanged += typeof e.changed === "number" ? e.changed : 0;
+      deltaInvalidated += typeof e.invalidated === "number" ? e.invalidated : 0;
     }
 
     if (name === "blastradius.injected") {
@@ -344,6 +360,14 @@ function summarize(events) {
       pathMisses: brPathMisses,
       openPrecision: brPathHits + brPathMisses ? brPathHits / (brPathHits + brPathMisses) : null,
       pathHitsBySource: Object.fromEntries(brHitsBySource),
+    },
+    // CLAIM LEDGER (docs/028 Phase C): claims served + context-deltas that
+    // retracted stale facts mid-session (cache coherence for agent context).
+    claimLedger: {
+      claimsServed,
+      contextDeltas,
+      deltaChanged,
+      deltaInvalidated,
     },
   };
 }
@@ -620,6 +644,18 @@ function printSummary(rootAbs, sum) {
         );
       }
     }
+  }
+
+  // CLAIM LEDGER (docs/028 Phase C) — cache coherence for agent context.
+  const cl = sum.claimLedger;
+  if (cl && (cl.claimsServed > 0 || cl.contextDeltas > 0)) {
+    lines.push("");
+    lines.push("Claim ledger (did sextant retract facts that went stale mid-session?)");
+    lines.push(`  claims served: ${cl.claimsServed}`);
+    lines.push(
+      `  context-deltas emitted: ${cl.contextDeltas}  ` +
+      `(${cl.deltaChanged} facts re-derived, ${cl.deltaInvalidated} invalidated)`
+    );
   }
 
   lines.push("");
