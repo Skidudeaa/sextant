@@ -532,6 +532,51 @@ async function run() {
       }
     }
 
+    // --- Lane 3: structural delta (docs/029 Phase D) — capsule-gated ---
+    // After a mutation, diff the file's NEW structure against the graph's stored
+    // pre-image (exports/imports added/removed) and record it into the capsule's
+    // touchedRegions so the closure report can summarize what the task changed.
+    // Capsule-gated (dogfood-only), out-of-band telemetry, never throws.
+    if (MUTATE_TOOLS.has(tool)) {
+      try {
+        const capsuleLib = require("../lib/capsule");
+        if (capsuleLib.capsuleEnabled(root)) {
+          const tr = data.tool_response || data.toolUseResult || null;
+          // POST-edit content for the "new" structure (NOT originalFile — that's
+          // pre-edit and would show a reversed delta). tool_response.content is
+          // post-edit; disk is post-edit (hook fires after apply).
+          let content = tr && typeof tr.content === "string" ? tr.content : null;
+          if (content == null) content = safeReadFile(path.resolve(root, repoRel));
+          if (content != null) {
+            const graph = require("../lib/graph");
+            const db = await graph.loadDb(root);
+            if (db) {
+              const SD = require("../lib/structural-delta");
+              const delta = SD.computeStructuralDelta(db, graph, repoRel, content);
+              if (delta.changed) {
+                recordEvent(root, "structure.delta", {
+                  exportsAdded: delta.exportsAdded.length,
+                  exportsRemoved: delta.exportsRemoved.length,
+                  importsAdded: delta.importsAdded.length,
+                  importsRemoved: delta.importsRemoved.length,
+                });
+                capsuleLib.appendTouchedRegion(root, sessionKey, {
+                  path: repoRel,
+                  ts: Date.now(),
+                  exportsAdded: delta.exportsAdded,
+                  exportsRemoved: delta.exportsRemoved,
+                  importsAdded: delta.importsAdded,
+                  importsRemoved: delta.importsRemoved,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // structural-delta lane is best-effort; never breaks the hook.
+      }
+    }
+
     // --- Lane 2: blast-radius emitter (docs/016 Sprint 1) ---
     // Touched-tracking runs for EVERY file tool (a Read marks the dependent as
     // seen); emission only for mutations.  The file being edited is excluded

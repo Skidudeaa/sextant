@@ -141,6 +141,20 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "sextant_closure",
+    description:
+      "A factual task-closure report for the current task: which files changed in observable " +
+      "structure (exports/imports added/removed), whether the facts sextant served still hold, " +
+      "which directly-connected tests/fixtures were vs were NOT observed, which affected " +
+      "surfaces were NOT inspected, and what sextant cannot verify. States evidence and gaps " +
+      "only — it does NOT assert the change is correct, complete, or safe to merge. Use before " +
+      "declaring a task done to see the connected surfaces you haven't touched.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // --- Tool handlers ------------------------------------------------------
@@ -560,6 +574,16 @@ async function handleTaskStatus() {
   }
 }
 
+async function handleClosure() {
+  await ensureInit();
+  try {
+    const { buildClosure, renderClosure } = require("../lib/closure");
+    return textResult(renderClosure(buildClosure(_root, {})));
+  } catch {
+    return textResult("Closure report unavailable (internal error).");
+  }
+}
+
 // --- Dispatch table -----------------------------------------------------
 
 const toolHandlers = {
@@ -571,6 +595,7 @@ const toolHandlers = {
   sextant_scope: handleScope,
   sextant_focus: handleFocus,
   sextant_task_status: handleTaskStatus,
+  sextant_closure: handleClosure,
 };
 
 // --- JSON-RPC 2.0 protocol layer ---------------------------------------

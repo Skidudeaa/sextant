@@ -95,19 +95,10 @@ function persistInjectedSet(injPathsFile, payload) {
 }
 
 // TASK CAPSULE gate (docs/027 Phase B). DEFAULT-OFF: unset → flat block,
-// byte-identical to pre-capsule behavior (a normal install is never changed).
-// Opt in with SEXTANT_CAPSULE=1 or `.codebase-intel.json` `capsule: true`. This
-// is the A/B switch — capsule-on vs flat, scored by the Phase-A region metrics.
-function capsuleEnabled(root, env = process.env) {
-  const e = env && env.SEXTANT_CAPSULE;
-  if (e === "1" || e === "true") return true;
-  if (e === "0" || e === "false") return false;
-  try {
-    return require("../lib/config").loadRepoConfig(root).capsule === true;
-  } catch {
-    return false;
-  }
-}
+// byte-identical to pre-capsule behavior. Canonical impl lives in lib/capsule.js
+// (shared with hook-posttooluse so B/C/D turn on together); re-exported here for
+// the existing test and call sites.
+const { capsuleEnabled } = require("../lib/capsule");
 
 // ARCHITECTURE: Query-aware UserPromptSubmit hook.
 //

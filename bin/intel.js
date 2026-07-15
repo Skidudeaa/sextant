@@ -43,6 +43,7 @@ const commandMap = {
   doctor: "../commands/doctor",
   query: "../commands/query",
   explain: "../commands/explain",
+  closure: "../commands/closure",
   telemetry: "../commands/telemetry",
   "eval-trajectory": "../commands/eval-trajectory",
   tune: "../commands/tune",
