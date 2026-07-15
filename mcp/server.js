@@ -110,6 +110,37 @@ const TOOLS = [
       properties: {},
     },
   },
+  {
+    name: "sextant_focus",
+    description:
+      "Compile a role-based Task Capsule for what you're about to work on: the files " +
+      "grouped as PRIMARY (the thing to change, with its region), SUPPORT (needed to " +
+      "understand it), WITNESSES (its tests/fixtures), HAZARDS (high-fan-in/blast " +
+      "surfaces), and UNKNOWNS (what sextant can't verify). A sharper first call than a " +
+      "flat file list when starting a task. Returns nothing structural when the index is " +
+      "stale (silent absence — stale claims are withheld).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "What you're about to work on — drives the role-based workset",
+        },
+      },
+    },
+  },
+  {
+    name: "sextant_task_status",
+    description:
+      "Report the most-recent Task Capsule for this repo: its task id, intent, the repo " +
+      "version it was compiled against and whether that fingerprint is still current " +
+      "(HEAD/status unchanged), and the workset counts by role. Use to check whether the " +
+      "capsule's structural claims may have gone stale since it was compiled.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 // --- Tool handlers ------------------------------------------------------
@@ -442,6 +473,93 @@ async function handleOrient(args) {
   return { content: [{ type: "text", text: built.block }] };
 }
 
+// TASK CAPSULE (docs/027 Phase B). Facts-only, like sextant_orient.
+function textResult(text) {
+  return { content: [{ type: "text", text }] };
+}
+
+async function handleFocus(args) {
+  await ensureInit();
+  const task = typeof args?.task === "string" ? args.task : "";
+  try {
+    const graph = require("../lib/graph");
+    const freshness = require("../lib/freshness");
+    const { compileWorkset } = require("../lib/workset");
+    const { buildCapsule, writeCapsule } = require("../lib/capsule");
+    const { formatCapsule } = require("../lib/format-capsule");
+
+    const fresh = await freshness.checkFreshness(_root);
+    if (fresh.fresh === false && fresh.contentChanged === true) {
+      return textResult(
+        "Focus unavailable: the index is stale for this repo (structural claims withheld " +
+        "rather than served stale). `sextant scan` rebuilds it."
+      );
+    }
+    const db = await graph.loadDb(_root);
+    if (!db || !graph.countFiles(db)) {
+      return textResult("Focus unavailable: no index for this repo. Run `sextant scan`.");
+    }
+
+    let files = [];
+    if (task.trim()) {
+      const { shouldRetrieve } = require("../lib/classifier");
+      const cls = shouldRetrieve(task.slice(-8192));
+      if (cls && Array.isArray(cls.terms) && cls.terms.length) {
+        const gr = require("../lib/graph-retrieve").graphRetrieve(db, cls.terms, {
+          maxResults: 12,
+          borderline: typeof cls.confidence === "number" && cls.confidence <= 0.4,
+        });
+        files = (gr && gr.files) || [];
+      }
+    }
+    const res = graph.computeResolutionStats(db);
+    const workset = compileWorkset(files, { root: _root, resolutionPct: res && res.resolutionPct });
+    const capsule = buildCapsule({ root: _root, sessionKey: "mcp", taskText: task, workset });
+    writeCapsule(_root, "mcp", capsule);
+    const detailed = formatCapsule(capsule, { maxChars: 1400 });
+    if (!detailed.text || !detailed.text.trim()) {
+      return textResult(
+        task.trim()
+          ? "No task-relevant files found for that description. Try more specific symbol or file names."
+          : "Provide a `task` description to compile a focused workset."
+      );
+    }
+    return textResult(detailed.text);
+  } catch {
+    return textResult("Focus unavailable (internal error).");
+  }
+}
+
+async function handleTaskStatus() {
+  await ensureInit();
+  try {
+    const { readLatestCapsule, capsuleFreshness } = require("../lib/capsule");
+    const cap = readLatestCapsule(_root);
+    if (!cap) {
+      return textResult(
+        "No task capsule yet for this repo. Use sextant_focus to compile one (it also " +
+        "forms automatically during retrieval when capsule mode is enabled)."
+      );
+    }
+    const fr = capsuleFreshness(_root, cap);
+    const ws = cap.workset || {};
+    const count = (k) => (Array.isArray(ws[k]) ? ws[k].length : 0);
+    const lines = [
+      `Task ${cap.taskId} — status: ${cap.status}`,
+      `Intent: ${(cap.intent && cap.intent.text) || "(none)"}`,
+      `Repo: ${(cap.repo && cap.repo.branch) || "?"} @ ${String((cap.repo && cap.repo.head) || "").slice(0, 7)} ` +
+        `(fingerprint ${fr.fresh ? "current" : "STALE — " + fr.reason})`,
+      `Workset: primary ${count("primary")}, support ${count("support")}, witnesses ${count("witnesses")}, ` +
+        `hazards ${count("hazards")}, unknowns ${count("unknowns")}`,
+    ];
+    if (count("primary")) lines.push("Primary: " + ws.primary.map((e) => e.path).join(", "));
+    if (count("hazards")) lines.push("Hazards: " + ws.hazards.join("; "));
+    return textResult(lines.join("\n"));
+  } catch {
+    return textResult("Task status unavailable (internal error).");
+  }
+}
+
 // --- Dispatch table -----------------------------------------------------
 
 const toolHandlers = {
@@ -451,6 +569,8 @@ const toolHandlers = {
   sextant_health: handleHealth,
   sextant_orient: handleOrient,
   sextant_scope: handleScope,
+  sextant_focus: handleFocus,
+  sextant_task_status: handleTaskStatus,
 };
 
 // --- JSON-RPC 2.0 protocol layer ---------------------------------------

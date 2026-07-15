@@ -94,6 +94,21 @@ function persistInjectedSet(injPathsFile, payload) {
   } catch {}
 }
 
+// TASK CAPSULE gate (docs/027 Phase B). DEFAULT-OFF: unset → flat block,
+// byte-identical to pre-capsule behavior (a normal install is never changed).
+// Opt in with SEXTANT_CAPSULE=1 or `.codebase-intel.json` `capsule: true`. This
+// is the A/B switch — capsule-on vs flat, scored by the Phase-A region metrics.
+function capsuleEnabled(root, env = process.env) {
+  const e = env && env.SEXTANT_CAPSULE;
+  if (e === "1" || e === "true") return true;
+  if (e === "0" || e === "false") return false;
+  try {
+    return require("../lib/config").loadRepoConfig(root).capsule === true;
+  } catch {
+    return false;
+  }
+}
+
 // ARCHITECTURE: Query-aware UserPromptSubmit hook.
 //
 // Flow:
@@ -409,18 +424,37 @@ async function run() {
   // zoekt excerpt, so the block is honest about what it is. Fresh/version-only
   // turns are unaffected (contentStale=false → byte-identical output).
   const maxChars = classification.confidence >= 0.7 ? 1000 : 600;
+  const sessionKey = deriveSessionKey(data);
+  // TASK CAPSULE (docs/027 Phase B): default-off role-based, region-surfaced
+  // block. On → replaces the flat list AND persists the durable capsule. A
+  // content-stale turn NEVER renders a capsule (structural claims withheld —
+  // same silent-absence rule as every lane); it takes the flat textOnly path.
+  const useCapsule = capsuleEnabled(root) && !contentStale;
   let output = "";
-  // injectedFiles = the subset actually RENDERED into the block (the prefix kept
-  // before the maxChars cap), so the persisted outcome set can't claim a file the
-  // cap truncated out.  See formatRetrievalDetailed.
-  let injectedFiles = [];
+  // injectedPaths = the {path,source,line?,symbol?}[] to persist for the Phase-A
+  // outcome substrate. In flat mode it's derived from the RENDERED subset (so the
+  // persisted set can't claim a file the cap truncated out); in capsule mode the
+  // renderer already returns entries in that shape.
+  let injectedPaths = [];
   try {
-    const detailed = formatRetrievalDetailed(merged, { maxChars, textOnly: contentStale });
-    output = detailed.text;
-    injectedFiles = detailed.files;
+    if (useCapsule) {
+      const { compileWorkset } = require("../lib/workset");
+      const { buildCapsule, writeCapsule } = require("../lib/capsule");
+      const { formatCapsule } = require("../lib/format-capsule");
+      const workset = compileWorkset((merged && merged.files) || [], { root });
+      const capsule = buildCapsule({ root, sessionKey, taskText: prompt, workset });
+      writeCapsule(root, sessionKey, capsule);
+      const detailed = formatCapsule(capsule, { maxChars });
+      output = detailed.text;
+      injectedPaths = detailed.files;
+    } else {
+      const detailed = formatRetrievalDetailed(merged, { maxChars, textOnly: contentStale });
+      output = detailed.text;
+      injectedPaths = buildInjectedPaths(detailed.files);
+    }
   } catch {
     output = "";
-    injectedFiles = [];
+    injectedPaths = [];
   }
 
   if (!output || !output.trim()) {
@@ -438,7 +472,6 @@ async function run() {
 
   // ARM DECISION (009 #1 follow-up): now that output is non-empty we have a real
   // injection that COULD be withheld. Decide armed vs holdback. See decideArm.
-  const sessionKey = deriveSessionKey(data);
   const injPathsFile = path.join(
     root,
     ".planning",
@@ -458,9 +491,9 @@ async function run() {
       ts: Date.now(),
       stale: contentStale === true,
       arm: "holdback",
-      paths: buildInjectedPaths(injectedFiles),
+      paths: injectedPaths,
     });
-    recordEvent(root, "retrieval.holdback", { fileCount: injectedFiles.length });
+    recordEvent(root, "retrieval.holdback", { fileCount: injectedPaths.length });
     await injectStaticSummary(root, data);
     await statusLinePromise;
     return;
@@ -521,7 +554,7 @@ async function run() {
     ts: Date.now(),
     stale: contentStale === true,
     arm: "armed",
-    paths: buildInjectedPaths(injectedFiles),
+    paths: injectedPaths,
   });
 
   // TELEMETRY (T1.3): a non-empty <codebase-retrieval> block is being
@@ -558,4 +591,4 @@ async function run() {
   await statusLinePromise;
 }
 
-module.exports = { run, buildInjectedPaths, decideArm };
+module.exports = { run, buildInjectedPaths, decideArm, capsuleEnabled };

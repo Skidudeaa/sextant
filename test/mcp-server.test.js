@@ -70,8 +70,8 @@ async function setupTestRoot() {
 // ---------------------------------------------------------------------------
 
 describe("MCP server — tool definitions", () => {
-  it("exposes exactly 6 tools", () => {
-    assert.equal(TOOLS.length, 6);
+  it("exposes exactly 8 tools", () => {
+    assert.equal(TOOLS.length, 8); // +sextant_focus, +sextant_task_status (docs/027)
   });
 
   it("every tool has name, description, and inputSchema", () => {
@@ -140,15 +140,17 @@ describe("MCP server — tools/list", () => {
   it("returns the tool list", async () => {
     const result = await dispatch("tools/list", {});
     assert.ok(Array.isArray(result.tools));
-    assert.equal(result.tools.length, 6);
+    assert.equal(result.tools.length, 8);
     const names = result.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
       "sextant_explain",
+      "sextant_focus",
       "sextant_health",
       "sextant_orient",
       "sextant_related",
       "sextant_scope",
       "sextant_search",
+      "sextant_task_status",
     ]);
   });
 });
