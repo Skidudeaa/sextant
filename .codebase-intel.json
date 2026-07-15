@@ -8,5 +8,6 @@
     "**/build/**",
     "**/.next/**"
   ],
-  "summaryEverySec": 5
+  "summaryEverySec": 5,
+  "capsule": true
 }
