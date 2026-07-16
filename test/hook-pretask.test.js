@@ -496,6 +496,35 @@ describe("hook pretask — Lane A injection", () => {
     }
   });
 
+  it("counts orientation-unavailable Phase-F spawns in the lifecycle denominator", () => {
+    fs.writeFileSync(path.join(root, "unscanned.js"), "module.exports = 2;\n");
+    execSync("git add -A && git commit -qm stale-for-phase-f-denominator", { cwd: root });
+    try {
+      const payload = {
+        ...taskInput("Find where widgetize is defined."),
+        session_id: "phase-f-no-block-session",
+        tool_use_id: "toolu_phase_f_no_block",
+      };
+      const res = runHook(root, payload, {
+        SEXTANT_CAPSULE: "1",
+        SEXTANT_COHERENCE: "1",
+      });
+      assert.equal(res.status, 0);
+      assert.equal(res.stdout, "");
+      const row = readTelemetry(root).find(
+        (event) => event.name === "coherence.lifecycle" &&
+          event.stage === "child_spawn" &&
+          event.reason === "orientation_unavailable"
+      );
+      assert.ok(row, "upstream orientation absence must remain in the spawn denominator");
+      assert.equal(row.outcome, "withheld");
+      assert.equal(row.state, "orientation_unavailable");
+      assert.match(row.taskKey, /^ctask_[a-f0-9]{24}$/);
+    } finally {
+      execSync(`node ${BIN} scan --root ${root} --force`, { stdio: "ignore", env: hermeticEnv() });
+    }
+  });
+
   it("refused root (no project marker): no output AND no state created", () => {
     const bare = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-pretask-bare-"));
     try {

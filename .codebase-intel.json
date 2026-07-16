@@ -10,5 +10,6 @@
   ],
   "summaryEverySec": 5,
   "capsule": true,
-  "coherence": true
+  "coherence": true,
+  "coherenceHoldbackPct": 50
 }

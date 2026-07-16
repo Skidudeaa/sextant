@@ -24,18 +24,50 @@ const telemetry = require("../lib/telemetry");
 // floor. Below this the summary prints a DORMANT line with the raw counts.
 const HOLDBACK_MIN_SCORED = 30;
 
+// Phase-F decision floors. These are intentionally conservative operational
+// gates, not proof of behavioral benefit. The scorecard cannot graduate while
+// factual review is thin or a confirmed false fact exists.
+const COHERENCE_THRESHOLDS = Object.freeze({
+  minDays: 7,
+  minMultiAgentTasks: 30,
+  minSpawnAttempts: 100,
+  minReturnAttempts: 100,
+  minEligibleIncidents: 50,
+  minReviewedFindings: 50,
+  minLifecycleWilsonLower: 0.95,
+  minBoundaryResolutionRate: 0.95,
+  minIncidentResolutionRate: 0.95,
+  minFindingResolutionRate: 0.90,
+  maxP95Ms: 100,
+  maxP99Ms: 250,
+  minPeerAnalysesForHeadroom: 100,
+  minFindingIncidence: 0.05,
+});
+
+const COHERENCE_FEEDBACK_VERDICTS = new Set([
+  "accurate_useful",
+  "accurate_noise",
+  "false_fact",
+  "unclear",
+]);
+const COHERENCE_ADJUDICATED_VERDICTS = new Set([
+  "accurate_useful",
+  "accurate_noise",
+  "false_fact",
+]);
+
 function readAllEvents(rootAbs, includeOld) {
   const events = [];
   // .old first so chronological order is preserved when concatenated.
   if (includeOld) {
     const oldPath = telemetry.telemetryOldPath(rootAbs);
-    if (fs.existsSync(oldPath)) {
+    try {
       const raw = fs.readFileSync(oldPath, "utf8");
       for (const line of raw.split("\n")) {
         if (!line) continue;
         try { events.push(JSON.parse(line)); } catch {}
       }
-    }
+    } catch {}
   }
   for (const e of telemetry.readEvents(rootAbs)) events.push(e);
   return events;
@@ -141,6 +173,7 @@ function summarize(events) {
   let coherenceChanged = 0;
   let coherenceInvalidated = 0;
   let coherenceSkipped = 0;
+  const coherenceSkippedByReason = new Map();
 
   // Blast-radius lane (docs/016 Sprint 1): action-time injections after an
   // edit.  Counts emissions and the surfaced-path volume split by signal.
@@ -245,7 +278,11 @@ function summarize(events) {
       coherenceChanged += typeof e.changed === "number" ? e.changed : 0;
       coherenceInvalidated += typeof e.invalidated === "number" ? e.invalidated : 0;
     }
-    if (name === "coherence.skipped") coherenceSkipped++;
+    if (name === "coherence.skipped") {
+      coherenceSkipped++;
+      const reason = e.reason || "(unknown)";
+      coherenceSkippedByReason.set(reason, (coherenceSkippedByReason.get(reason) || 0) + 1);
+    }
 
     if (name === "blastradius.injected") {
       brInjected++;
@@ -407,6 +444,8 @@ function summarize(events) {
       claimsChangedDelivered: coherenceChanged,
       claimsInvalidatedDelivered: coherenceInvalidated,
       skipped: coherenceSkipped,
+      skippedByReason: Object.fromEntries(coherenceSkippedByReason),
+      scorecard: coherenceScorecard(events),
     },
   };
 }
@@ -447,6 +486,1369 @@ function benefitDelta(hitsByArm, missesByArm) {
     return +(p.armed - p.holdback).toFixed(4);
   }
   return null;
+}
+
+function finiteCount(value) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function ratio(num, denom) {
+  return denom > 0 ? num / denom : null;
+}
+
+// Wilson lower confidence bound for a binomial success rate. The scorecard
+// gates on the lower bound, never the optimistic point estimate.
+function wilsonLowerBound(successes, attempts, z = 1.96) {
+  if (!Number.isFinite(attempts) || attempts <= 0) return null;
+  const n = attempts;
+  const p = Math.max(0, Math.min(1, successes / n));
+  const z2 = z * z;
+  const center = p + z2 / (2 * n);
+  const spread = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+  return Math.max(0, (center - spread) / (1 + z2 / n));
+}
+
+function wilsonInterval(successes, attempts, z = 1.96) {
+  if (!Number.isFinite(attempts) || attempts <= 0) return null;
+  const n = attempts;
+  const p = Math.max(0, Math.min(1, successes / n));
+  const z2 = z * z;
+  const denominator = 1 + z2 / n;
+  const center = (p + z2 / (2 * n)) / denominator;
+  const radius =
+    z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n) / denominator;
+  return {
+    lower: Math.max(0, center - radius),
+    upper: Math.min(1, center + radius),
+  };
+}
+
+function countBy(items, keyFn) {
+  const out = {};
+  for (const item of items) {
+    const key = keyFn(item) || "(unknown)";
+    out[key] = (out[key] || 0) + 1;
+  }
+  return out;
+}
+
+function findingCounts(event, prefix) {
+  const overlapKey = prefix === "eligible"
+    ? (event.eligibleOverlaps ?? event.overlapPairs)
+    : prefix === "deduped"
+      ? event.dedupedOverlapPairs
+      : (event.deliveredOverlaps ?? event.deliveredOverlapPairs);
+  const changedKey = prefix === "eligible"
+    ? (event.eligibleChanged ?? event.changed)
+    : prefix === "deduped"
+      ? event.dedupedChanged
+      : event.deliveredChanged;
+  const invalidatedKey = prefix === "eligible"
+    ? (event.eligibleInvalidated ?? event.invalidated)
+    : prefix === "deduped"
+      ? event.dedupedInvalidated
+      : event.deliveredInvalidated;
+  return {
+    overlaps: finiteCount(overlapKey),
+    changed: finiteCount(changedKey),
+    invalidated: finiteCount(invalidatedKey),
+  };
+}
+
+function findingTotal(counts) {
+  return counts.overlaps + counts.changed + counts.invalidated;
+}
+
+function claimSampleCount(event) {
+  const raw = event && (
+    typeof event.findingSample === "string" ? event.findingSample : event.sample
+  );
+  if (typeof raw !== "string" || raw.length > 2000) return 0;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((item) =>
+          item && (item.kind === "changed" || item.kind === "invalidated")
+        ).length
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function maxFindingCounts(current, candidate) {
+  if (!candidate) {
+    return current
+      ? { ...current }
+      : { overlaps: 0, changed: 0, invalidated: 0 };
+  }
+  if (!current) return { ...candidate };
+  return {
+    overlaps: Math.max(current.overlaps, candidate.overlaps),
+    changed: Math.max(current.changed, candidate.changed),
+    invalidated: Math.max(current.invalidated, candidate.invalidated),
+  };
+}
+
+function findingCoverage(eligible, delivered, heldback) {
+  const shown = delivered || { overlaps: 0, changed: 0, invalidated: 0 };
+  const withheld = heldback || { overlaps: 0, changed: 0, invalidated: 0 };
+  const deliveredCount =
+    Math.min(eligible.overlaps, shown.overlaps) +
+    Math.min(eligible.changed, shown.changed) +
+    Math.min(eligible.invalidated, shown.invalidated);
+  const heldbackOverlap = Math.min(
+    Math.max(0, eligible.overlaps - shown.overlaps),
+    withheld.overlaps
+  );
+  return {
+    delivered: deliveredCount,
+    heldback: heldbackOverlap,
+    resolved: deliveredCount + heldbackOverlap,
+    eligible: findingTotal(eligible),
+  };
+}
+
+function addTaskAgent(taskAgents, taskKey, agentKey) {
+  if (!taskKey) return;
+  if (!taskAgents.has(taskKey)) taskAgents.set(taskKey, new Set());
+  if (agentKey) taskAgents.get(taskKey).add(agentKey);
+}
+
+function eventDurationStats(items) {
+  const durations = items
+    .map((event) => event && event.durationMs)
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+  return durations.length ? {
+    count: durations.length,
+    p50: percentile(durations, 0.50),
+    p95: percentile(durations, 0.95),
+    p99: percentile(durations, 0.99),
+    max: durations[durations.length - 1],
+  } : null;
+}
+
+function lifecycleAttemptUnits(items) {
+  const units = new Map();
+  items.forEach((event, index) => {
+    // A child agent is the stable spawn/return identity. Include taskKey when
+    // available so an upstream identity collision cannot merge separate work.
+    // Identity-less failures remain separate attempts because there is no
+    // defensible join key with which to collapse them.
+    const stable = event && event.agentKey
+      ? `${event.taskKey || "(unknown-task)"}\0${event.agentKey}`
+      : `anonymous\0${index}`;
+    if (!units.has(stable)) units.set(stable, []);
+    units.get(stable).push({ event, index });
+  });
+  return [...units.values()].map((rows) => {
+    rows.sort((left, right) => {
+      const leftTs = Number.isFinite(left.event.ts) ? left.event.ts : Number.POSITIVE_INFINITY;
+      const rightTs = Number.isFinite(right.event.ts) ? right.event.ts : Number.POSITIVE_INFINITY;
+      return leftTs - rightTs || left.index - right.index;
+    });
+    const successful = rows.filter(({ event }) =>
+      event.outcome === "written" || event.outcome === "retry"
+    );
+    // A later integrity-safe terminal state is not a successful retry. In
+    // particular, written -> ambiguous/withheld/moved means the identity can no
+    // longer be trusted at the boundary and must remain visible. Plain failed
+    // rows may recover via an explicit retry; raw failures are still counted by
+    // the separate sticky hard-failure stop below.
+    const terminal = rows.filter(({ event }) =>
+      ["ambiguous", "withheld", "moved"].includes(event.outcome)
+    );
+    const selected = (terminal.length ? terminal : (successful.length ? successful : rows)).at(-1).event;
+    return {
+      ...selected,
+      outcome: terminal.length
+        ? selected.outcome
+        : successful.length
+        ? (successful.some(({ event }) => event.outcome === "written") ? "written" : "retry")
+        : selected.outcome,
+      rowCount: rows.length,
+    };
+  });
+}
+
+function lifecycleIdentity(event) {
+  return event && event.agentKey
+    ? `${event.taskKey || "(unknown-task)"}\0${event.agentKey}`
+    : null;
+}
+
+// The experiment registers exact opportunity/window units for protocol
+// accounting, then estimates the behavioral outcome once per task from that
+// task's first registered opportunity. Keeping those two units separate stops
+// repeated windows from manufacturing either apparent sample size or closure.
+function coherenceExperimentScorecard(events) {
+  const schemaOne = (event) => event && (event.schema === 1 || event.schemaVersion === 1);
+  const relevantRows = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) =>
+      schemaOne(event) &&
+      (String(event.name || "").startsWith("coherence.experiment.") ||
+        String(event.name || "").startsWith("coherence.overlap.") ||
+        (event.name === "coherence.report" && ["delivery", "holdback"].includes(event.stage)))
+    );
+  const relevant = relevantRows.map(({ event }) => event);
+  const forcedTaskKeys = new Set(
+    relevant.filter((event) => event.assignmentMode === "forced")
+      .map((event) => event.taskKey)
+      .filter(Boolean)
+  );
+  const randomized = (event) =>
+    event && event.assignmentMode === "randomized" && !forcedTaskKeys.has(event.taskKey);
+  const armOf = (event) => event && (event.arm || event.experimentArm);
+  const exactKey = (event) => {
+    const arm = armOf(event);
+    return event && event.opportunityId && event.taskKey && (arm === "armed" || arm === "holdback")
+      ? `${arm}\0${event.taskKey}\0${event.opportunityId}`
+      : null;
+  };
+  const taskArmKey = (event) => {
+    const arm = armOf(event);
+    return event && event.taskKey && (arm === "armed" || arm === "holdback")
+      ? `${arm}\0${event.taskKey}`
+      : null;
+  };
+  const ordered = (rows) => [...rows].sort((left, right) => {
+    const leftTs = Number.isFinite(left.event.ts) ? left.event.ts : Number.POSITIVE_INFINITY;
+    const rightTs = Number.isFinite(right.event.ts) ? right.event.ts : Number.POSITIVE_INFINITY;
+    return leftTs - rightTs || left.index - right.index;
+  });
+  const uniqueBy = (rows, keyFn) => {
+    const out = new Map();
+    for (const row of ordered(rows)) {
+      const key = keyFn(row.event);
+      if (key && !out.has(key)) out.set(key, row);
+    }
+    return out;
+  };
+  const taskArms = new Map();
+  const rememberArm = (event) => {
+    if (!randomized(event) || !event.taskKey) return;
+    const arm = armOf(event);
+    if (arm !== "armed" && arm !== "holdback") return;
+    if (!taskArms.has(event.taskKey)) taskArms.set(event.taskKey, new Set());
+    taskArms.get(event.taskKey).add(arm);
+  };
+  for (const event of relevant) rememberArm(event);
+
+  const assignments = relevant.filter(
+    (event) => event.name === "coherence.experiment.assigned"
+  );
+  const opportunities = relevant.filter(
+    (event) => event.name === "coherence.overlap.opportunity"
+  );
+  const exposed = relevant.filter((event) => event.name === "coherence.overlap.exposed");
+  const withheld = relevant.filter((event) => event.name === "coherence.overlap.withheld");
+  const opened = relevant.filter(
+    (event) => event.name === "coherence.experiment.window_opened"
+  );
+  const closed = relevant.filter(
+    (event) => event.name === "coherence.experiment.window_closed"
+  );
+  const observationFailures = relevant.filter(
+    (event) => event.name === "coherence.experiment.observation_failed"
+  );
+
+  const causalNames = new Set([
+    "coherence.experiment.assigned",
+    "coherence.overlap.opportunity",
+    "coherence.overlap.exposed",
+    "coherence.overlap.withheld",
+    "coherence.experiment.window_opened",
+    "coherence.experiment.window_closed",
+  ]);
+  const missingAssignmentModeEvents = relevant.filter(
+    (event) => causalNames.has(event.name) && event.assignmentMode == null
+  ).length;
+  const rowsNamed = (name) => relevantRows.filter(({ event }) => event.name === name);
+  const randomizedOpportunityRows = rowsNamed("coherence.overlap.opportunity")
+    .filter(({ event }) => randomized(event));
+  const registeredByKey = uniqueBy(randomizedOpportunityRows, exactKey);
+  const randomizedOpportunities = [...registeredByKey.values()].map(({ event }) => event);
+  const randomizedOpenRows = rowsNamed("coherence.experiment.window_opened")
+    .filter(({ event }) => randomized(event));
+  const randomizedCloseRows = rowsNamed("coherence.experiment.window_closed")
+    .filter(({ event }) => randomized(event));
+  const randomizedExposedRows = rowsNamed("coherence.overlap.exposed")
+    .filter(({ event }) => randomized(event));
+  const randomizedWithheldRows = rowsNamed("coherence.overlap.withheld")
+    .filter(({ event }) => randomized(event));
+  const openedByKey = uniqueBy(randomizedOpenRows, exactKey);
+  const closedByKey = uniqueBy(randomizedCloseRows, exactKey);
+  const exposedByKey = uniqueBy(randomizedExposedRows, exactKey);
+  const withheldByKey = uniqueBy(randomizedWithheldRows, exactKey);
+
+  const registrationCountByTask = new Map();
+  const firstRegisteredByTask = new Map();
+  for (const row of ordered([...registeredByKey.values()])) {
+    const key = taskArmKey(row.event);
+    if (!key) continue;
+    registrationCountByTask.set(key, (registrationCountByTask.get(key) || 0) + 1);
+    if (!firstRegisteredByTask.has(key)) firstRegisteredByTask.set(key, row);
+  }
+  const tasksWithMultipleOpportunities = [...registrationCountByTask.values()]
+    .filter((count) => count > 1).length;
+  const protocolDuplicateOpportunityUnits = [...registrationCountByTask.values()]
+    .reduce((total, count) => total + Math.max(0, count - 1), 0);
+  const randomizedAssignmentRows = rowsNamed("coherence.experiment.assigned")
+    .filter(({ event }) => randomized(event));
+  const uniqueAssignments = uniqueBy(randomizedAssignmentRows, taskArmKey);
+
+  const opportunityTasks = {
+    armed: new Set(),
+    holdback: new Set(),
+  };
+  for (const event of randomizedOpportunities) {
+    if (event.taskKey && opportunityTasks[event.arm]) opportunityTasks[event.arm].add(event.taskKey);
+  }
+
+  const tasks = new Map();
+  for (const [taskKey, registration] of firstRegisteredByTask) {
+    const close = closedByKey.get(exactKey(registration.event));
+    if (!close) continue;
+    const event = close.event;
+    tasks.set(taskKey, {
+      taskKey: event.taskKey,
+      arm: armOf(event),
+      opportunityId: event.opportunityId,
+      targetRead: event.targetRead === true,
+      targetMutation: event.targetMutation === true,
+      blindTargetMutation: event.blindTargetMutation === true,
+      firstTargetRank: Number.isInteger(event.firstTargetRank) && event.firstTargetRank > 0
+        ? event.firstTargetRank
+        : null,
+      totalTouches: finiteCount(event.totalTouches),
+    });
+  }
+
+  const arms = {};
+  for (const arm of ["armed", "holdback"]) {
+    const taskSet = (items) => new Set(items
+      .filter((event) => randomized(event) && event.arm === arm && event.taskKey)
+      .map((event) => event.taskKey));
+    const assignedTasks = taskSet(assignments);
+    const eligibleTasks = opportunityTasks[arm];
+    const registeredKeys = new Set(randomizedOpportunities
+      .filter((event) => armOf(event) === arm)
+      .map(exactKey)
+      .filter(Boolean));
+    const openedKeys = new Set([...openedByKey.keys()].filter((key) => registeredKeys.has(key)));
+    const closedKeys = new Set([...closedByKey.keys()].filter((key) => registeredKeys.has(key)));
+    const compliantSource = arm === "armed" ? exposedByKey : withheldByKey;
+    const compliantKeys = new Set([...compliantSource.keys()].filter((key) => registeredKeys.has(key)));
+    const openedTasks = taskSet([...openedByKey.values()].map(({ event }) => event));
+    const closedTasks = taskSet([...closedByKey.values()].map(({ event }) => event));
+    const compliantTasks = taskSet([...compliantSource.values()].map(({ event }) => event));
+    const intersection = (left, right) => [...left].filter((item) => right.has(item)).length;
+    const rows = [...tasks.values()].filter((row) => row.arm === arm);
+    const blind = rows.filter((row) => row.blindTargetMutation).length;
+    const reads = rows.filter((row) => row.targetRead).length;
+    const mutations = rows.filter((row) => row.targetMutation).length;
+    const readBeforeMutation = rows.filter(
+      (row) => row.targetMutation && !row.blindTargetMutation
+    ).length;
+    const ranked = rows.filter((row) => row.firstTargetRank != null);
+    arms[arm] = {
+      tasks: rows.length,
+      assignedTasks: assignedTasks.size,
+      opportunityTasks: eligibleTasks.size,
+      openedTasks: intersection(openedTasks, eligibleTasks),
+      closedTasks: intersection(closedTasks, eligibleTasks),
+      compliantTasks: intersection(compliantTasks, eligibleTasks),
+      registeredOpportunities: registeredKeys.size,
+      openedWindows: openedKeys.size,
+      closedWindows: closedKeys.size,
+      compliantWindows: compliantKeys.size,
+      assignmentCoverage: ratio(intersection(assignedTasks, eligibleTasks), eligibleTasks.size),
+      assignmentToOpportunityRate: ratio(
+        intersection(assignedTasks, eligibleTasks),
+        assignedTasks.size
+      ),
+      windowOpenRate: ratio(openedKeys.size, registeredKeys.size),
+      windowClosureRate: ratio(closedKeys.size, registeredKeys.size),
+      openedWindowClosureRate: ratio(closedKeys.size, openedKeys.size),
+      complianceRate: ratio(compliantKeys.size, registeredKeys.size),
+      windows: closedKeys.size,
+      blindTargetMutations: blind,
+      blindTargetMutationRate: ratio(blind, rows.length),
+      targetReads: reads,
+      targetReadRate: ratio(reads, rows.length),
+      targetMutations: mutations,
+      targetMutationRate: ratio(mutations, rows.length),
+      readBeforeMutationRate: ratio(readBeforeMutation, mutations),
+      meanFirstTargetRank: ranked.length
+        ? ranked.reduce((total, row) => total + row.firstTargetRank, 0) / ranked.length
+        : null,
+      meanTouches: rows.length
+        ? rows.reduce((total, row) => total + row.totalTouches, 0) / rows.length
+        : null,
+      blindMutationWilson95: wilsonInterval(blind, rows.length),
+    };
+  }
+
+  const armedInterval = arms.armed.blindMutationWilson95;
+  const holdbackInterval = arms.holdback.blindMutationWilson95;
+  const blindMutationDelta =
+    arms.armed.blindTargetMutationRate != null &&
+    arms.holdback.blindTargetMutationRate != null
+      ? arms.holdback.blindTargetMutationRate - arms.armed.blindTargetMutationRate
+      : null;
+  const blindMutationDeltaInterval = armedInterval && holdbackInterval ? {
+    lower: holdbackInterval.lower - armedInterval.upper,
+    upper: holdbackInterval.upper - armedInterval.lower,
+  } : null;
+
+  const armFlips = [...taskArms.values()].filter((armsForTask) => armsForTask.size > 1).length;
+  const controlLeaks = exposed.filter(
+    (event) => randomized(event) && event.arm === "holdback"
+  ).length +
+    relevant.filter((event) =>
+      event.name === "coherence.report" && event.stage === "delivery" &&
+      event.experimentArm === "holdback" && !forcedTaskKeys.has(event.taskKey) &&
+      taskArms.has(event.taskKey) && finiteCount(event.deliveredOverlapPairs) > 0
+    ).length;
+  const claimHoldbacks = relevant.filter((event) =>
+    event.name === "coherence.report" && event.stage === "holdback" &&
+    (finiteCount(event.heldbackChanged) > 0 || finiteCount(event.heldbackInvalidated) > 0)
+  ).length;
+
+  const pilotPerArm = 40;
+  const crediblePerArm = 150;
+  const minAssignmentCoverage = 0.95;
+  const minOpenCoverage = 0.95;
+  const minClosureCoverage = 0.90;
+  const maxClosureRateDifference = 0.05;
+  const minCompliance = 0.95;
+  const attritionFailures = [];
+  const attritionPilotReached = ["armed", "holdback"].every((arm) =>
+    Math.max(arms[arm].assignedTasks, arms[arm].opportunityTasks) >= pilotPerArm
+  );
+  if (attritionPilotReached) {
+    for (const arm of ["armed", "holdback"]) {
+      const row = arms[arm];
+      if (row.assignmentCoverage == null || row.assignmentCoverage < minAssignmentCoverage) {
+        attritionFailures.push(`${arm} assignment coverage below ${minAssignmentCoverage}`);
+      }
+      if (
+        row.assignmentToOpportunityRate == null ||
+        row.assignmentToOpportunityRate < minAssignmentCoverage
+      ) {
+        attritionFailures.push(`${arm} assignment-to-opportunity coverage below ${minAssignmentCoverage}`);
+      }
+      if (row.windowOpenRate == null || row.windowOpenRate < minOpenCoverage) {
+        attritionFailures.push(`${arm} window-open coverage below ${minOpenCoverage}`);
+      }
+      if (row.windowClosureRate == null || row.windowClosureRate < minClosureCoverage) {
+        attritionFailures.push(`${arm} window-closure coverage below ${minClosureCoverage}`);
+      }
+      if (row.complianceRate == null || row.complianceRate < minCompliance) {
+        attritionFailures.push(`${arm} intervention compliance below ${minCompliance}`);
+      }
+    }
+    if (
+      Math.abs(arms.armed.windowClosureRate - arms.holdback.windowClosureRate) >
+      maxClosureRateDifference
+    ) {
+      attritionFailures.push("differential window closure exceeds 0.05");
+    }
+  }
+  let status = "DORMANT";
+  let interpretation = "NOT_ENOUGH_DATA";
+  if (
+    armFlips || controlLeaks || claimHoldbacks || tasksWithMultipleOpportunities ||
+    observationFailures.length > 0
+  ) {
+    status = "INVESTIGATE";
+    interpretation = "EXPERIMENT_INTEGRITY_FAILURE";
+  } else if (attritionFailures.length > 0) {
+    status = "ATTRITION_HOLD";
+    interpretation = "EXPERIMENT_ATTRITION_FAILURE";
+  } else if (
+    arms.armed.opportunityTasks > 0 || arms.holdback.opportunityTasks > 0
+  ) {
+    status = arms.armed.tasks >= crediblePerArm && arms.holdback.tasks >= crediblePerArm
+      ? "CREDIBLE_READ"
+      : arms.armed.tasks >= pilotPerArm && arms.holdback.tasks >= pilotPerArm
+        ? "PILOT_READY"
+        : "ACCRUING";
+    if (status === "CREDIBLE_READ" && blindMutationDeltaInterval) {
+      if (blindMutationDeltaInterval.lower > 0) {
+        interpretation = "ARMED_REDUCES_BLIND_TARGET_MUTATION";
+      } else if (blindMutationDeltaInterval.upper < 0) {
+        interpretation = "ARMED_INCREASES_BLIND_TARGET_MUTATION";
+      } else {
+        interpretation = "INCONCLUSIVE_BEHAVIOR_SHIFT";
+      }
+    }
+  }
+
+  const registeredKeys = new Set(registeredByKey.keys());
+  const registeredOpenedKeys = new Set([...openedByKey.keys()].filter((key) => registeredKeys.has(key)));
+  const registeredClosedKeys = new Set([...closedByKey.keys()].filter((key) => registeredKeys.has(key)));
+  const registeredExposedKeys = new Set([...exposedByKey.keys()].filter((key) => registeredKeys.has(key)));
+  const registeredWithheldKeys = new Set([...withheldByKey.keys()].filter((key) => registeredKeys.has(key)));
+  const validRowCount = (rows, keyFn) => rows.filter(({ event }) => keyFn(event)).length;
+  const validAssignmentRows = validRowCount(randomizedAssignmentRows, taskArmKey);
+  const validOpportunityRows = validRowCount(randomizedOpportunityRows, exactKey);
+  const validOpenRows = validRowCount(randomizedOpenRows, exactKey);
+  const validCloseRows = validRowCount(randomizedCloseRows, exactKey);
+  const forcedTasksExcluded = forcedTaskKeys.size;
+  return {
+    schema: 1,
+    name: "overlap-holdback-v1",
+    status,
+    interpretation,
+    unit: "unique task",
+    outcomeUnit: "first registered opportunity per unique task",
+    protocolUnit: "exact registered opportunity/window",
+    pilotTasksPerArm: pilotPerArm,
+    credibleTasksPerArm: crediblePerArm,
+    attritionThresholds: {
+      minAssignmentCoverage,
+      minOpenCoverage,
+      minClosureCoverage,
+      maxClosureRateDifference,
+      minCompliance,
+    },
+    attritionFailures,
+    forcedTasksExcluded,
+    missingAssignmentModeEvents,
+    opportunities: registeredKeys.size,
+    exposed: registeredExposedKeys.size,
+    withheld: registeredWithheldKeys.size,
+    windowsOpened: registeredOpenedKeys.size,
+    windowsClosed: registeredClosedKeys.size,
+    windowsOpenOrUnobserved: [...registeredOpenedKeys]
+      .filter((key) => !registeredClosedKeys.has(key)).length,
+    protocol: {
+      duplicateAssignmentRecords: validAssignmentRows - uniqueAssignments.size,
+      duplicateOpportunityRecords: validOpportunityRows - registeredByKey.size,
+      duplicateOpenRecords: validOpenRows - openedByKey.size,
+      duplicateCloseRecords: validCloseRows - closedByKey.size,
+      malformedAssignmentRecords: randomizedAssignmentRows.length - validAssignmentRows,
+      malformedOpportunityRecords: randomizedOpportunityRows.length - validOpportunityRows,
+      malformedOpenRecords: randomizedOpenRows.length - validOpenRows,
+      malformedCloseRecords: randomizedCloseRows.length - validCloseRows,
+      tasksWithMultipleOpportunities,
+      duplicateOpportunityUnits: protocolDuplicateOpportunityUnits,
+      orphanOpenWindows: [...openedByKey.keys()].filter((key) => !registeredKeys.has(key)).length,
+      orphanClosedWindows: [...closedByKey.keys()].filter((key) => !registeredKeys.has(key)).length,
+      orphanComplianceEvents: [...new Set([...exposedByKey.keys(), ...withheldByKey.keys()])]
+        .filter((key) => !registeredKeys.has(key)).length,
+    },
+    armFlips,
+    controlLeaks,
+    claimHoldbacks,
+    observationFailures: observationFailures.length,
+    observationFailureReasons: countBy(
+      observationFailures.filter((event) => event.reason),
+      (event) => event.reason
+    ),
+    arms,
+    blindTargetMutationDeltaHoldbackMinusArmed: blindMutationDelta,
+    blindTargetMutationDeltaWilson95: blindMutationDeltaInterval,
+    outcomeBoundary:
+      "Uses each randomized task's first registered opportunity to measure observed parent Read/Edit/Write/MultiEdit/NotebookEdit behavior; Bash/script mutations, child-agent work, conflicts, task success, and user value are not measured.",
+  };
+}
+
+function coherenceScorecard(events) {
+  const schemaOne = (event) => event && (event.schema === 1 || event.schemaVersion === 1);
+  const incidentKey = (event) => event && (event.incidentId || event.reportId) || null;
+  const lifecycle = events.filter(
+    (event) => schemaOne(event) && event.name === "coherence.lifecycle"
+  );
+  const reports = events.filter(
+    (event) => schemaOne(event) && event.name === "coherence.report"
+  );
+  const feedbackEvents = events.filter(
+    (event) => schemaOne(event) && event.name === "coherence.feedback"
+  );
+  const experimentEvents = events.filter(
+    (event) => schemaOne(event) &&
+      (String(event.name || "").startsWith("coherence.experiment.") ||
+        String(event.name || "").startsWith("coherence.overlap."))
+  );
+  const versioned = [...lifecycle, ...reports, ...feedbackEvents, ...experimentEvents];
+
+  let firstTs = null;
+  let lastTs = null;
+  for (const event of versioned) {
+    if (!Number.isFinite(event.ts)) continue;
+    if (firstTs == null || event.ts < firstTs) firstTs = event.ts;
+    if (lastTs == null || event.ts > lastTs) lastTs = event.ts;
+  }
+  const spanMs = firstTs != null && lastTs != null ? Math.max(0, lastTs - firstTs) : 0;
+  const spanDays = spanMs / (24 * 60 * 60 * 1000);
+
+  const taskAgents = new Map();
+  const childSpawnEvents = lifecycle.filter((event) => event.stage === "child_spawn");
+  const returnEvents = lifecycle.filter((event) => event.stage === "tool_return");
+  const parentServeEvents = lifecycle.filter((event) => event.stage === "parent_serve");
+  for (const event of lifecycle) addTaskAgent(taskAgents, event.taskKey, event.agentKey);
+
+  const lifecycleSuccess = (event) => event.outcome === "written" || event.outcome === "retry";
+  const spawnAttempts = lifecycleAttemptUnits(childSpawnEvents);
+  const returnAttempts = lifecycleAttemptUnits(returnEvents);
+  const spawnSuccesses = spawnAttempts.filter(lifecycleSuccess).length;
+  const returnSuccesses = returnAttempts.filter(lifecycleSuccess).length;
+  const uniqueChildrenPrepared = new Set(
+    spawnAttempts.filter(lifecycleSuccess).map(lifecycleIdentity).filter(Boolean)
+  );
+  const uniqueChildrenReturned = new Set(
+    returnAttempts.filter(lifecycleSuccess).map(lifecycleIdentity).filter(Boolean)
+  );
+  const observedReturnedChildren = new Set(
+    [...uniqueChildrenReturned].filter((agentKey) => uniqueChildrenPrepared.has(agentKey))
+  );
+  const orphanReturnedChildren = new Set(
+    [...uniqueChildrenReturned].filter((agentKey) => !uniqueChildrenPrepared.has(agentKey))
+  );
+  const lifecycleUnits = [
+    ...lifecycle.filter((event) =>
+      event.stage !== "child_spawn" && event.stage !== "tool_return"
+    ),
+    ...spawnAttempts,
+    ...returnAttempts,
+  ];
+
+  const analyses = reports.filter((event) => event.stage === "analysis");
+  const analysisFailures = analyses.filter((event) => event.outcome === "failed");
+  const deliveries = reports.filter((event) => event.stage === "delivery");
+  const holdbacks = reports.filter((event) => event.stage === "holdback");
+  const dedupes = reports.filter((event) => event.stage === "dedupe");
+  const suppressions = reports.filter((event) => event.stage === "suppression");
+  const lifecycleDurationStats = eventDurationStats(lifecycle);
+  const reportAnalysisDurationStats = eventDurationStats(analyses);
+  const experimentDurationStats = eventDurationStats(experimentEvents);
+  const measuredLatencyLanes = {
+    lifecycle: lifecycleDurationStats,
+    reportAnalysis: reportAnalysisDurationStats,
+    experimentState: experimentDurationStats,
+  };
+  const latencyFailures = Object.entries(measuredLatencyLanes)
+    .filter(([, stats]) => stats && (
+      stats.p95 > COHERENCE_THRESHOLDS.maxP95Ms ||
+      stats.p99 > COHERENCE_THRESHOLDS.maxP99Ms
+    ))
+    .map(([lane, stats]) =>
+      `${lane} latency p95 ${Math.round(stats.p95)}ms / p99 ${Math.round(stats.p99)}ms exceeds ` +
+      `${COHERENCE_THRESHOLDS.maxP95Ms}ms / ${COHERENCE_THRESHOLDS.maxP99Ms}ms`
+    );
+  const peerAnalyses = analyses.filter((event) => finiteCount(event.agents) >= 2);
+  for (const event of peerAnalyses) {
+    if (event.taskKey && !taskAgents.has(event.taskKey)) taskAgents.set(event.taskKey, new Set());
+  }
+
+  const eligibleByIncident = new Map();
+  const deliveredByIncident = new Map();
+  const dedupedByIncident = new Map();
+  const heldbackByIncident = new Map();
+  const incidentSamples = new Map();
+  const incidentReviewableSamples = new Map();
+  const eligibleBoundaryIds = new Set();
+  const deliveredBoundaryIds = new Set();
+  const heldbackBoundaryIds = new Set();
+  const eligibleByBoundary = new Map();
+  const deliveredByBoundary = new Map();
+  const dedupedByBoundary = new Map();
+  const heldbackByBoundary = new Map();
+  let findingBearingAnalyses = 0;
+  let claimsChecked = 0;
+  let unverifiableClaims = 0;
+
+  const surface = {};
+  const ensureSurface = (name) => {
+    const key = name || "(unknown)";
+    if (!surface[key]) {
+      surface[key] = {
+        analyses: 0,
+        eligibleBoundaries: 0,
+        deliveredBoundaries: 0,
+        eligibleIncidents: 0,
+        deliveredIncidents: 0,
+        resolvedIncidents: 0,
+        incidentDeliveryRate: null,
+        incidentResolutionRate: null,
+        _eligible: new Map(),
+        _delivered: new Map(),
+        _deduped: new Map(),
+        _heldback: new Map(),
+      };
+    }
+    return surface[key];
+  };
+
+  for (const event of analyses) {
+    const row = ensureSurface(event.surface);
+    row.analyses++;
+    claimsChecked += finiteCount(
+      event.claimsChecked ??
+      (finiteCount(event.unchanged) + finiteCount(event.changed) +
+        finiteCount(event.invalidated) + finiteCount(event.unknown))
+    );
+    unverifiableClaims += finiteCount(event.unverifiable ?? event.unknown);
+    const eligible = findingCounts(event, "eligible");
+    if (findingTotal(eligible) === 0) continue;
+    findingBearingAnalyses++;
+    row.eligibleBoundaries++;
+    if (event.boundaryId) {
+      eligibleBoundaryIds.add(event.boundaryId);
+      eligibleByBoundary.set(
+        event.boundaryId,
+        maxFindingCounts(eligibleByBoundary.get(event.boundaryId), eligible)
+      );
+    }
+    const reportId = incidentKey(event);
+    if (!reportId) continue;
+    row._eligible.set(reportId, maxFindingCounts(row._eligible.get(reportId), eligible));
+    eligibleByIncident.set(
+      reportId,
+      maxFindingCounts(eligibleByIncident.get(reportId), eligible)
+    );
+    const sample = typeof event.sample === "string" ? event.sample : event.findingSample;
+    const reviewableSampleCount = claimSampleCount(event);
+    const priorReviewableSampleCount = incidentReviewableSamples.get(reportId) || 0;
+    if (
+      reviewableSampleCount > priorReviewableSampleCount &&
+      typeof sample === "string" && sample && sample !== "[]"
+    ) {
+      incidentSamples.set(reportId, sample.slice(0, 500));
+    }
+    incidentReviewableSamples.set(
+      reportId,
+      Math.max(priorReviewableSampleCount, reviewableSampleCount)
+    );
+  }
+
+  for (const event of deliveries) {
+    const row = ensureSurface(event.surface);
+    const reportId = incidentKey(event);
+    if (!reportId) continue;
+    const delivered = findingCounts(event, "delivered");
+    if (findingTotal(delivered) > 0) {
+      row.deliveredBoundaries++;
+      if (event.boundaryId) {
+        deliveredBoundaryIds.add(event.boundaryId);
+        deliveredByBoundary.set(
+          event.boundaryId,
+          maxFindingCounts(deliveredByBoundary.get(event.boundaryId), delivered)
+        );
+      }
+      row._delivered.set(
+        reportId,
+        maxFindingCounts(row._delivered.get(reportId), delivered)
+      );
+    }
+    deliveredByIncident.set(
+      reportId,
+      maxFindingCounts(deliveredByIncident.get(reportId), delivered)
+    );
+  }
+
+  for (const event of holdbacks) {
+    const row = ensureSurface(event.surface);
+    const reportId = incidentKey(event);
+    if (!reportId) continue;
+    const heldback = {
+      overlaps: finiteCount(event.heldbackOverlapPairs),
+      changed: finiteCount(event.heldbackChanged),
+      invalidated: finiteCount(event.heldbackInvalidated),
+    };
+    heldbackByIncident.set(
+      reportId,
+      maxFindingCounts(heldbackByIncident.get(reportId), heldback)
+    );
+    if (heldback.overlaps > 0) {
+      if (event.boundaryId) {
+        heldbackBoundaryIds.add(event.boundaryId);
+        heldbackByBoundary.set(
+          event.boundaryId,
+          maxFindingCounts(heldbackByBoundary.get(event.boundaryId), heldback)
+        );
+      }
+      row._heldback.set(
+        reportId,
+        maxFindingCounts(row._heldback.get(reportId), heldback)
+      );
+    }
+  }
+
+  for (const event of dedupes) {
+    const row = ensureSurface(event.surface);
+    const reportId = incidentKey(event);
+    if (!reportId) continue;
+    const deduped = findingCounts(event, "deduped");
+    if (findingTotal(deduped) === 0) continue;
+    dedupedByIncident.set(
+      reportId,
+      maxFindingCounts(dedupedByIncident.get(reportId), deduped)
+    );
+    row._deduped.set(
+      reportId,
+      maxFindingCounts(row._deduped.get(reportId), deduped)
+    );
+    if (event.boundaryId) {
+      dedupedByBoundary.set(
+        event.boundaryId,
+        maxFindingCounts(dedupedByBoundary.get(event.boundaryId), deduped)
+      );
+    }
+  }
+
+  for (const row of Object.values(surface)) {
+    row.eligibleIncidents = row._eligible.size;
+    row.deliveredIncidents = 0;
+    row.resolvedIncidents = 0;
+    for (const [id, eligible] of row._eligible) {
+      const rawCoverage = findingCoverage(eligible, row._delivered.get(id), null);
+      const resolvedCoverage = findingCoverage(
+        eligible,
+        maxFindingCounts(row._delivered.get(id), row._deduped.get(id)),
+        row._heldback.get(id)
+      );
+      if (rawCoverage.delivered > 0) row.deliveredIncidents++;
+      if (resolvedCoverage.resolved === resolvedCoverage.eligible) row.resolvedIncidents++;
+    }
+    row.incidentDeliveryRate = ratio(row.deliveredIncidents, row.eligibleIncidents);
+    row.incidentResolutionRate = ratio(row.resolvedIncidents, row.eligibleIncidents);
+    delete row._eligible;
+    delete row._delivered;
+    delete row._deduped;
+    delete row._heldback;
+  }
+
+  let eligibleFindings = 0;
+  let deliveredFindings = 0;
+  let resolvedFindings = 0;
+  let dedupedFindings = 0;
+  let intentionallyHeldbackFindings = 0;
+  let deliveredIncidents = 0;
+  let resolvedIncidents = 0;
+  for (const [reportId, eligible] of eligibleByIncident) {
+    eligibleFindings += findingTotal(eligible);
+    const rawCoverage = findingCoverage(eligible, deliveredByIncident.get(reportId), null);
+    const dedupeCoverage = findingCoverage(eligible, dedupedByIncident.get(reportId), null);
+    const resolvedCoverage = findingCoverage(
+      eligible,
+      maxFindingCounts(deliveredByIncident.get(reportId), dedupedByIncident.get(reportId)),
+      heldbackByIncident.get(reportId)
+    );
+    deliveredFindings += rawCoverage.delivered;
+    dedupedFindings += dedupeCoverage.delivered;
+    intentionallyHeldbackFindings += resolvedCoverage.heldback;
+    resolvedFindings += resolvedCoverage.resolved;
+    if (rawCoverage.delivered > 0) deliveredIncidents++;
+    if (resolvedCoverage.resolved === resolvedCoverage.eligible) resolvedIncidents++;
+  }
+
+  let deliveredBoundaries = 0;
+  let resolvedBoundaries = 0;
+  for (const [boundaryId, eligible] of eligibleByBoundary) {
+    const rawCoverage = findingCoverage(eligible, deliveredByBoundary.get(boundaryId), null);
+    const resolvedCoverage = findingCoverage(
+      eligible,
+      maxFindingCounts(deliveredByBoundary.get(boundaryId), dedupedByBoundary.get(boundaryId)),
+      heldbackByBoundary.get(boundaryId)
+    );
+    if (rawCoverage.delivered > 0) deliveredBoundaries++;
+    if (resolvedCoverage.resolved === resolvedCoverage.eligible) resolvedBoundaries++;
+  }
+
+  const feedbackByIncident = new Map();
+  for (const event of feedbackEvents) {
+    const reportId = incidentKey(event);
+    if (!reportId || !COHERENCE_FEEDBACK_VERDICTS.has(event.verdict)) continue;
+    const previous = feedbackByIncident.get(reportId);
+    if (!previous || finiteCount(event.ts) >= finiteCount(previous.ts)) {
+      feedbackByIncident.set(reportId, event);
+    }
+  }
+  const feedbackByVerdict = countBy([...feedbackByIncident.values()], (event) => event.verdict);
+  // Safety findings are sticky within the selected telemetry window. A later
+  // convenience review cannot silently erase a confirmed false fact; clearing
+  // one requires an explicit adjudication mechanism, which v1 does not expose.
+  const falseFactIncidents = new Set(
+    feedbackEvents
+      .filter((event) => event.verdict === "false_fact")
+      .map((event) => incidentKey(event))
+      .filter(Boolean)
+  );
+  const falseFacts = falseFactIncidents.size;
+  const claimIncidents = [...eligibleByIncident.entries()]
+    .filter(([, counts]) => counts.changed + counts.invalidated > 0)
+    .map(([reportId]) => reportId);
+  const reviewedClaimIncidents = claimIncidents.filter((reportId) => {
+    const feedback = feedbackByIncident.get(reportId);
+    return feedback && COHERENCE_ADJUDICATED_VERDICTS.has(feedback.verdict);
+  });
+  const reviewedFindings = reviewedClaimIncidents.reduce((total, reportId) => {
+    const eligible = eligibleByIncident.get(reportId);
+    const event = feedbackByIncident.get(reportId);
+    const reviewable = Math.min(
+      eligible.changed + eligible.invalidated,
+      incidentReviewableSamples.get(reportId) || 0
+    );
+    return total + Math.min(reviewable, finiteCount(event.reviewedFindings));
+  }, 0);
+  const unreviewed = claimIncidents
+    .filter((reportId) => {
+      const feedback = feedbackByIncident.get(reportId);
+      return !feedback || !COHERENCE_ADJUDICATED_VERDICTS.has(feedback.verdict);
+    })
+    .slice(0, 5)
+    .map((reportId) => ({ reportId, sample: incidentSamples.get(reportId) || "" }));
+
+  // Eventual retry success is appropriate for the reliability denominator, but
+  // must not erase a hard failure that actually occurred inside the window.
+  const hardFailureEvents = lifecycle.filter((event) => event.outcome === "failed");
+  const safeWithholdEvents = lifecycleUnits.filter((event) =>
+    ["ambiguous", "withheld", "moved", "missing"].includes(event.outcome)
+  );
+  const multiAgentTasks = [...taskAgents.entries()].filter(([, agents]) => agents.size >= 2).length +
+    [...new Set(peerAnalyses.map((event) => event.taskKey).filter(Boolean))]
+      .filter((taskKey) => !taskAgents.has(taskKey) || taskAgents.get(taskKey).size < 2).length;
+
+  const incidentDeliveryRate = ratio(deliveredIncidents, eligibleByIncident.size);
+  const findingDeliveryRate = ratio(deliveredFindings, eligibleFindings);
+  const incidentResolutionRate = ratio(resolvedIncidents, eligibleByIncident.size);
+  const findingResolutionRate = ratio(resolvedFindings, eligibleFindings);
+  const boundaryDeliveryRate = ratio(deliveredBoundaries, eligibleByBoundary.size);
+  const boundaryResolutionRate = ratio(resolvedBoundaries, eligibleByBoundary.size);
+  const findingIncidence = ratio(findingBearingAnalyses, peerAnalyses.length);
+  const spawnWilson = wilsonLowerBound(spawnSuccesses, spawnAttempts.length);
+  const returnWilson = wilsonLowerBound(returnSuccesses, returnAttempts.length);
+
+  const baseGaps = [];
+  if (spanDays < COHERENCE_THRESHOLDS.minDays) {
+    baseGaps.push(`window ${spanDays.toFixed(1)}d < ${COHERENCE_THRESHOLDS.minDays}d`);
+  }
+  if (multiAgentTasks < COHERENCE_THRESHOLDS.minMultiAgentTasks) {
+    baseGaps.push(`multi-agent tasks ${multiAgentTasks} < ${COHERENCE_THRESHOLDS.minMultiAgentTasks}`);
+  }
+  if (spawnAttempts.length < COHERENCE_THRESHOLDS.minSpawnAttempts) {
+    baseGaps.push(`spawn attempts ${spawnAttempts.length} < ${COHERENCE_THRESHOLDS.minSpawnAttempts}`);
+  }
+  if (returnAttempts.length < COHERENCE_THRESHOLDS.minReturnAttempts) {
+    baseGaps.push(`return attempts ${returnAttempts.length} < ${COHERENCE_THRESHOLDS.minReturnAttempts}`);
+  }
+  const incidentGap = eligibleByIncident.size < COHERENCE_THRESHOLDS.minEligibleIncidents
+    ? `eligible incidents ${eligibleByIncident.size} < ${COHERENCE_THRESHOLDS.minEligibleIncidents}`
+    : null;
+  const gaps = incidentGap ? [...baseGaps, incidentGap] : [...baseGaps];
+
+  let status = "DORMANT";
+  const reasons = [];
+  if (versioned.length > 0) {
+    if (falseFacts > 0) {
+      status = "INVESTIGATE";
+      reasons.push(`${falseFacts} confirmed false-fact review(s)`);
+    } else if (analysisFailures.length > 0) {
+      status = "INVESTIGATE";
+      reasons.push(`${analysisFailures.length} report analysis failure(s)`);
+    } else if (hardFailureEvents.length > 0) {
+      status = "INVESTIGATE";
+      reasons.push(`${hardFailureEvents.length} hard lifecycle failure(s)`);
+    } else if (baseGaps.length > 0) {
+      status = "ACCRUING";
+      reasons.push(...baseGaps);
+    } else if (
+      spawnWilson == null || spawnWilson < COHERENCE_THRESHOLDS.minLifecycleWilsonLower ||
+      returnWilson == null || returnWilson < COHERENCE_THRESHOLDS.minLifecycleWilsonLower ||
+      latencyFailures.length > 0
+    ) {
+      status = "HOLD";
+      reasons.push(
+        ...(spawnWilson == null || spawnWilson < COHERENCE_THRESHOLDS.minLifecycleWilsonLower ||
+          returnWilson == null || returnWilson < COHERENCE_THRESHOLDS.minLifecycleWilsonLower
+          ? ["one or more lifecycle-reliability gates missed"]
+          : []),
+        ...latencyFailures
+      );
+    } else if (
+      peerAnalyses.length >= COHERENCE_THRESHOLDS.minPeerAnalysesForHeadroom &&
+      (findingIncidence == null || findingIncidence < COHERENCE_THRESHOLDS.minFindingIncidence)
+    ) {
+      status = "PARK_CANDIDATE";
+      reasons.push("finding incidence is below the pre-registered headroom floor");
+    } else if (incidentGap) {
+      status = "ACCRUING";
+      reasons.push(incidentGap);
+    } else if (
+      boundaryResolutionRate == null ||
+      boundaryResolutionRate < COHERENCE_THRESHOLDS.minBoundaryResolutionRate ||
+      incidentResolutionRate == null ||
+      incidentResolutionRate < COHERENCE_THRESHOLDS.minIncidentResolutionRate ||
+      findingResolutionRate == null ||
+      findingResolutionRate < COHERENCE_THRESHOLDS.minFindingResolutionRate
+    ) {
+      status = "HOLD";
+      reasons.push("one or more boundary, incident, or finding resolution gates missed");
+    } else if (reviewedFindings < COHERENCE_THRESHOLDS.minReviewedFindings) {
+      status = "REVIEW_REQUIRED";
+      reasons.push(
+        `adjudicated findings ${reviewedFindings} < ` +
+        `${COHERENCE_THRESHOLDS.minReviewedFindings}`
+      );
+    } else {
+      status = "OPERATIONALLY_READY";
+      reasons.push("operational and factual-review gates passed");
+    }
+  } else {
+    reasons.push("no schema-v1 coherence lifecycle/report events recorded");
+  }
+
+  const experiment = coherenceExperimentScorecard(events);
+  if (experiment.status === "INVESTIGATE" && status !== "DORMANT") {
+    status = "INVESTIGATE";
+    reasons.unshift("overlap experiment integrity stop triggered");
+  } else if (experiment.status === "ATTRITION_HOLD" && status !== "INVESTIGATE") {
+    status = "HOLD";
+    reasons.unshift("overlap experiment attrition/compliance gate missed");
+  }
+
+  return {
+    schema: 1,
+    status,
+    reasons,
+    behavioralBenefit: "NOT_MEASURED",
+    behavioralBenefitReason:
+      "The randomized overlap trial observes only parent Read/Edit/Write/MultiEdit/NotebookEdit behavior; Bash/script mutations, child work, conflicts, task success, and user value are not instrumented.",
+    window: { firstTs, lastTs, spanMs, spanDays },
+    thresholds: COHERENCE_THRESHOLDS,
+    gaps: status === "PARK_CANDIDATE" ? baseGaps : gaps,
+    lifecycle: {
+      multiAgentTasks,
+      parentServeAttempts: parentServeEvents.length,
+      childSpawnAttempts: spawnAttempts.length,
+      childSpawnRows: childSpawnEvents.length,
+      childSpawnDuplicateRowsCollapsed: childSpawnEvents.length - spawnAttempts.length,
+      childSpawnSuccesses: spawnSuccesses,
+      childSpawnSuccessRate: ratio(spawnSuccesses, spawnAttempts.length),
+      childSpawnWilsonLower95: spawnWilson,
+      uniqueChildrenPrepared: uniqueChildrenPrepared.size,
+      returnAttempts: returnAttempts.length,
+      returnRows: returnEvents.length,
+      returnDuplicateRowsCollapsed: returnEvents.length - returnAttempts.length,
+      returnSuccesses,
+      returnSuccessRate: ratio(returnSuccesses, returnAttempts.length),
+      returnWilsonLower95: returnWilson,
+      uniqueChildrenReturned: uniqueChildrenReturned.size,
+      observedChildrenReturned: observedReturnedChildren.size,
+      observedReturnRate: ratio(observedReturnedChildren.size, uniqueChildrenPrepared.size),
+      orphanReturns: orphanReturnedChildren.size,
+      outcomesByStage: {
+        parent_serve: countBy(parentServeEvents, (event) => event.outcome),
+        child_spawn: countBy(spawnAttempts, (event) => event.outcome),
+        tool_return: countBy(returnAttempts, (event) => event.outcome),
+      },
+      reasons: countBy(lifecycleUnits.filter((event) => event.reason), (event) => event.reason),
+      hardFailures: hardFailureEvents.length,
+      safeWithholds: safeWithholdEvents.length,
+      duration: lifecycleDurationStats,
+    },
+    reports: {
+      analyses: analyses.length,
+      analysisFailures: analysisFailures.length,
+      analysisFailureReasons: countBy(
+        analysisFailures.filter((event) => event.reason),
+        (event) => event.reason
+      ),
+      peerAnalyses: peerAnalyses.length,
+      findingBearingAnalyses,
+      findingIncidence,
+      eligibleBoundaries: eligibleBoundaryIds.size,
+      deliveredBoundaries,
+      dedupedBoundaries: dedupedByBoundary.size,
+      heldbackBoundaries: heldbackBoundaryIds.size,
+      resolvedBoundaries,
+      boundaryDeliveryRate,
+      boundaryResolutionRate,
+      uniqueEligibleIncidents: eligibleByIncident.size,
+      uniqueDeliveredIncidents: deliveredIncidents,
+      incidentDeliveryRate,
+      uniqueResolvedIncidents: resolvedIncidents,
+      incidentResolutionRate,
+      eligibleFindings,
+      deliveredFindings,
+      dedupedFindings,
+      findingDeliveryRate,
+      intentionallyHeldbackFindings,
+      resolvedFindings,
+      findingResolutionRate,
+      claimsChecked,
+      unverifiableClaims,
+      unverifiableRate: ratio(unverifiableClaims, claimsChecked),
+      bySurface: surface,
+      analysisDuration: reportAnalysisDurationStats,
+      suppressions: {
+        count: suppressions.length,
+        reasons: countBy(suppressions, (event) => event.reason),
+      },
+    },
+    safetyReview: {
+      feedbackIncidents: feedbackByIncident.size,
+      reviewedIncidents: reviewedClaimIncidents.length,
+      reviewedFindings,
+      adjudicatedIncidents: reviewedClaimIncidents.length,
+      adjudicatedFindings: reviewedFindings,
+      unclearIncidents: finiteCount(feedbackByVerdict.unclear),
+      verdicts: feedbackByVerdict,
+      falseFacts,
+      unreviewedClaimIncidents: Math.max(0, claimIncidents.length - reviewedClaimIncidents.length),
+      nextUnreviewed: unreviewed,
+    },
+    experiment: {
+      ...experiment,
+      operationDuration: experimentDurationStats,
+    },
+    latency: {
+      measurementBoundary:
+        "durationMs covers instrumented Phase-F lifecycle handling, report analysis, and experiment state operations only; it excludes telemetry append and total hook runtime.",
+      lanes: measuredLatencyLanes,
+      failures: latencyFailures,
+    },
+  };
+}
+
+function fmtRate(value) {
+  return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "n/a";
+}
+
+function printCoherenceScorecard(rootAbs, card) {
+  const lines = [];
+  lines.push(`sextant coherence scorecard — ${rootAbs}`);
+  lines.push("─".repeat(60));
+  lines.push(`  status: ${card.status}`);
+  for (const reason of card.reasons || []) lines.push(`  - ${reason}`);
+  lines.push("");
+  lines.push(
+    `  Behavioral benefit: ${card.behavioralBenefit} — ${card.behavioralBenefitReason}`
+  );
+
+  if (card.status === "DORMANT") {
+    lines.push("");
+    lines.push("  No decision-grade Phase-F events exist in this window.");
+    lines.push("  This is not a negative result; the measurement lane has not observed traffic.");
+    return lines.join("\n");
+  }
+
+  const windowDays = card.window && Number.isFinite(card.window.spanDays)
+    ? card.window.spanDays.toFixed(1)
+    : "0.0";
+  lines.push("");
+  lines.push(`Observation window: ${windowDays} days`);
+
+  const lifecycle = card.lifecycle;
+  lines.push("");
+  lines.push("Lifecycle reliability (unique identities remain separately counted)");
+  lines.push(`  multi-agent tasks: ${lifecycle.multiAgentTasks}`);
+  lines.push(
+    `  child spawn: ${lifecycle.childSpawnSuccesses}/${lifecycle.childSpawnAttempts} successful ` +
+    `(rate ${fmtRate(lifecycle.childSpawnSuccessRate)}, Wilson lower ${fmtRate(lifecycle.childSpawnWilsonLower95)})`
+  );
+  lines.push(
+    `  tool return join: ${lifecycle.returnSuccesses}/${lifecycle.returnAttempts} successful ` +
+    `(rate ${fmtRate(lifecycle.returnSuccessRate)}, Wilson lower ${fmtRate(lifecycle.returnWilsonLower95)})`
+  );
+  lines.push(
+    `  unique children: ${lifecycle.uniqueChildrenPrepared} prepared, ` +
+    `${lifecycle.observedChildrenReturned} observed returned ` +
+    `(right-censored rate ${fmtRate(lifecycle.observedReturnRate)}); ` +
+    `orphan returns: ${lifecycle.orphanReturns}`
+  );
+  if (lifecycle.childSpawnDuplicateRowsCollapsed || lifecycle.returnDuplicateRowsCollapsed) {
+    lines.push(
+      `  retry/duplicate rows collapsed by stable child identity: spawn ` +
+      `${lifecycle.childSpawnDuplicateRowsCollapsed}, return ` +
+      `${lifecycle.returnDuplicateRowsCollapsed}`
+    );
+  }
+  lines.push(
+    `  hard failures: ${lifecycle.hardFailures}; safe withholds/ambiguities/missing joins: ${lifecycle.safeWithholds}`
+  );
+  if (lifecycle.duration) {
+    lines.push(
+      `  instrumented lifecycle segment: p50 ${fmtMs(lifecycle.duration.p50)}, ` +
+      `p95 ${fmtMs(lifecycle.duration.p95)}, p99 ${fmtMs(lifecycle.duration.p99)}, ` +
+      `max ${fmtMs(lifecycle.duration.max)}`
+    );
+  }
+  const reasonEntries = Object.entries(lifecycle.reasons || {});
+  if (reasonEntries.length) {
+    lines.push("  exact reasons:");
+    for (const [reason, count] of reasonEntries.sort((a, b) => b[1] - a[1])) {
+      lines.push(`    - ${reason}: ${count}`);
+    }
+  }
+
+  const reports = card.reports;
+  lines.push("");
+  lines.push("Report signal and delivery (deduped by canonical incident ID)");
+  if (reports.analysisFailures > 0) {
+    lines.push(`  failed analysis attempts: ${reports.analysisFailures}`);
+    for (const [reason, count] of Object.entries(reports.analysisFailureReasons || {})) {
+      lines.push(`    - ${reason}: ${count}`);
+    }
+  }
+  lines.push(
+    `  analyses with peers: ${reports.peerAnalyses}; finding-bearing: ${reports.findingBearingAnalyses} ` +
+    `(${fmtRate(reports.findingIncidence)})`
+  );
+  lines.push(
+    `  output boundaries delivered: ${reports.deliveredBoundaries}/${reports.eligibleBoundaries} ` +
+    `(${fmtRate(reports.boundaryDeliveryRate)}); resolved: ` +
+    `${reports.resolvedBoundaries}/${reports.eligibleBoundaries} ` +
+    `(${fmtRate(reports.boundaryResolutionRate)})`
+  );
+  lines.push(
+    `  unique incidents delivered: ${reports.uniqueDeliveredIncidents}/${reports.uniqueEligibleIncidents} ` +
+    `(${fmtRate(reports.incidentDeliveryRate)})`
+  );
+  lines.push(
+    `  finding units delivered: ${reports.deliveredFindings}/${reports.eligibleFindings} ` +
+    `(${fmtRate(reports.findingDeliveryRate)})`
+  );
+  lines.push(
+    `  findings resolved (delivered or intentional overlap holdback): ` +
+    `${reports.resolvedFindings}/${reports.eligibleFindings} ` +
+    `(${fmtRate(reports.findingResolutionRate)}); deduped: ${reports.dedupedFindings}; ` +
+    `held back: ${reports.intentionallyHeldbackFindings}`
+  );
+  lines.push(
+    `  incidents resolved: ${reports.uniqueResolvedIncidents}/${reports.uniqueEligibleIncidents} ` +
+    `(${fmtRate(reports.incidentResolutionRate)})`
+  );
+  lines.push(
+    `  claims checked: ${reports.claimsChecked}; unverifiable: ${reports.unverifiableClaims} ` +
+    `(${fmtRate(reports.unverifiableRate)}; never rendered as a factual retraction)`
+  );
+  if (reports.analysisDuration) {
+    lines.push(
+      `  instrumented report-analysis segment: p50 ${fmtMs(reports.analysisDuration.p50)}, ` +
+      `p95 ${fmtMs(reports.analysisDuration.p95)}, ` +
+      `p99 ${fmtMs(reports.analysisDuration.p99)}`
+    );
+  }
+  for (const [surface, row] of Object.entries(reports.bySurface || {})) {
+    lines.push(
+      `  surface=${surface}: ${row.deliveredIncidents}/${row.eligibleIncidents} incidents delivered, ` +
+      `${row.resolvedIncidents}/${row.eligibleIncidents} resolved, ${row.analyses} analyses`
+    );
+  }
+  if (reports.suppressions && reports.suppressions.count > 0) {
+    lines.push(`  unresolved publication suppressions: ${reports.suppressions.count}`);
+    for (const [reason, count] of Object.entries(reports.suppressions.reasons || {})) {
+      lines.push(`    - ${reason}: ${count}`);
+    }
+  }
+
+  const review = card.safetyReview;
+  lines.push("");
+  lines.push("Factual safety review");
+  lines.push(
+    `  adjudicated: ${review.reviewedFindings} finding units across ${review.reviewedIncidents} incident(s); ` +
+    `confirmed false facts: ${review.falseFacts}`
+  );
+  for (const item of review.nextUnreviewed || []) {
+    lines.push(`  unreviewed ${item.reportId}${item.sample ? ` — ${item.sample}` : ""}`);
+    lines.push(
+      `    record: sextant telemetry --review ${item.reportId} ` +
+      `--verdict <verdict> --reviewed-findings 1`
+    );
+  }
+
+  const experiment = card.experiment;
+  if (experiment) {
+    lines.push("");
+    lines.push("Randomized overlap-only behavior trial (unique-task outcome; exact-window protocol)");
+    lines.push(
+      `  status: ${experiment.status}; interpretation: ${experiment.interpretation}`
+    );
+    lines.push(
+      `  opportunities: ${experiment.opportunities}; exposed: ${experiment.exposed}; ` +
+      `withheld: ${experiment.withheld}; closed windows: ${experiment.windowsClosed}; ` +
+      `forced tasks excluded: ${experiment.forcedTasksExcluded}`
+    );
+    for (const arm of ["armed", "holdback"]) {
+      const row = experiment.arms && experiment.arms[arm];
+      if (!row) continue;
+      lines.push(
+        `  ${arm}: assigned ${row.assignedTasks}, opportunities ${row.opportunityTasks}, ` +
+        `opened ${row.openedTasks}, closed ${row.closedTasks}, compliant ${row.compliantTasks}`
+      );
+      lines.push(
+        `    exact windows: registered ${row.registeredOpportunities}, opened ` +
+        `${row.openedWindows}, closed ${row.closedWindows}, compliant ${row.compliantWindows}`
+      );
+      lines.push(
+        `    coverage: assignment ${fmtRate(row.assignmentCoverage)}, open ` +
+        `${fmtRate(row.windowOpenRate)}, closure ${fmtRate(row.windowClosureRate)}, ` +
+        `compliance ${fmtRate(row.complianceRate)}`
+      );
+      lines.push(
+        `    outcome: ${row.tasks} task(s), blind target mutation ${row.blindTargetMutations}/` +
+        `${row.tasks} (${fmtRate(row.blindTargetMutationRate)}), target read ` +
+        `${fmtRate(row.targetReadRate)}, read-before-mutation ${fmtRate(row.readBeforeMutationRate)}`
+      );
+    }
+    const delta = experiment.blindTargetMutationDeltaHoldbackMinusArmed;
+    const interval = experiment.blindTargetMutationDeltaWilson95;
+    lines.push(
+      `  holdback−armed blind-mutation delta: ` +
+      `${typeof delta === "number" ? fmtRate(delta) : "n/a"}` +
+      `${interval ? ` (conservative 95% interval ${fmtRate(interval.lower)} to ${fmtRate(interval.upper)})` : ""}`
+    );
+    lines.push(
+      `  integrity stops: arm flips ${experiment.armFlips}, control leaks ${experiment.controlLeaks}, ` +
+      `claim holdbacks ${experiment.claimHoldbacks}, observation failures ` +
+      `${experiment.observationFailures}`
+    );
+    for (const [reason, count] of Object.entries(experiment.observationFailureReasons || {})) {
+      lines.push(`    - observation ${reason}: ${count}`);
+    }
+    if (experiment.protocol) {
+      lines.push(
+        `  protocol duplicates: ${experiment.protocol.duplicateOpportunityUnits} extra opportunity ` +
+        `unit(s) across ${experiment.protocol.tasksWithMultipleOpportunities} task(s); ` +
+        `orphan opens ${experiment.protocol.orphanOpenWindows}, ` +
+        `orphan closes ${experiment.protocol.orphanClosedWindows}`
+      );
+    }
+    if (experiment.missingAssignmentModeEvents) {
+      lines.push(
+        `  excluded causal rows missing assignmentMode: ${experiment.missingAssignmentModeEvents}`
+      );
+    }
+    for (const failure of experiment.attritionFailures || []) {
+      lines.push(`  attrition: ${failure}`);
+    }
+    if (experiment.operationDuration) {
+      lines.push(
+        `  instrumented experiment-state operation: p50 ${fmtMs(experiment.operationDuration.p50)}, ` +
+        `p95 ${fmtMs(experiment.operationDuration.p95)}, ` +
+        `p99 ${fmtMs(experiment.operationDuration.p99)}`
+      );
+    }
+    lines.push(`  ${experiment.outcomeBoundary}`);
+  }
+
+  if (card.latency && card.latency.measurementBoundary) {
+    lines.push("");
+    lines.push(`Latency measurement boundary: ${card.latency.measurementBoundary}`);
+  }
+
+  if (card.gaps && card.gaps.length) {
+    lines.push("");
+    lines.push("Accrual gaps");
+    for (const gap of card.gaps) lines.push(`  - ${gap}`);
+  }
+  return lines.join("\n");
 }
 
 function printSummary(rootAbs, sum) {
@@ -731,8 +2133,18 @@ function printSummary(rootAbs, sum) {
 async function run(ctx) {
   const root = ctx.roots[0];
   const wantJson = hasFlag(process.argv, "--json");
-  const includeOld = hasFlag(process.argv, "--include-old");
+  const wantCoherenceScorecard = hasFlag(process.argv, "--coherence-scorecard");
+  const reviewId = flag(process.argv, "--review");
+  const includeOld = hasFlag(process.argv, "--include-old") || wantCoherenceScorecard || !!reviewId;
   const tailN = flag(process.argv, "--tail");
+  const daysRaw = flag(process.argv, "--days");
+  let days = null;
+  if (daysRaw != null) {
+    days = Number(daysRaw);
+    if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+      throw new Error("--days must be greater than 0 and at most 3650");
+    }
+  }
   let exposeCoherence = false;
   try {
     exposeCoherence = require("../lib/coherence").coherenceEnabled(root);
@@ -741,18 +2153,79 @@ async function run(ctx) {
     ? events
     : events.filter((event) => !String(event && event.name || "").startsWith("coherence."));
 
+  const applyWindow = (events) => {
+    if (days == null) return events;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return events.filter((event) => Number.isFinite(event && event.ts) && event.ts >= cutoff);
+  };
+
+  const allVisible = visibleEvents(readAllEvents(root, includeOld));
+
+  if (reviewId) {
+    if (!exposeCoherence) throw new Error("coherence review is unavailable while the gate is off");
+    const verdict = flag(process.argv, "--verdict");
+    if (!COHERENCE_FEEDBACK_VERDICTS.has(verdict)) {
+      throw new Error(
+        "--verdict must be accurate_useful, accurate_noise, false_fact, or unclear"
+      );
+    }
+    const reviewedFindings = Number(flag(process.argv, "--reviewed-findings"));
+    if (!Number.isInteger(reviewedFindings) || reviewedFindings <= 0 || reviewedFindings > 1000) {
+      throw new Error("--reviewed-findings must be an integer between 1 and 1000");
+    }
+    const incidentRows = allVisible.filter((event) =>
+      event && event.name === "coherence.report" && event.stage === "analysis" &&
+      (event.incidentId === reviewId || event.reportId === reviewId)
+    );
+    if (incidentRows.length === 0) throw new Error(`unknown coherence incident: ${reviewId}`);
+    const reviewableClaimFindings = Math.max(...incidentRows.map((event) =>
+      Math.min(
+        finiteCount(event.changed) + finiteCount(event.invalidated),
+        claimSampleCount(event)
+      )
+    ));
+    if (reviewedFindings > reviewableClaimFindings) {
+      throw new Error(
+        `--reviewed-findings exceeds the ${reviewableClaimFindings} changed/invalidated ` +
+        `claim finding(s) in ${reviewId}`
+      );
+    }
+    const incident = incidentRows.find((event) => event.taskKey) || incidentRows[0];
+    telemetry.recordEvent(root, "coherence.feedback", {
+      schemaVersion: 1,
+      incidentId: reviewId,
+      taskKey: incident.taskKey || null,
+      verdict,
+      reviewedFindings,
+    });
+    process.stdout.write(
+      `recorded coherence review ${reviewId}: ${verdict} (${reviewedFindings} finding(s))\n`
+    );
+    return;
+  }
+
   if (tailN) {
     // Raw-event mode: print the last N events as JSON lines, no aggregation.
     // Useful for `jq` post-processing or eyeballing recent activity.
     const n = Math.max(1, parseInt(tailN, 10) || 50);
-    const events = visibleEvents(readAllEvents(root, includeOld));
+    const events = applyWindow(allVisible);
     const slice = events.slice(-n);
     for (const e of slice) process.stdout.write(JSON.stringify(e) + "\n");
     return;
   }
 
-  const events = visibleEvents(readAllEvents(root, includeOld));
+  const events = applyWindow(allVisible);
   const summary = summarize(events);
+
+  if (wantCoherenceScorecard) {
+    const scorecard = summary.multiAgentCoherence.scorecard;
+    if (wantJson) {
+      process.stdout.write(JSON.stringify({ root, days, ...scorecard }, null, 2) + "\n");
+    } else {
+      process.stdout.write(printCoherenceScorecard(root, scorecard) + "\n");
+    }
+    return;
+  }
 
   if (wantJson) {
     process.stdout.write(JSON.stringify({ root, ...summary }, null, 2) + "\n");
@@ -762,4 +2235,15 @@ async function run(ctx) {
   process.stdout.write(printSummary(root, summary) + "\n");
 }
 
-module.exports = { run, summarize, percentile, printSummary };
+module.exports = {
+  run,
+  summarize,
+  percentile,
+  printSummary,
+  coherenceScorecard,
+  printCoherenceScorecard,
+  wilsonLowerBound,
+  wilsonInterval,
+  coherenceExperimentScorecard,
+  COHERENCE_THRESHOLDS,
+};

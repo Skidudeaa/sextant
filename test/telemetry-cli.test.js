@@ -12,7 +12,15 @@ const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const { summarize, percentile, printSummary } = require("../commands/telemetry");
+const {
+  summarize,
+  percentile,
+  printSummary,
+  coherenceScorecard,
+  printCoherenceScorecard,
+  wilsonLowerBound,
+  coherenceExperimentScorecard,
+} = require("../commands/telemetry");
 const telemetry = require("../lib/telemetry");
 
 describe("percentile", () => {
@@ -156,22 +164,667 @@ describe("summarize: Phase F multi-agent coherence", () => {
       { ts: 5, name: "coherence.delta_delivered", overlaps: 2, changed: 3, invalidated: 1 },
       { ts: 6, name: "coherence.skipped", reason: "no_spawn_id" },
     ]);
-    assert.deepEqual(sum.multiAgentCoherence, {
-      agentsRegistered: 2,
-      agentReturns: 1,
-      reportsEligible: 1,
-      reportsDelivered: 1,
-      overlapPairsDelivered: 2,
-      claimsChangedDelivered: 3,
-      claimsInvalidatedDelivered: 1,
-      skipped: 1,
-    });
+    assert.equal(sum.multiAgentCoherence.agentsRegistered, 2);
+    assert.equal(sum.multiAgentCoherence.agentReturns, 1);
+    assert.equal(sum.multiAgentCoherence.reportsEligible, 1);
+    assert.equal(sum.multiAgentCoherence.reportsDelivered, 1);
+    assert.equal(sum.multiAgentCoherence.overlapPairsDelivered, 2);
+    assert.equal(sum.multiAgentCoherence.claimsChangedDelivered, 3);
+    assert.equal(sum.multiAgentCoherence.claimsInvalidatedDelivered, 1);
+    assert.equal(sum.multiAgentCoherence.skipped, 1);
+    assert.deepEqual(sum.multiAgentCoherence.skippedByReason, { no_spawn_id: 1 });
+    assert.equal(sum.multiAgentCoherence.scorecard.status, "DORMANT");
     const text = printSummary("/x", sum);
     assert.match(text, /Multi-agent coherence/);
     assert.match(text, /recorded observation only/);
     assert.doesNotMatch(text, /coordination lock/i);
     assert.match(text, /recorded capsule generations: 2/);
     assert.match(text, /reports: 1\/1 delivered/);
+  });
+});
+
+describe("Phase F decision-grade scorecard", () => {
+  function matureEvents() {
+    const now = Date.now();
+    const start = now - 8 * 24 * 60 * 60 * 1000;
+    const events = [];
+    for (let i = 0; i < 100; i++) {
+      const taskKey = `ctask_${String(i % 30).padStart(24, "0")}`;
+      const agentKey = `child_${i}`;
+      events.push({
+        ts: start + i,
+        name: "coherence.lifecycle",
+        schemaVersion: 1,
+        taskKey,
+        agentKey,
+        stage: "child_spawn",
+        outcome: "written",
+        durationMs: 20,
+      });
+      events.push({
+        ts: start + 1000 + i,
+        name: "coherence.lifecycle",
+        schemaVersion: 1,
+        taskKey,
+        agentKey,
+        stage: "tool_return",
+        outcome: "written",
+        durationMs: 24,
+      });
+    }
+    for (let i = 0; i < 50; i++) {
+      const incidentId = `cincident_${String(i).padStart(24, "0")}`;
+      const boundaryId = `cboundary_${String(i).padStart(32, "0")}`;
+      const taskKey = `ctask_${String(i % 30).padStart(24, "0")}`;
+      events.push({
+        ts: start + 2000 + i,
+        name: "coherence.report",
+        schemaVersion: 1,
+        stage: "analysis",
+        outcome: "eligible",
+        incidentId,
+        boundaryId,
+        taskKey,
+        surface: "parent_prompt",
+        agents: 2,
+        unchanged: 3,
+        changed: 1,
+        invalidated: 0,
+        unknown: 0,
+        overlapPairs: 1,
+        reportFindings: 2,
+        findingSample: `[{"kind":"changed","path":"src/${i}.js"}]`,
+      });
+      events.push({
+        ts: start + 3000 + i,
+        name: "coherence.report",
+        schemaVersion: 1,
+        stage: "delivery",
+        outcome: "delivered",
+        incidentId,
+        boundaryId,
+        taskKey,
+        surface: "parent_prompt",
+        deliveredChanged: 1,
+        deliveredInvalidated: 0,
+        deliveredOverlapPairs: 1,
+      });
+      events.push({
+        ts: start + 4000 + i,
+        name: "coherence.feedback",
+        schemaVersion: 1,
+        incidentId,
+        verdict: "accurate_useful",
+        reviewedFindings: 1,
+      });
+    }
+    events.push({
+      ts: now,
+      name: "coherence.lifecycle",
+      schemaVersion: 1,
+      taskKey: "ctask_000000000000000000000000",
+      agentKey: "parent_0",
+      stage: "parent_serve",
+      outcome: "written",
+      durationMs: 10,
+    });
+    return events;
+  }
+
+  it("uses Wilson lower bounds and never calls operational health behavioral benefit", () => {
+    assert.ok(wilsonLowerBound(100, 100) > 0.95);
+    const card = coherenceScorecard(matureEvents());
+    assert.equal(card.status, "OPERATIONALLY_READY");
+    assert.equal(card.behavioralBenefit, "NOT_MEASURED");
+    assert.equal(card.lifecycle.multiAgentTasks, 30);
+    assert.equal(card.lifecycle.childSpawnAttempts, 100);
+    assert.equal(card.lifecycle.returnAttempts, 100);
+    assert.equal(card.reports.uniqueEligibleIncidents, 50);
+    assert.equal(card.reports.uniqueDeliveredIncidents, 50);
+    assert.equal(card.reports.findingDeliveryRate, 1);
+    assert.equal(card.safetyReview.reviewedFindings, 50);
+    assert.match(printCoherenceScorecard("/repo", card), /Behavioral benefit: NOT_MEASURED/);
+  });
+
+  it("collapses retry rows by child identity and reports only prepared returns", () => {
+    const base = {
+      name: "coherence.lifecycle",
+      schemaVersion: 1,
+      taskKey: "task_join",
+      durationMs: 2,
+    };
+    const events = [
+      { ...base, ts: 1, stage: "child_spawn", agentKey: "child_a", outcome: "written" },
+      { ...base, ts: 2, stage: "child_spawn", agentKey: "child_a", outcome: "retry" },
+      { ...base, ts: 3, stage: "child_spawn", agentKey: "child_b", outcome: "written" },
+      { ...base, ts: 4, stage: "tool_return", agentKey: "child_a", outcome: "written" },
+      { ...base, ts: 5, stage: "tool_return", agentKey: "child_a", outcome: "retry" },
+      { ...base, ts: 6, stage: "tool_return", agentKey: "orphan", outcome: "written" },
+    ];
+    const card = coherenceScorecard(events);
+    assert.equal(card.lifecycle.childSpawnRows, 3);
+    assert.equal(card.lifecycle.childSpawnAttempts, 2);
+    assert.equal(card.lifecycle.childSpawnDuplicateRowsCollapsed, 1);
+    assert.equal(card.lifecycle.returnRows, 3);
+    assert.equal(card.lifecycle.returnAttempts, 2);
+    assert.equal(card.lifecycle.returnDuplicateRowsCollapsed, 1);
+    assert.equal(card.lifecycle.uniqueChildrenPrepared, 2);
+    assert.equal(card.lifecycle.uniqueChildrenReturned, 2);
+    assert.equal(card.lifecycle.observedChildrenReturned, 1);
+    assert.equal(card.lifecycle.observedReturnRate, 0.5);
+    assert.equal(card.lifecycle.orphanReturns, 1);
+  });
+
+  it("keeps task-scoped child cohorts distinct and never erases a hard failure with a retry", () => {
+    const base = {
+      name: "coherence.lifecycle",
+      schemaVersion: 1,
+      agentKey: "reused_child_key",
+      durationMs: 2,
+    };
+    const card = coherenceScorecard([
+      { ...base, ts: 1, taskKey: "task_one", stage: "child_spawn", outcome: "failed" },
+      { ...base, ts: 2, taskKey: "task_one", stage: "child_spawn", outcome: "retry" },
+      { ...base, ts: 3, taskKey: "task_two", stage: "child_spawn", outcome: "written" },
+      { ...base, ts: 4, taskKey: "task_one", stage: "tool_return", outcome: "written" },
+    ]);
+    assert.equal(card.lifecycle.childSpawnAttempts, 2);
+    assert.equal(card.lifecycle.childSpawnSuccesses, 2);
+    assert.equal(card.lifecycle.uniqueChildrenPrepared, 2);
+    assert.equal(card.lifecycle.observedChildrenReturned, 1);
+    assert.equal(card.lifecycle.observedReturnRate, 0.5);
+    assert.equal(card.lifecycle.hardFailures, 1);
+    assert.equal(card.status, "INVESTIGATE");
+  });
+
+  it("does not let an earlier success erase a later terminal ambiguity", () => {
+    const base = {
+      name: "coherence.lifecycle",
+      schemaVersion: 1,
+      taskKey: "task_terminal",
+      agentKey: "child_terminal",
+      stage: "child_spawn",
+      durationMs: 2,
+    };
+    const card = coherenceScorecard([
+      { ...base, ts: 1, outcome: "written" },
+      { ...base, ts: 2, outcome: "ambiguous", reason: "spawn_identity_ambiguous" },
+    ]);
+    assert.equal(card.lifecycle.childSpawnAttempts, 1);
+    assert.equal(card.lifecycle.childSpawnSuccesses, 0);
+    assert.equal(card.lifecycle.safeWithholds, 1);
+    assert.equal(card.lifecycle.outcomesByStage.child_spawn.ambiguous, 1);
+  });
+
+  it("treats a failed report-analysis denominator as an integrity stop", () => {
+    const card = coherenceScorecard([{
+      ts: 1,
+      name: "coherence.report",
+      schemaVersion: 1,
+      stage: "analysis",
+      surface: "parent_prompt",
+      outcome: "failed",
+      reason: "analysis_exception",
+      boundaryId: "boundary-failed",
+      taskKey: "task-failed",
+      durationMs: 3,
+      reportFindings: 0,
+    }]);
+    assert.equal(card.status, "INVESTIGATE");
+    assert.equal(card.reports.analysisFailures, 1);
+    assert.equal(card.reports.analysisFailureReasons.analysis_exception, 1);
+    assert.match(printCoherenceScorecard("/repo", card), /failed analysis attempts: 1/);
+  });
+
+  it("gates each instrumented latency lane without claiming full-hook cost", () => {
+    const events = matureEvents();
+    const slowAnalysis = events.find(
+      (event) => event.name === "coherence.report" && event.stage === "analysis"
+    );
+    slowAnalysis.durationMs = 1000;
+    const card = coherenceScorecard(events);
+    assert.equal(card.lifecycle.duration.p95, 24);
+    assert.equal(card.reports.analysisDuration.p95, 1000);
+    assert.equal(card.status, "HOLD");
+    assert.ok(card.latency.failures.some((failure) => /reportAnalysis/.test(failure)));
+    assert.match(card.latency.measurementBoundary, /excludes telemetry append and total hook runtime/);
+    assert.equal(card.latency.measuredOperations, undefined);
+    const text = printCoherenceScorecard("/repo", card);
+    assert.match(text, /Latency measurement boundary/);
+    assert.doesNotMatch(text, /Measured Phase-F operation cost/);
+  });
+
+  it("prints a neutral factual-review command without preselecting a verdict", () => {
+    const events = matureEvents().filter((event) => event.name !== "coherence.feedback");
+    const text = printCoherenceScorecard("/repo", coherenceScorecard(events));
+    assert.match(text, /--verdict <verdict> --reviewed-findings 1/);
+    assert.doesNotMatch(text, /--verdict accurate_useful/);
+  });
+
+  it("does not let unclear reviews satisfy the factual-adjudication floor", () => {
+    const events = matureEvents();
+    for (const event of events) {
+      if (event.name === "coherence.feedback") event.verdict = "unclear";
+    }
+    const card = coherenceScorecard(events);
+    assert.equal(card.status, "REVIEW_REQUIRED");
+    assert.equal(card.safetyReview.reviewedFindings, 0);
+    assert.equal(card.safetyReview.reviewedIncidents, 0);
+    assert.equal(card.safetyReview.adjudicatedFindings, 0);
+    assert.equal(card.safetyReview.unclearIncidents, 50);
+    assert.equal(card.safetyReview.verdicts.unclear, 50);
+    assert.equal(card.safetyReview.unreviewedClaimIncidents, 50);
+    assert.match(printCoherenceScorecard("/repo", card), /adjudicated: 0 finding units/);
+  });
+
+  it("dedupes repeated incident ids and a confirmed false fact forces INVESTIGATE", () => {
+    const events = matureEvents();
+    const duplicate = { ...events.find((event) => event.stage === "analysis"), ts: Date.now() - 10 };
+    events.push(duplicate);
+    const before = coherenceScorecard(events);
+    assert.equal(before.reports.uniqueEligibleIncidents, 50);
+    events.push({
+      ts: Date.now(),
+      name: "coherence.feedback",
+      schemaVersion: 1,
+      incidentId: duplicate.incidentId,
+      verdict: "false_fact",
+      reviewedFindings: 1,
+    });
+    const after = coherenceScorecard(events);
+    assert.equal(after.status, "INVESTIGATE");
+    assert.equal(after.safetyReview.falseFacts, 1);
+    events.push({
+      ts: Date.now() + 1,
+      name: "coherence.feedback",
+      schemaVersion: 1,
+      incidentId: duplicate.incidentId,
+      verdict: "accurate_useful",
+      reviewedFindings: 1,
+    });
+    const sticky = coherenceScorecard(events);
+    assert.equal(sticky.status, "INVESTIGATE");
+    assert.equal(sticky.safetyReview.falseFacts, 1);
+  });
+
+  it("is explicitly DORMANT before versioned events arrive", () => {
+    const card = coherenceScorecard([{ ts: Date.now(), name: "coherence.agent_registered" }]);
+    assert.equal(card.status, "DORMANT");
+    assert.match(printCoherenceScorecard("/repo", card), /measurement lane has not observed traffic/);
+  });
+
+  it("can reach PARK_CANDIDATE after the headroom sample without 50 incidents", () => {
+    const events = matureEvents().filter(
+      (event) => event.name === "coherence.lifecycle"
+    );
+    const start = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    for (let i = 0; i < 100; i++) {
+      events.push({
+        ts: start + 10_000 + i,
+        name: "coherence.report",
+        schemaVersion: 1,
+        stage: "analysis",
+        boundaryId: `cboundary_park_${i}`,
+        taskKey: `ctask_${String(i % 30).padStart(24, "0")}`,
+        surface: "parent_prompt",
+        agents: 2,
+        unchanged: 2,
+        changed: 0,
+        invalidated: 0,
+        unknown: 0,
+        overlapPairs: 0,
+      });
+    }
+    const card = coherenceScorecard(events);
+    assert.equal(card.reports.peerAnalyses, 100);
+    assert.equal(card.reports.uniqueEligibleIncidents, 0);
+    assert.equal(card.status, "PARK_CANDIDATE");
+    assert.equal(card.gaps.some((gap) => /eligible incidents/.test(gap)), false);
+  });
+
+  it("never parks a low-headroom cohort whose lifecycle reliability failed", () => {
+    const events = [];
+    const start = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    for (let i = 0; i < 100; i++) {
+      const taskKey = `ctask_${String(i % 30).padStart(24, "0")}`;
+      events.push({
+        ts: start + i,
+        name: "coherence.lifecycle",
+        schemaVersion: 1,
+        stage: "child_spawn",
+        outcome: "missing",
+        taskKey,
+        agentKey: `child_${i}`,
+        durationMs: 2,
+      });
+      events.push({
+        ts: start + 1000 + i,
+        name: "coherence.lifecycle",
+        schemaVersion: 1,
+        stage: "tool_return",
+        outcome: "missing",
+        taskKey,
+        agentKey: `child_${i}`,
+        durationMs: 2,
+      });
+      events.push({
+        ts: start + 2000 + i,
+        name: "coherence.report",
+        schemaVersion: 1,
+        stage: "analysis",
+        boundaryId: `boundary_${i}`,
+        taskKey,
+        agents: 2,
+        unchanged: 2,
+      });
+    }
+    events.push({
+      ts: Date.now(),
+      name: "coherence.lifecycle",
+      schemaVersion: 1,
+      stage: "parent_serve",
+      outcome: "written",
+      taskKey: "ctask_000000000000000000000000",
+      agentKey: "parent",
+      durationMs: 2,
+    });
+    const card = coherenceScorecard(events);
+    assert.equal(card.reports.findingIncidence, 0);
+    assert.equal(card.status, "HOLD");
+    assert.match(card.reasons[0], /lifecycle-reliability/);
+  });
+
+  it("separates raw delivery from intentional overlap-holdback resolution", () => {
+    const base = {
+      ts: Date.now(),
+      name: "coherence.report",
+      schemaVersion: 1,
+      incidentId: "cincident_holdback",
+      boundaryId: "cboundary_holdback",
+      taskKey: "ctask_000000000000000000000001",
+      surface: "parent_prompt",
+    };
+    const card = coherenceScorecard([
+      {
+        ...base,
+        stage: "analysis",
+        agents: 2,
+        changed: 1,
+        invalidated: 0,
+        overlapPairs: 1,
+      },
+      {
+        ...base,
+        stage: "delivery",
+        deliveredChanged: 1,
+        deliveredInvalidated: 0,
+        deliveredOverlapPairs: 0,
+        experimentArm: "holdback",
+      },
+      {
+        ...base,
+        stage: "holdback",
+        heldbackOverlapPairs: 1,
+        heldbackChanged: 0,
+        heldbackInvalidated: 0,
+        experimentArm: "holdback",
+      },
+    ]);
+    assert.equal(card.reports.deliveredFindings, 1);
+    assert.equal(card.reports.findingDeliveryRate, 0.5);
+    assert.equal(card.reports.intentionallyHeldbackFindings, 1);
+    assert.equal(card.reports.resolvedFindings, 2);
+    assert.equal(card.reports.findingResolutionRate, 1);
+    assert.equal(card.reports.incidentResolutionRate, 1);
+    assert.equal(card.reports.boundaryResolutionRate, 1);
+  });
+
+  it("does not hide repeated boundary loss behind canonical incident deduplication", () => {
+    const common = {
+      name: "coherence.report",
+      schemaVersion: 1,
+      incidentId: "cincident_repeat",
+      taskKey: "ctask_repeat",
+      surface: "parent_prompt",
+      agents: 2,
+      changed: 1,
+      invalidated: 0,
+      overlapPairs: 0,
+    };
+    const card = coherenceScorecard([
+      { ...common, ts: 1, stage: "analysis", boundaryId: "boundary_ok" },
+      { ...common, ts: 2, stage: "delivery", boundaryId: "boundary_ok", deliveredChanged: 1 },
+      { ...common, ts: 3, stage: "analysis", boundaryId: "boundary_lost" },
+    ]);
+    assert.equal(card.reports.uniqueEligibleIncidents, 1);
+    assert.equal(card.reports.incidentResolutionRate, 1);
+    assert.equal(card.reports.eligibleBoundaries, 2);
+    assert.equal(card.reports.resolvedBoundaries, 1);
+    assert.equal(card.reports.boundaryResolutionRate, 0.5);
+  });
+
+  it("requires every finding in an incident before calling the incident resolved", () => {
+    const common = {
+      ts: 1,
+      name: "coherence.report",
+      schemaVersion: 1,
+      incidentId: "cincident_partial",
+      boundaryId: "boundary_partial",
+      taskKey: "ctask_partial",
+      surface: "tool_return",
+    };
+    const card = coherenceScorecard([
+      { ...common, stage: "analysis", agents: 2, changed: 2, invalidated: 0, overlapPairs: 0 },
+      { ...common, stage: "delivery", deliveredChanged: 1, deliveredInvalidated: 0, deliveredOverlapPairs: 0 },
+    ]);
+    assert.equal(card.reports.findingResolutionRate, 0.5);
+    assert.equal(card.reports.uniqueResolvedIncidents, 0);
+    assert.equal(card.reports.incidentResolutionRate, 0);
+    assert.equal(card.reports.resolvedBoundaries, 0);
+  });
+
+  function addExperimentWindow(events, options) {
+    const {
+      arm,
+      taskKey,
+      opportunityId,
+      assignmentMode = "randomized",
+      assigned = true,
+      close = true,
+      targetRead = arm === "armed",
+      blindTargetMutation = arm === "holdback",
+    } = options;
+    const common = { schemaVersion: 1, taskKey, arm, assignmentMode };
+    if (assigned) {
+      events.push({
+        ...common,
+        ts: events.length + 1,
+        name: "coherence.experiment.assigned",
+      });
+    }
+    events.push(
+      {
+        ...common,
+        ts: events.length + 1,
+        name: "coherence.overlap.opportunity",
+        opportunityId,
+      },
+      {
+        ...common,
+        ts: events.length + 2,
+        name: "coherence.experiment.window_opened",
+        opportunityId,
+      },
+      {
+        ...common,
+        ts: events.length + 3,
+        name: arm === "armed" ? "coherence.overlap.exposed" : "coherence.overlap.withheld",
+        opportunityId,
+      }
+    );
+    if (close) {
+      events.push({
+        ...common,
+        ts: events.length + 4,
+        name: "coherence.experiment.window_closed",
+        opportunityId,
+        targetRead,
+        targetMutation: true,
+        blindTargetMutation,
+        firstTargetRank: 1,
+        totalTouches: 2,
+      });
+    }
+  }
+
+  it("uses each task's first registered opportunity for the randomized outcome", () => {
+    const events = [];
+    for (const arm of ["armed", "holdback"]) {
+      for (let i = 0; i < 150; i++) {
+        const taskKey = `ctask_${arm === "armed" ? "a" : "b"}${String(i).padStart(23, "0")}`;
+        const opportunityId = `op_${arm}_${i}`;
+        addExperimentWindow(events, {
+          arm,
+          opportunityId,
+          taskKey,
+        });
+        // A later protocol-duplicate opportunity has the opposite outcome. It
+        // remains visible in protocol/attrition counts but must not overwrite
+        // the task's pre-registered first-opportunity outcome.
+        if (i === 0) {
+          addExperimentWindow(events, {
+            arm,
+            taskKey,
+            opportunityId: `${opportunityId}_second`,
+            assigned: false,
+            targetRead: arm !== "armed",
+            blindTargetMutation: arm !== "holdback",
+          });
+        }
+      }
+    }
+    const experiment = coherenceExperimentScorecard(events);
+    assert.equal(experiment.status, "INVESTIGATE");
+    assert.equal(experiment.interpretation, "EXPERIMENT_INTEGRITY_FAILURE");
+    assert.equal(experiment.arms.armed.tasks, 150);
+    assert.equal(experiment.arms.holdback.tasks, 150);
+    assert.equal(experiment.protocol.tasksWithMultipleOpportunities, 2);
+    assert.equal(experiment.protocol.duplicateOpportunityUnits, 2);
+    assert.equal(experiment.blindTargetMutationDeltaHoldbackMinusArmed, 1);
+    assert.equal(experiment.interpretation, "EXPERIMENT_INTEGRITY_FAILURE");
+    assert.match(experiment.outcomeBoundary, /conflicts, task success, and user value are not measured/);
+  });
+
+  it("holds when exact-window attrition is hidden by one closure per task", () => {
+    const events = [];
+    for (const arm of ["armed", "holdback"]) {
+      for (let task = 0; task < 40; task++) {
+        const taskKey = `task_${arm}_${task}`;
+        for (let window = 0; window < 10; window++) {
+          addExperimentWindow(events, {
+            arm,
+            taskKey,
+            opportunityId: `op_${arm}_${task}_${window}`,
+            assigned: window === 0,
+            close: window === 0,
+          });
+        }
+      }
+    }
+    const experiment = coherenceExperimentScorecard(events);
+    assert.equal(experiment.arms.armed.tasks, 40);
+    assert.equal(experiment.arms.armed.registeredOpportunities, 400);
+    assert.equal(experiment.arms.armed.closedWindows, 40);
+    assert.equal(experiment.arms.armed.windowClosureRate, 0.1);
+    assert.equal(experiment.arms.holdback.windowClosureRate, 0.1);
+    assert.equal(experiment.protocol.duplicateOpportunityUnits, 720);
+    assert.equal(experiment.status, "INVESTIGATE");
+    assert.ok(experiment.attritionFailures.some((failure) => /window-closure/.test(failure)));
+  });
+
+  it("excludes forced and missing-assignment-mode rows from causal results", () => {
+    const events = [];
+    addExperimentWindow(events, {
+      arm: "armed",
+      taskKey: "forced_armed",
+      opportunityId: "forced_a",
+      assignmentMode: "forced",
+    });
+    addExperimentWindow(events, {
+      arm: "holdback",
+      taskKey: "forced_holdback",
+      opportunityId: "forced_b",
+      assignmentMode: "forced",
+    });
+    events.push({
+      ts: 100,
+      name: "coherence.overlap.opportunity",
+      schemaVersion: 1,
+      taskKey: "legacy_missing_mode",
+      opportunityId: "legacy",
+      arm: "armed",
+    });
+    const experiment = coherenceExperimentScorecard(events);
+    assert.equal(experiment.status, "DORMANT");
+    assert.equal(experiment.opportunities, 0);
+    assert.equal(experiment.controlLeaks, 0);
+    assert.equal(experiment.forcedTasksExcluded, 2);
+    assert.equal(experiment.missingAssignmentModeEvents, 1);
+  });
+
+  it("forces an experiment integrity stop on arm flips or control leakage", () => {
+    const taskKey = "ctask_000000000000000000000099";
+    const events = [
+      {
+        ts: 1,
+        name: "coherence.experiment.assigned",
+        schemaVersion: 1,
+        taskKey,
+        arm: "armed",
+        assignmentMode: "randomized",
+      },
+      {
+        ts: 2,
+        name: "coherence.experiment.assigned",
+        schemaVersion: 1,
+        taskKey,
+        arm: "holdback",
+        assignmentMode: "randomized",
+      },
+      {
+        ts: 3,
+        name: "coherence.overlap.exposed",
+        schemaVersion: 1,
+        taskKey,
+        arm: "holdback",
+        opportunityId: "leak",
+        assignmentMode: "randomized",
+      },
+    ];
+    const experiment = coherenceExperimentScorecard(events);
+    assert.equal(experiment.status, "INVESTIGATE");
+    assert.equal(experiment.armFlips, 1);
+    assert.equal(experiment.controlLeaks, 1);
+    const card = coherenceScorecard(events);
+    assert.equal(card.status, "INVESTIGATE");
+  });
+
+  it("forces investigation when an active-window file touch was not observed", () => {
+    const events = matureEvents();
+    events.push({
+      ts: Date.now(),
+      name: "coherence.experiment.observation_failed",
+      schemaVersion: 1,
+      operation: "score_touch",
+      reason: "lock_unavailable",
+      activeWindowCount: 0,
+    });
+    const card = coherenceScorecard(events);
+    assert.equal(card.status, "INVESTIGATE");
+    assert.equal(card.experiment.status, "INVESTIGATE");
+    assert.equal(card.experiment.observationFailures, 1);
+    assert.equal(card.experiment.observationFailureReasons.lock_unavailable, 1);
+    assert.match(printCoherenceScorecard("/repo", card), /observation failures 1/);
   });
 });
 
@@ -208,6 +861,82 @@ describe("telemetry CLI: Phase F gate-off retention boundary", () => {
       assert.equal(tailResult.status, 0, tailResult.stderr);
       assert.doesNotMatch(tailResult.stdout, /coherence\./);
       assert.match(tailResult.stdout, /freshness\.fresh_hit/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("telemetry CLI: Phase F factual review", () => {
+  it("records only known, bounded changed/invalidated claim reviews", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-telemetry-review-"));
+    const bin = path.resolve(__dirname, "..", "bin", "intel.js");
+    const incidentId = "cincident_000000000000000000000123";
+    try {
+      fs.writeFileSync(
+        path.join(root, ".codebase-intel.json"),
+        JSON.stringify({ capsule: true, coherence: true })
+      );
+      // A repeated incident may first appear on a boundary whose bounded sample
+      // contains no claim rows. Review capacity must use the best retained
+      // evidence across all joined analyses, not whichever row appears first.
+      telemetry.recordEvent(root, "coherence.report", {
+        schemaVersion: 1,
+        stage: "analysis",
+        incidentId,
+        taskKey: "ctask_000000000000000000000123",
+        changed: 1,
+        invalidated: 1,
+        overlapPairs: 3,
+        findingSample: JSON.stringify([{ kind: "overlap", path: "src/c.js" }]),
+      });
+      telemetry.recordEvent(root, "coherence.report", {
+        schemaVersion: 1,
+        stage: "analysis",
+        incidentId,
+        taskKey: "ctask_000000000000000000000123",
+        changed: 1,
+        invalidated: 1,
+        overlapPairs: 3,
+        findingSample: JSON.stringify([
+          { kind: "changed", path: "src/a.js" },
+          { kind: "invalidated", path: "src/b.js" },
+          { kind: "overlap", path: "src/c.js" },
+        ]),
+      });
+      const run = (...args) => spawnSync(
+        process.execPath,
+        [bin, "telemetry", "--root", root, ...args],
+        {
+          cwd: root,
+          encoding: "utf8",
+          timeout: 30000,
+          env: { ...process.env, SEXTANT_CAPSULE: "1", SEXTANT_COHERENCE: "1" },
+        }
+      );
+      const accepted = run(
+        "--review", incidentId,
+        "--verdict", "accurate_useful",
+        "--reviewed-findings", "2"
+      );
+      assert.equal(accepted.status, 0, accepted.stderr);
+      const feedback = telemetry.readEvents(root).find(
+        (event) => event.name === "coherence.feedback"
+      );
+      assert.equal(feedback.incidentId, incidentId);
+      assert.equal(feedback.reviewedFindings, 2);
+
+      const inflated = run(
+        "--review", incidentId,
+        "--verdict", "accurate_useful",
+        "--reviewed-findings", "3"
+      );
+      assert.notEqual(inflated.status, 0);
+      assert.match(inflated.stderr, /exceeds the 2 changed\/invalidated/);
+      assert.equal(
+        telemetry.readEvents(root).filter((event) => event.name === "coherence.feedback").length,
+        1
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

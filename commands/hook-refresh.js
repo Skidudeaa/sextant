@@ -15,6 +15,14 @@ const { mergeResults } = require("../lib/merge-results");
 const { formatRetrievalDetailed } = require("../lib/format-retrieval");
 const { recordEvent } = require("../lib/telemetry");
 
+function recordExperimentEvents(root, events) {
+  for (const event of events || []) {
+    if (!event || typeof event.name !== "string") continue;
+    const { name, ...payload } = event;
+    recordEvent(root, name, payload);
+  }
+}
+
 // OUTCOME SUBSTRATE (009 #1): build the {path, source} set persisted per session
 // so a later PostToolUse hook can score whether the agent opened/edited what
 // retrieval surfaced. source = the signal that SURFACED the file (graphSignal:
@@ -153,7 +161,11 @@ function sameValidatedRepo(validated, current) {
  * call is async).  All three callers in this file already run inside the
  * async run() flow.
  */
-async function injectStaticSummary(root, data, contextPrefix = "") {
+async function injectStaticSummary(root, data, contextPrefix = "", onResult = null) {
+  const finish = (status, value) => {
+    try { if (typeof onResult === "function") onResult(status); } catch {}
+    return value;
+  };
   const summaryPath = path.join(root, ".planning", "intel", "summary.md");
   let summary = "";
   let structuralValidation = null;
@@ -166,7 +178,7 @@ async function injectStaticSummary(root, data, contextPrefix = "") {
   summary = gated.body;
   // A claim retraction is independently useful and safe even when no static
   // summary exists. It may therefore be the entire hook output.
-  if (!summary && !contextPrefix) return false;
+  if (!summary && !contextPrefix) return finish("empty", false);
 
   const sessionKey = deriveSessionKey(data);
   const cachePath = path.join(
@@ -187,23 +199,27 @@ async function injectStaticSummary(root, data, contextPrefix = "") {
     .digest("hex");
   const last = tryReadFile(cachePath);
 
-  if (last === h) return false;
+  if (last === h) return finish("deduped", false);
 
   const summaryBlock = summary
     ? `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${stripUnsafeXmlTags(summary)}\n</codebase-intelligence>`
     : "";
   if (structuralValidation && !(await boundSummaryStillValid(root, structuralValidation))) {
     recordEvent(root, "freshness.summary_withheld", { reason: "publication_moved" });
-    return false;
+    return finish("publication_moved", false);
   }
   // Emit before committing the dedupe marker. If stdout fails, the next prompt
   // must still be eligible to deliver the summary/retraction rather than see a
   // ghost hash for context that never crossed the output boundary.
-  process.stdout.write(contextPrefix + summaryBlock);
+  try {
+    process.stdout.write(contextPrefix + summaryBlock);
+  } catch {
+    return finish("stdout_failed", false);
+  }
   try {
     fs.writeFileSync(cachePath, h);
   } catch {}
-  return true;
+  return finish("delivered", true);
 }
 
 /**
@@ -252,6 +268,17 @@ async function run() {
     rawPrompt.length > MAX_PROMPT_BYTES ? rawPrompt.slice(-MAX_PROMPT_BYTES) : rawPrompt;
 
   const sessionKey = deriveSessionKey(data);
+  // A new parent prompt is the pre-registered end of every prior overlap
+  // outcome window. Close before opening a possible new opportunity below.
+  try {
+    const experiment = require("../lib/coherence-experiment");
+    if (experiment.hasActiveExposure(root, sessionKey)) {
+      recordExperimentEvents(
+        root,
+        experiment.closeExposure(root, sessionKey, { reason: "next_prompt" })
+      );
+    }
+  } catch {}
   const capsuleOn = capsuleEnabled(root);
   let contextDelta = "";
   let contextDeltaMeta = null;
@@ -288,20 +315,47 @@ async function run() {
   // writer. Running children have no push channel, so this lands at the next
   // parent UserPromptSubmit (this hook) or spawn/join surface.
   let coherenceMeta = null;
+  let coherenceAnalysisMeta = null;
   let coherenceTaskId = null;
   let parentKey = null;
+  let coherenceAnalysisAttempt = null;
+  let coherenceAnalysisRecorded = false;
   try {
     const coherence = require("../lib/coherence");
     if (coherence.coherenceEnabled(root)) {
+      const metrics = require("../lib/coherence-metrics");
+      const analysisStarted = Date.now();
+      const boundaryId = metrics.randomBoundaryId();
+      coherenceTaskId = "task_" + require("../lib/capsule").shortHash(sessionKey);
+      coherenceAnalysisAttempt = {
+        metrics,
+        startedAt: analysisStarted,
+        boundaryId,
+        taskId: coherenceTaskId,
+        surface: "parent_prompt",
+      };
       const cap = require("../lib/capsule").readCapsule(root, sessionKey);
       coherenceTaskId = cap && cap.taskId
         ? cap.taskId
-        : "task_" + require("../lib/capsule").shortHash(sessionKey);
+        : coherenceTaskId;
+      coherenceAnalysisAttempt.taskId = coherenceTaskId;
       parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
       const result = coherence.analyzeCoherence(root, {
         taskId: coherenceTaskId,
         currentAgentKey: parentKey,
       });
+      const analysis = metrics.buildAnalysisPayload(result, {
+        boundaryId,
+        surface: "parent_prompt",
+      });
+      recordEvent(root, "coherence.report", {
+        ...analysis,
+        stage: "analysis",
+        outcome: analysis.reportFindings > 0 ? "eligible" : "none",
+        durationMs: Math.max(0, Date.now() - analysisStarted),
+      });
+      coherenceAnalysisRecorded = true;
+      if (analysis.reportFindings > 0) coherenceAnalysisMeta = analysis;
       if (coherence.hasFindings(result)) {
         const crossGroups = (result.agentClaims || []).filter(
           (g) => !parentKey || g.agentKey !== parentKey
@@ -313,7 +367,109 @@ async function run() {
           invalidated: crossGroups.reduce((n, g) => n + (g.invalidated || []).length, 0),
           surface: "parent_prompt",
         });
-        const rendered = coherence.renderCoherenceDetailed(result, { maxChars: 800 });
+        const wouldRender = coherence.renderCoherenceDetailed(result, { maxChars: 800 });
+        let experimentMeta = null;
+        if (wouldRender.delivered.overlapPairs > 0 && wouldRender.overlapPaths.length > 0) {
+          const experiment = require("../lib/coherence-experiment");
+          const paths = experiment.eligiblePaths({
+            overlaps: [{ sharedPaths: wouldRender.overlapPaths }],
+          });
+          const assignment = experiment.assignArm(coherenceTaskId, {
+            config: require("../lib/config").loadRepoConfig(root),
+            env: process.env,
+            force: data && data._coherenceHoldbackForce,
+          });
+          const opportunityId = experiment.opportunityKey(
+            analysis.incidentId,
+            "parent_prompt"
+          );
+          if (assignment.enabled && opportunityId && paths.length > 0) {
+            const candidate = {
+              schemaVersion: 1,
+              experiment: experiment.EXPERIMENT_NAME,
+              opportunityId,
+              incidentId: analysis.incidentId,
+              taskKey: assignment.taskKey,
+              arm: assignment.arm,
+              assignmentMode: assignment.assignmentMode,
+              surface: "parent_prompt",
+              targetPathCount: paths.length,
+              eligibleOverlapPairs: wouldRender.delivered.overlapPairs,
+              paths,
+            };
+            // `assigned` is the intention-to-treat denominator. Keep it before
+            // state enrollment so lock/write failure is visible as attrition.
+            recordEvent(root, "coherence.experiment.assigned", {
+              schemaVersion: 1,
+              experiment: experiment.EXPERIMENT_NAME,
+              taskKey: assignment.taskKey,
+              arm: assignment.arm,
+              assignmentMode: assignment.assignmentMode,
+              holdbackPct: assignment.holdbackPct,
+            });
+            // Enroll both randomized arms at the same analysis boundary. Actual
+            // treatment compliance is recorded separately as exposed/withheld;
+            // output failure therefore cannot select one arm out of the cohort.
+            const exposureEvents = experiment.openExposure(root, sessionKey, {
+              enabled: true,
+              opportunityId,
+              taskKey: assignment.taskKey,
+              arm: assignment.arm,
+              assignmentMode: assignment.assignmentMode,
+              surface: "parent_prompt",
+              paths,
+            });
+            const enrolled = exposureEvents.some(
+              (event) => event && event.name === experiment.EVENT_OPENED &&
+                event.opportunityId === opportunityId
+            );
+            if (enrolled) {
+              experimentMeta = candidate;
+              const { paths: ignoredPaths, ...opportunity } = experimentMeta;
+              recordEvent(root, "coherence.overlap.opportunity", opportunity);
+            } else {
+              const activeHoldback = experiment.activeHoldbackEvent(
+                exposureEvents,
+                assignment.taskKey
+              );
+              if (activeHoldback) {
+                // The first registered opportunity owns the outcome window.
+                // Keep its control policy sealed on deduped reports without
+                // creating a second opportunity, holdback, or compliance row.
+                experimentMeta = {
+                  ...candidate,
+                  opportunityId: activeHoldback.enrolledOpportunityId,
+                  arm: "holdback",
+                  assignmentMode: activeHoldback.activeAssignmentMode || assignment.assignmentMode,
+                  continuedHoldback: true,
+                };
+              }
+            }
+            recordExperimentEvents(root, exposureEvents);
+            if (experimentMeta && experimentMeta.arm === "holdback") {
+              const { paths: ignoredPaths, ...opportunity } = experimentMeta;
+              recordEvent(root, "coherence.report", {
+                schemaVersion: 1,
+                incidentId: analysis.incidentId,
+                boundaryId,
+                taskKey: assignment.taskKey,
+                surface: "parent_prompt",
+                stage: "holdback",
+                outcome: "intentional_overlap_holdback",
+                experiment: experiment.EXPERIMENT_NAME,
+                experimentArm: "holdback",
+                continuedHoldback: experimentMeta.continuedHoldback === true,
+                heldbackOverlapPairs: wouldRender.delivered.overlapPairs,
+                heldbackChanged: 0,
+                heldbackInvalidated: 0,
+              });
+              if (enrolled) recordEvent(root, "coherence.overlap.withheld", opportunity);
+            }
+          }
+        }
+        const rendered = experimentMeta && experimentMeta.arm === "holdback"
+          ? coherence.renderCoherenceDetailed(result, { maxChars: 800, includeOverlaps: false })
+          : wouldRender;
         const text = rendered.text;
         if (text) {
           coherenceMeta = {
@@ -324,6 +480,20 @@ async function run() {
               invalidated: rendered.delivered.invalidated,
               surface: "parent_prompt",
             },
+            v1: {
+              ...metrics.buildDeliveryPayload(result, rendered.delivered, {
+                boundaryId,
+                surface: "parent_prompt",
+              }),
+              stage: "delivery",
+              outcome: "delivered",
+              reportBytes: Buffer.byteLength(text, "utf8"),
+              experiment: experimentMeta && experimentMeta.experiment,
+              experimentArm: experimentMeta && experimentMeta.arm,
+            },
+            experiment: experimentMeta && experimentMeta.arm === "armed"
+              ? experimentMeta
+              : null,
           };
           contextPrefix +=
             `<sextant-agent-coherence>\n${stripUnsafeXmlTags(text)}\n` +
@@ -332,11 +502,44 @@ async function run() {
       }
     }
   } catch {
+    try {
+      if (coherenceAnalysisAttempt && !coherenceAnalysisRecorded) {
+        recordEvent(root, "coherence.report", {
+          ...coherenceAnalysisAttempt.metrics.buildFailedAnalysisPayload({
+            taskId: coherenceAnalysisAttempt.taskId,
+            boundaryId: coherenceAnalysisAttempt.boundaryId,
+            surface: coherenceAnalysisAttempt.surface,
+          }),
+          stage: "analysis",
+          outcome: "failed",
+          reason: "analysis_exception",
+          durationMs: Math.max(0, Date.now() - coherenceAnalysisAttempt.startedAt),
+        });
+      } else if (coherenceAnalysisRecorded && coherenceAnalysisMeta) {
+        recordEvent(root, "coherence.report", {
+          schemaVersion: 1,
+          incidentId: coherenceAnalysisMeta.incidentId,
+          boundaryId: coherenceAnalysisMeta.boundaryId,
+          taskKey: coherenceAnalysisMeta.taskKey,
+          surface: "parent_prompt",
+          stage: "suppression",
+          outcome: "not_delivered",
+          reason: "report_pipeline_exception",
+        });
+      }
+    } catch {}
     coherenceMeta = null;
   }
 
   const recordCoherenceDelivered = () => {
-    if (coherenceMeta) recordEvent(root, "coherence.delta_delivered", coherenceMeta.delivered);
+    if (coherenceMeta) {
+      recordEvent(root, "coherence.delta_delivered", coherenceMeta.delivered);
+      if (coherenceMeta.v1) recordEvent(root, "coherence.report", coherenceMeta.v1);
+      if (coherenceMeta.experiment) {
+        const { paths, ...event } = coherenceMeta.experiment;
+        recordEvent(root, "coherence.overlap.exposed", event);
+      }
+    }
   };
   const recordContextDeltaDelivered = () => {
     if (contextDeltaMeta) recordEvent(root, "contextdelta.emitted", contextDeltaMeta);
@@ -344,6 +547,53 @@ async function run() {
   const recordPrefixDelivered = () => {
     recordContextDeltaDelivered();
     recordCoherenceDelivered();
+  };
+  let coherenceBoundaryOutcomeRecorded = false;
+  const recordCoherenceBoundaryOutcome = (status) => {
+    if (coherenceBoundaryOutcomeRecorded || !coherenceAnalysisMeta) return;
+    if (status === "deduped" && coherenceMeta && coherenceMeta.v1) {
+      coherenceBoundaryOutcomeRecorded = true;
+      recordEvent(root, "coherence.report", {
+        schemaVersion: 1,
+        incidentId: coherenceAnalysisMeta.incidentId,
+        boundaryId: coherenceAnalysisMeta.boundaryId,
+        taskKey: coherenceAnalysisMeta.taskKey,
+        surface: "parent_prompt",
+        stage: "dedupe",
+        outcome: "already_delivered",
+        dedupedChanged: coherenceMeta.v1.deliveredChanged,
+        dedupedInvalidated: coherenceMeta.v1.deliveredInvalidated,
+        dedupedOverlapPairs: coherenceMeta.v1.deliveredOverlapPairs,
+      });
+    } else if (["publication_moved", "stdout_failed"].includes(status)) {
+      coherenceBoundaryOutcomeRecorded = true;
+      recordEvent(root, "coherence.report", {
+        schemaVersion: 1,
+        incidentId: coherenceAnalysisMeta.incidentId,
+        boundaryId: coherenceAnalysisMeta.boundaryId,
+        taskKey: coherenceAnalysisMeta.taskKey,
+        surface: "parent_prompt",
+        stage: "suppression",
+        outcome: "not_delivered",
+        reason: status,
+      });
+    }
+  };
+  const injectStaticWithPrefix = async () => {
+    let status = "empty";
+    const delivered = await injectStaticSummary(
+      root,
+      data,
+      contextPrefix,
+      (value) => { status = value; }
+    );
+    if (delivered) {
+      coherenceBoundaryOutcomeRecorded = true;
+      recordPrefixDelivered();
+    } else {
+      recordCoherenceBoundaryOutcome(status);
+    }
+    return delivered;
   };
 
   // 1. Classify
@@ -354,7 +604,7 @@ async function run() {
     // Classifier failed — fall back to static summary.  No telemetry here:
     // the classifier threw, so there's no classification decision to record;
     // this is the degraded path, distinct from a deliberate retrieve:false.
-    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
+    await injectStaticWithPrefix();
     return;
   }
 
@@ -374,7 +624,7 @@ async function run() {
 
   if (!classification.retrieve) {
     // Non-code prompt — inject static summary if changed
-    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
+    await injectStaticWithPrefix();
     await statusLinePromise;
     return;
   }
@@ -607,7 +857,7 @@ async function run() {
     // retrieval.classified{retrieve:true} count gives the empty-injection rate
     // that surfaces NL-recall regressions (cf. the A4 gap).
     recordEvent(root, "retrieval.empty_fallback", {});
-    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
+    await injectStaticWithPrefix();
     await statusLinePromise;
     return;
   }
@@ -636,7 +886,7 @@ async function run() {
       paths: injectedPaths,
     });
     recordEvent(root, "retrieval.holdback", { fileCount: injectedPaths.length });
-    if (await injectStaticSummary(root, data, contextPrefix)) recordPrefixDelivered();
+    await injectStaticWithPrefix();
     await statusLinePromise;
     return;
   }
@@ -668,6 +918,7 @@ async function run() {
   const last = tryReadFile(cachePath);
 
   if (last === h) {
+    recordCoherenceBoundaryOutcome("deduped");
     await statusLinePromise;
     return;
   }
@@ -688,6 +939,7 @@ async function run() {
           recordEvent(root, "coherence.skipped", { reason: "fingerprint_moved" });
         }
       } catch {}
+      recordCoherenceBoundaryOutcome("publication_moved");
       await statusLinePromise;
       return;
     }
@@ -704,6 +956,7 @@ async function run() {
   try {
     process.stdout.write(`${contextPrefix}<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
   } catch {
+    recordCoherenceBoundaryOutcome("stdout_failed");
     await statusLinePromise;
     return;
   }
@@ -796,9 +1049,14 @@ async function run() {
   });
 
   if (parentSnapshotToPersist) {
+    const lifecycleStarted = Date.now();
+    let lifecycleOutcome = "failed";
+    let lifecycleReason = "snapshot_write_failed";
     try {
       const coherence = require("../lib/coherence");
       if (coherence.writeSnapshot(root, parentSnapshotToPersist)) {
+        lifecycleOutcome = "written";
+        lifecycleReason = null;
         recordEvent(root, "coherence.agent_registered", {
           kind: "parent",
           state: parentSnapshotToPersist.state,
@@ -806,7 +1064,33 @@ async function run() {
         });
       }
     } catch {}
+    try {
+      const metrics = require("../lib/coherence-metrics");
+      const roles = ["primary", "support", "witnesses", "context"];
+      const worksetPaths = roles.reduce(
+        (total, role) => total + (
+          parentSnapshotToPersist.workset && Array.isArray(parentSnapshotToPersist.workset[role])
+            ? parentSnapshotToPersist.workset[role].length
+            : 0
+        ),
+        0
+      );
+      recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
+        taskId: parentSnapshotToPersist.taskId,
+        agentKey: parentSnapshotToPersist.agentKey,
+        stage: "parent_serve",
+        kind: "parent",
+        state: parentSnapshotToPersist.state,
+        outcome: lifecycleOutcome,
+        reason: lifecycleReason,
+        generation: parentSnapshotToPersist.generation,
+        claims: parentSnapshotToPersist.servedClaims.length,
+        worksetPaths,
+        durationMs: Date.now() - lifecycleStarted,
+      }));
+    } catch {}
   }
+  coherenceBoundaryOutcomeRecorded = true;
   recordPrefixDelivered();
   await statusLinePromise;
 }

@@ -48,6 +48,41 @@ function sameValidatedRepo(validated, current) {
   );
 }
 
+// Orientation is upstream of the Phase-F snapshot path, but it is still part
+// of the spawn pipeline whose reliability the scorecard gates. Record these
+// early exits so the denominator is not selected only after Lane A succeeds.
+function recordUnavailableSpawnLifecycle(root, data, outcome, reason, startedAt) {
+  try {
+    const coherence = require("../lib/coherence");
+    if (!coherence.coherenceEnabled(root)) return;
+    const { deriveSessionKey, rawSessionIdentity } = require("../lib/session");
+    const capsuleLib = require("../lib/capsule");
+    const parentSessionKey = deriveSessionKey(data);
+    const rootCapsule = capsuleLib.readCapsule(root, parentSessionKey);
+    const taskId = rootCapsule && rootCapsule.taskId
+      ? rootCapsule.taskId
+      : "task_" + capsuleLib.shortHash(parentSessionKey);
+    const toolUseId = typeof data.tool_use_id === "string" ? data.tool_use_id : "";
+    const parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
+    const childKey = coherence.childAgentKey(parentKey, toolUseId);
+    const metrics = require("../lib/coherence-metrics");
+    recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
+      taskId,
+      agentKey: childKey,
+      parentAgentKey: parentKey,
+      stage: "child_spawn",
+      kind: "child",
+      state: "orientation_unavailable",
+      outcome,
+      reason,
+      generation: 0,
+      claims: 0,
+      worksetPaths: 0,
+      durationMs: Date.now() - startedAt,
+    }));
+  } catch {}
+}
+
 async function run() {
   try {
     const root = process.cwd();
@@ -74,11 +109,31 @@ async function run() {
       return;
     }
 
+    const orientationStarted = Date.now();
     const { buildOrientationBlock, ORIENT_MAX_BYTES } = require("../lib/orient");
-    const built = await buildOrientationBlock(root, ti.prompt);
+    let built;
+    try {
+      built = await buildOrientationBlock(root, ti.prompt);
+    } catch {
+      recordUnavailableSpawnLifecycle(
+        root,
+        data,
+        "failed",
+        "orientation_exception",
+        orientationStarted
+      );
+      return;
+    }
     if (!built) {
       // Silent absence: content-stale graph / no graph / internal error.
       recordEvent(root, "pretask.skipped", { reason: "no_block" });
+      recordUnavailableSpawnLifecycle(
+        root,
+        data,
+        "withheld",
+        "orientation_unavailable",
+        orientationStarted
+      );
       return;
     }
 
@@ -88,6 +143,8 @@ async function run() {
     let coherenceSkipReason = null;
     let coherenceReportMeta = null;
     let coherenceEligibleMeta = null;
+    let coherenceReportV1 = null;
+    let recordCoherenceLifecycle = null;
 
     // PHASE F — a child capsule is the immutable record of facts this hook
     // prepared for one Agent/Task spawn. It does not prove the tool accepted
@@ -102,14 +159,37 @@ async function run() {
         const parentSessionKey = deriveSessionKey(data);
         const parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
         const childKey = coherence.childAgentKey(parentKey, toolUseId);
+        const capsuleLib = require("../lib/capsule");
+        const rootCapsule = capsuleLib.readCapsule(root, parentSessionKey);
+        const taskId = rootCapsule && rootCapsule.taskId
+          ? rootCapsule.taskId
+          : "task_" + capsuleLib.shortHash(parentSessionKey);
+        const metrics = require("../lib/coherence-metrics");
+        let lifecycleRecorded = false;
+        recordCoherenceLifecycle = (outcome, reason, state = "spawn_prepared") => {
+          if (lifecycleRecorded) return;
+          lifecycleRecorded = true;
+          recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
+            taskId,
+            agentKey: childKey,
+            parentAgentKey: parentKey,
+            stage: "child_spawn",
+            kind: "child",
+            state,
+            outcome,
+            reason,
+            generation: snapshot && snapshot.generation,
+            claims: snapshot && Array.isArray(snapshot.servedClaims)
+              ? snapshot.servedClaims.length
+              : 0,
+            worksetPaths: built.taskFiles.length,
+            durationMs: Date.now() - orientationStarted,
+          }));
+        };
         if (!childKey) {
           recordEvent(root, "coherence.skipped", { reason: "no_spawn_id" });
+          recordCoherenceLifecycle("missing", "no_spawn_id", null);
         } else {
-          const capsuleLib = require("../lib/capsule");
-          const rootCapsule = capsuleLib.readCapsule(root, parentSessionKey);
-          const taskId = rootCapsule && rootCapsule.taskId
-            ? rootCapsule.taskId
-            : "task_" + capsuleLib.shortHash(parentSessionKey);
           const workset = coherence.contextPathWorkset(built.taskFiles || []);
           const servedClaims = require("../lib/claims").mintClaims(root, built.taskFiles || [], {
             nowMs: Date.now(),
@@ -138,6 +218,8 @@ async function run() {
           // The candidate consumes one of the bounded 64 report identities,
           // including when an exact retry sits outside the newest peers.
           const maxPeers = 63;
+          const reportBoundaryId = metrics.randomBoundaryId();
+          const reportStarted = Date.now();
           const existing = coherence.listSnapshots(root, { taskId, max: maxPeers });
           const analyzed = coherence.analyzeCoherence(root, {
             taskId,
@@ -167,6 +249,19 @@ async function run() {
             childKey,
             ...existing.map((entry) => entry.agentKey),
           ]).size;
+          if (!(analyzed.agents || []).some((agent) => agent.agentKey === childKey)) {
+            analyzed.agents = [
+              ...(analyzed.agents || []),
+              {
+                agentKey: childKey,
+                parentAgentKey: parentKey,
+                kind: "child",
+                agentType: snapshot.agentType,
+                state: snapshot.state,
+                createdAt: snapshot.createdAt,
+              },
+            ];
+          }
 
           if (coherence.hasFindings(analyzed)) {
             const crossGroups = analyzed.agentClaims.filter((g) => g.agentKey !== childKey);
@@ -200,18 +295,51 @@ async function run() {
                     invalidated: rendered.delivered.invalidated,
                     surface: "child_spawn",
                   };
+                  coherenceReportV1 = {
+                    ...metrics.buildDeliveryPayload(analyzed, rendered.delivered, {
+                      boundaryId: reportBoundaryId,
+                      surface: "child_spawn",
+                    }),
+                    stage: "delivery",
+                    outcome: "delivered",
+                    reportBytes: Buffer.byteLength(safeReport, "utf8"),
+                  };
                 }
               }
             }
           }
 
+          const analysis = metrics.buildAnalysisPayload(analyzed, {
+            boundaryId: reportBoundaryId,
+            surface: "child_spawn",
+          });
+          recordEvent(root, "coherence.report", {
+            ...analysis,
+            stage: "analysis",
+            outcome: analysis.reportFindings > 0 ? "eligible" : "none",
+            durationMs: Math.max(0, Date.now() - reportStarted),
+          });
+
         }
       }
     } catch {
       // Phase F absence must never endanger the proven Lane-A spawn rewrite.
+      if (recordCoherenceLifecycle) {
+        recordCoherenceLifecycle("failed", "phase_f_exception");
+      } else {
+        recordUnavailableSpawnLifecycle(
+          root,
+          data,
+          "failed",
+          "phase_f_setup_exception",
+          orientationStarted
+        );
+      }
       snapshot = null;
       appended = built.block;
       coherenceEligibleMeta = null;
+      coherenceReportMeta = null;
+      coherenceReportV1 = null;
     }
 
     // Serialize both possible outputs before registration. The atomic
@@ -242,6 +370,9 @@ async function run() {
           .digest("hex");
       }
     } catch {
+      if (recordCoherenceLifecycle) {
+        recordCoherenceLifecycle("failed", "serialization_failed");
+      }
       return;
     }
 
@@ -257,17 +388,20 @@ async function run() {
         ambiguitySnapshot = true;
         coherenceSkipReason = "spawn_id_reused";
         coherenceReportMeta = null;
+        coherenceReportV1 = null;
         coherenceEligibleMeta = null;
         out = laneOut;
       } else if (registration.status === "withheld") {
         ambiguitySnapshot = true;
         coherenceSkipReason = "spawn_preparation_withheld";
         coherenceReportMeta = null;
+        coherenceReportV1 = null;
         coherenceEligibleMeta = null;
         out = laneOut;
       } else if (registration.status === "failed") {
         coherenceSkipReason = "snapshot_write_failed";
         coherenceReportMeta = null;
+        coherenceReportV1 = null;
         coherenceEligibleMeta = null;
         out = laneOut;
       } else if (registration.status === "moved") {
@@ -276,6 +410,9 @@ async function run() {
         // original tool call byte-for-byte.
         recordEvent(root, "pretask.skipped", { reason: "fingerprint_moved" });
         recordEvent(root, "coherence.skipped", { reason: "fingerprint_moved" });
+        if (recordCoherenceLifecycle) {
+          recordCoherenceLifecycle("moved", "fingerprint_moved");
+        }
         return;
       }
     }
@@ -298,17 +435,30 @@ async function run() {
         recordEvent(root, "pretask.skipped", { reason: "fingerprint_moved" });
         if (snapshot) {
           recordEvent(root, "coherence.skipped", { reason: "fingerprint_moved" });
+          if (recordCoherenceLifecycle) {
+            recordCoherenceLifecycle("moved", "fingerprint_moved", "spawn_withheld");
+          }
         }
         return;
       }
     } catch {
+      if (recordCoherenceLifecycle) {
+        recordCoherenceLifecycle("failed", "fingerprint_check_failed");
+      }
       return;
     }
 
     // The persisted boundary means "prepared by this hook", not proof that
     // the tool or child received it. Emit immediately after the atomic identity
     // and freshness decision; all telemetry follows the stdout boundary.
-    process.stdout.write(out);
+    try {
+      process.stdout.write(out);
+    } catch {
+      if (recordCoherenceLifecycle) {
+        recordCoherenceLifecycle("failed", "stdout_failed", "spawn_withheld");
+      }
+      return;
+    }
     recordEvent(root, "pretask.injected", {
       subagentType: typeof ti.subagent_type === "string" ? ti.subagent_type : null,
       bytes: built.bytes,
@@ -324,6 +474,18 @@ async function run() {
           agentType: snapshot.agentType,
         });
       }
+      if (recordCoherenceLifecycle) {
+        const outcome = registration && registration.status === "written"
+          ? "written"
+          : registration && registration.status === "retry"
+            ? "retry"
+            : registration && registration.status === "ambiguous"
+              ? "ambiguous"
+              : registration && registration.status === "withheld"
+                ? "withheld"
+                : "failed";
+        recordCoherenceLifecycle(outcome, coherenceSkipReason);
+      }
     }
     if (coherenceSkipReason) {
       recordEvent(root, "coherence.skipped", { reason: coherenceSkipReason });
@@ -333,6 +495,7 @@ async function run() {
     }
     if (coherenceReportMeta && !ambiguitySnapshot) {
       recordEvent(root, "coherence.delta_delivered", coherenceReportMeta);
+      if (coherenceReportV1) recordEvent(root, "coherence.report", coherenceReportV1);
     }
   } catch {
     // never-modify-on-doubt: silence = unmodified Task call.

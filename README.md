@@ -211,7 +211,7 @@ There is no channel that both the user and Claude see simultaneously.
 - **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; dirty-file bytes and stabilized HEAD/status captures close repeated-edit races, while a graph-generation manifest binds exact `summary.md` bytes to the graph validated for SessionStart/refresh/inject/summary. Missing manifests self-heal from a fresh graph; stale graphs enqueue an atomic single-flight rescan
 - **Adaptive sync rescan** -- when a repo's own recorded scan history proves rescans are fast (p95 ≤ 2.5s over ≥5 scans), a stale read runs the rescan *inside* the hook and injects a fresh body instead of the minimal one — ~1–2s of prompt latency instead of an orientation-less turn. Evidence-based per repo; slow or unknown repos keep the background path unchanged
 - **Subagent orientation** -- subagents (Task/Agent tool) receive no hook injection of their own; a PreToolUse hook appends a compact facts-only orientation block (repo, health, hotspots, task-relevant files) to the spawning prompt, byte-capped and freshness-gated. Paired with the `sextant_orient` MCP tool for on-demand pulls
-- **Task and multi-agent coherence** -- optional Task Capsules preserve the role-based workset and served claims; an independently opt-in Phase-F layer records immutable parent-delivered and child-spawn-prepared snapshots, re-checks each recorded agent's claims, and reports exact recorded workset overlap. Visibility only: integrity locks and fail-closed contention markers protect observation-state transitions, never code/work ownership, edit attribution, or coordination
+- **Task and multi-agent coherence** -- optional Task Capsules preserve the role-based workset and served claims; an independently opt-in Phase-F layer records immutable parent-delivered and child-spawn-prepared snapshots, re-checks each recorded agent's claims, and reports exact recorded workset overlap. Schema-v1 lifecycle/report telemetry, factual review, and a sticky overlap-only holdback on parent-visible prompt/return reports provide a conservative decision scorecard ([docs/032](docs/032-decision-grade-coherence-telemetry.md)). The experiment scores only parent `Read`/`Edit`/`Write`/`MultiEdit`/`NotebookEdit` calls; child actions and Bash/script mutations are outside its outcome boundary. Visibility only: integrity locks and fail-closed contention markers protect observation-state transitions, never code/work ownership, edit attribution, or coordination
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
 - **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
 - **Query-aware hooks** -- classifies each prompt, retrieves code-relevant context in <200ms
@@ -243,7 +243,9 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |
 | `sextant inject` | Print the current `<codebase-intelligence>` body to stdout (freshness-gated, same contract as the hooks) |
 | `sextant update --file <relPath>` | Re-extract a single file and update the graph (used by the watcher; useful for ad-hoc reindex) |
-| `sextant telemetry [--json \| --tail N] [--include-old]` | Audit the dataset: stale rate, scan percentiles, open-precision + per-arm holdback `benefitDelta` |
+| `sextant telemetry [--json \| --tail N] [--include-old] [--days N]` | Audit the dataset: stale rate, scan percentiles, open-precision + per-arm holdback `benefitDelta` |
+| `sextant telemetry --coherence-scorecard [--days N] [--json]` | Decision-grade Phase-F lifecycle, delivery, factual-safety, and overlap-experiment scorecard |
+| `sextant telemetry --review <incidentId> --verdict <verdict> --reviewed-findings N` | Record a manual factual review (`accurate_useful`, `accurate_noise`, `false_fact`, or `unclear`) for a known coherence incident |
 | `sextant eval-trajectory [--json] [--repo <name>] [--size-matched]` | Replay real session history → retrieval open-rate lift vs a permutation null (the benefit proof) |
 | `sextant tune [--json] [--repo <name>]` | Reporting-only per-source open-rate diagnostics from trajectory replay (Wilson intervals; no scoring weight reads it) |
 | `sextant zoekt <index\|serve\|search>` | Manage Zoekt code search (optional) |
@@ -268,6 +270,7 @@ Optional `.codebase-intel.json` at project root:
   "syncRescan": true,
   "capsule": false,
   "coherence": false,
+  "coherenceHoldbackPct": 0,
   "summaryEverySec": 5
 }
 ```
@@ -283,9 +286,14 @@ Optional `.codebase-intel.json` at project root:
 | `syncRescan` | `true` | Allow the freshness gate to run a rescan synchronously inside the hook when this repo's recorded scan history proves it's fast (p95 ≤ 2.5s). Set to `false` to always take the background-rescan path. `SEXTANT_SYNC_RESCAN=0` is the env-level kill switch. |
 | `capsule` | `false` | Render and persist role-based Task Capsules instead of the flat retrieval list. `SEXTANT_CAPSULE=1` is the env equivalent. |
 | `coherence` | `false` | Record parent-delivered and child-spawn-prepared snapshots, then surface cross-agent claim changes and exact workset overlap. Requires capsule mode; `SEXTANT_COHERENCE=1` is the env equivalent. |
+| `coherenceHoldbackPct` | `0` | Phase-F overlap-only experiment on parent-visible `parent_prompt` and `tool_return` reports. Set exactly `50` for sticky task-level 50/50 assignment; other values leave it off. Child-spawn overlap context is not experimental, and holdback never suppresses changed/invalidated claim retractions. |
 | `summaryEverySec` | `5` | Minimum interval (seconds) between summary regenerations |
 
 The summary header lists detected vendored exclusions (`Vendored excluded: N (path1, path2, …)`) so you can audit and override when the heuristic guesses wrong.
+
+See [docs/032-decision-grade-coherence-telemetry.md](docs/032-decision-grade-coherence-telemetry.md)
+for Phase-F scorecard thresholds, factual review, experimental outcomes, and the
+limits on what those outcomes can prove.
 
 ## Language Support
 
@@ -353,7 +361,7 @@ never gets quoted. See [docs/010-benefit-proof.md](docs/010-benefit-proof.md).
 These all run from a clean clone in under a minute (Vapor benchmark excluded — it's manual-trigger only):
 
 ```bash
-npm run test:unit                                                                                         # 948 pass on a clean run (a few spawn-based tests can flake under full-suite concurrency; they pass in isolation / on re-run)
+npm run test:unit                                                                                         # full node:test unit suite
 npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.900, nDCG 0.920
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture
@@ -387,7 +395,8 @@ All state lives in `.planning/intel/` (add `.planning/` to `.gitignore`):
 | `.watcher_last_file` | Last file the watcher processed |
 | `.last_injected_hash.*` | Per-session context deduplication (SHA-256) |
 | `.last_injected_paths.retrieval.*` | Per-session surfaced `{path, source, arm}` set — scored by the PostToolUse hook for the benefit loop |
-| `telemetry.jsonl` (+ `.old`) | Append-only events: freshness, retrieval, open-precision / holdback (rotates past 1 MiB) |
+| `.coherence-experiment.*` | Per-session overlap-experiment JSON + lock/active marker (mode `0600`; seven-day TTL, 2,048 JSON-state soft cap; current, locked, and live-window state protected from collection) |
+| `telemetry.jsonl` (+ `.old`) | Append-only events: freshness, retrieval, open-precision, and Phase-F decision rows (mode `0600`; token-owned rotation past 8 MiB) |
 
 ## Requirements
 

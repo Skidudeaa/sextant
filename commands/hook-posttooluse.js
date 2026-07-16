@@ -53,6 +53,14 @@ const { readStdinJson } = require("../lib/cli");
 const { recordEvent } = require("../lib/telemetry");
 const regionsLib = require("../lib/regions");
 
+function recordExperimentEvents(root, events) {
+  for (const event of events || []) {
+    if (!event || typeof event.name !== "string") continue;
+    const { name, ...payload } = event;
+    recordEvent(root, name, payload);
+  }
+}
+
 // Tools that target a concrete file we may have surfaced.  file_path lives in
 // tool_input for Read/Edit/Write/MultiEdit; NotebookEdit uses notebook_path.
 // Glob/Grep/Bash/etc. don't open a single ranked file, so they're out of scope.
@@ -396,35 +404,96 @@ function emitAdditionalContext(note) {
 // a file. Re-check every recorded claim now and report overlap/invalidation to
 // the parent via the already field-verified additionalContext channel.
 async function maybeReportAgentReturn(root, data) {
+  let reportAnalysisAttempt = null;
+  let reportAnalysisRecorded = false;
+  let reportAnalysisMeta = null;
   try {
     const coherence = require("../lib/coherence");
     if (!coherence.coherenceEnabled(root)) return;
+    const metrics = require("../lib/coherence-metrics");
+    const sessionKey = deriveSessionKey(data);
+    const lifecycleStarted = Date.now();
     const toolUseId = typeof data.tool_use_id === "string" ? data.tool_use_id : "";
     if (!toolUseId) {
       recordEvent(root, "coherence.skipped", { reason: "no_return_id" });
+      recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
+        stage: "tool_return",
+        kind: "child",
+        outcome: "missing",
+        reason: "no_return_id",
+        durationMs: Date.now() - lifecycleStarted,
+      }));
       return;
     }
     const { rawSessionIdentity } = require("../lib/session");
     const parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
     const childKey = coherence.childAgentKey(parentKey, toolUseId);
-    if (!childKey) return;
+    if (!childKey) {
+      recordEvent(root, "coherence.skipped", { reason: "return_identity_unavailable" });
+      recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
+        parentAgentKey: parentKey,
+        stage: "tool_return",
+        kind: "child",
+        outcome: "missing",
+        reason: "return_identity_unavailable",
+        durationMs: Date.now() - lifecycleStarted,
+      }));
+      return;
+    }
+    const prepared = coherence.readAgentSnapshot(root, childKey);
+    const recordLifecycle = (outcome, reason, snapshot = prepared) => {
+      const worksetPaths = snapshot && snapshot.workset
+        ? ["primary", "support", "witnesses", "context"].reduce(
+            (total, role) => total + (
+              Array.isArray(snapshot.workset[role]) ? snapshot.workset[role].length : 0
+            ),
+            0
+          )
+        : 0;
+      recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
+        taskId: snapshot && snapshot.taskId,
+        agentKey: childKey,
+        parentAgentKey: parentKey,
+        stage: "tool_return",
+        kind: "child",
+        state: snapshot && snapshot.state,
+        outcome,
+        reason,
+        generation: snapshot && snapshot.generation,
+        claims: snapshot && Array.isArray(snapshot.servedClaims)
+          ? snapshot.servedClaims.length
+          : 0,
+        worksetPaths,
+        durationMs: Date.now() - lifecycleStarted,
+      }));
+    };
     // This is an identity join, not a reporting query. The matching child must
     // remain addressable even when 64 newer peer agents fill the report cap.
-    const transition = coherence.registerReturnSnapshot(root, childKey);
+    let transition;
+    try {
+      transition = coherence.registerReturnSnapshot(root, childKey);
+    } catch {
+      recordLifecycle("failed", "return_transition_exception");
+      return;
+    }
     if (transition.status === "missing") {
       recordEvent(root, "coherence.skipped", { reason: "no_spawn_snapshot" });
+      recordLifecycle("missing", "no_spawn_snapshot");
       return;
     }
     if (transition.status === "ambiguous") {
       recordEvent(root, "coherence.skipped", { reason: "spawn_identity_ambiguous" });
+      recordLifecycle("ambiguous", "spawn_identity_ambiguous", transition.snapshot);
       return;
     }
     if (transition.status === "withheld") {
       recordEvent(root, "coherence.skipped", { reason: "spawn_preparation_withheld" });
+      recordLifecycle("withheld", "spawn_preparation_withheld", transition.snapshot);
       return;
     }
     if (!transition.snapshot || transition.status === "failed") {
       recordEvent(root, "coherence.skipped", { reason: "return_transition_failed" });
+      recordLifecycle("failed", "return_transition_failed", transition.snapshot);
       return;
     }
     const child = transition.snapshot;
@@ -435,10 +504,37 @@ async function maybeReportAgentReturn(root, data) {
       });
     }
 
+    recordLifecycle(
+      transition.status === "retry" ? "retry" : "written",
+      null,
+      child
+    );
+
+    const reportStarted = Date.now();
+    const reportBoundaryId = metrics.randomBoundaryId();
+    reportAnalysisAttempt = {
+      metrics,
+      startedAt: reportStarted,
+      boundaryId: reportBoundaryId,
+      taskId: child.taskId,
+      surface: "tool_return",
+    };
     const result = coherence.analyzeCoherence(root, {
       taskId: child.taskId,
       currentAgentKey: parentKey,
     });
+    const analysis = metrics.buildAnalysisPayload(result, {
+      boundaryId: reportBoundaryId,
+      surface: "tool_return",
+    });
+    recordEvent(root, "coherence.report", {
+      ...analysis,
+      stage: "analysis",
+      outcome: analysis.reportFindings > 0 ? "eligible" : "none",
+      durationMs: Math.max(0, Date.now() - reportStarted),
+    });
+    reportAnalysisRecorded = true;
+    reportAnalysisMeta = analysis.reportFindings > 0 ? analysis : null;
     if (!coherence.hasFindings(result)) return;
     const crossGroups = result.agentClaims.filter((g) => g.agentKey !== parentKey);
     recordEvent(root, "coherence.report_eligible", {
@@ -448,7 +544,108 @@ async function maybeReportAgentReturn(root, data) {
       invalidated: crossGroups.reduce((n, g) => n + g.invalidated.length, 0),
       surface: "tool_return",
     });
-    const rendered = coherence.renderCoherenceDetailed(result, { maxChars: 1000 });
+    const wouldRender = coherence.renderCoherenceDetailed(result, { maxChars: 1000 });
+    let experimentMeta = null;
+    if (wouldRender.delivered.overlapPairs > 0 && wouldRender.overlapPaths.length > 0) {
+      const experiment = require("../lib/coherence-experiment");
+      const paths = experiment.eligiblePaths({
+        overlaps: [{ sharedPaths: wouldRender.overlapPaths }],
+      });
+      const assignment = experiment.assignArm(child.taskId, {
+        config: require("../lib/config").loadRepoConfig(root),
+        env: process.env,
+        force: data && data._coherenceHoldbackForce,
+      });
+      const opportunityId = experiment.opportunityKey(
+        analysis.incidentId,
+        "tool_return"
+      );
+      if (assignment.enabled && opportunityId && paths.length > 0) {
+        const candidate = {
+          schemaVersion: 1,
+          experiment: experiment.EXPERIMENT_NAME,
+          opportunityId,
+          incidentId: analysis.incidentId,
+          taskKey: assignment.taskKey,
+          arm: assignment.arm,
+          assignmentMode: assignment.assignmentMode,
+          surface: "tool_return",
+          targetPathCount: paths.length,
+          eligibleOverlapPairs: wouldRender.delivered.overlapPairs,
+          paths,
+        };
+        // This is the intention-to-treat denominator. Recording it before the
+        // state write makes enrollment failures observable instead of silently
+        // selecting tasks out of the experiment.
+        recordEvent(root, "coherence.experiment.assigned", {
+          schemaVersion: 1,
+          experiment: experiment.EXPERIMENT_NAME,
+          taskKey: assignment.taskKey,
+          arm: assignment.arm,
+          assignmentMode: assignment.assignmentMode,
+          holdbackPct: assignment.holdbackPct,
+        });
+        // Intention-to-treat enrollment is symmetric. `exposed` is emitted only
+        // after output succeeds, so compliance remains separately auditable.
+        const exposureEvents = experiment.openExposure(root, sessionKey, {
+          enabled: true,
+          opportunityId,
+          taskKey: assignment.taskKey,
+          arm: assignment.arm,
+          assignmentMode: assignment.assignmentMode,
+          surface: "tool_return",
+          paths,
+        });
+        const enrolled = exposureEvents.some(
+          (event) => event && event.name === experiment.EVENT_OPENED &&
+            event.opportunityId === opportunityId
+        );
+        if (enrolled) {
+          experimentMeta = candidate;
+          const { paths: ignoredPaths, ...opportunity } = experimentMeta;
+          recordEvent(root, "coherence.overlap.opportunity", opportunity);
+        } else {
+          const activeHoldback = experiment.activeHoldbackEvent(
+            exposureEvents,
+            assignment.taskKey
+          );
+          if (activeHoldback) {
+            // Preserve the original control policy until its outcome window
+            // closes, but never register or resolve a duplicate opportunity.
+            experimentMeta = {
+              ...candidate,
+              opportunityId: activeHoldback.enrolledOpportunityId,
+              arm: "holdback",
+              assignmentMode: activeHoldback.activeAssignmentMode || assignment.assignmentMode,
+              continuedHoldback: true,
+            };
+          }
+        }
+        recordExperimentEvents(root, exposureEvents);
+        if (experimentMeta && experimentMeta.arm === "holdback") {
+          const { paths: ignoredPaths, ...opportunity } = experimentMeta;
+          recordEvent(root, "coherence.report", {
+            schemaVersion: 1,
+            incidentId: analysis.incidentId,
+            boundaryId: reportBoundaryId,
+            taskKey: assignment.taskKey,
+            surface: "tool_return",
+            stage: "holdback",
+            outcome: "intentional_overlap_holdback",
+            experiment: experiment.EXPERIMENT_NAME,
+            experimentArm: "holdback",
+            continuedHoldback: experimentMeta.continuedHoldback === true,
+            heldbackOverlapPairs: wouldRender.delivered.overlapPairs,
+            heldbackChanged: 0,
+            heldbackInvalidated: 0,
+          });
+          if (enrolled) recordEvent(root, "coherence.overlap.withheld", opportunity);
+        }
+      }
+    }
+    const rendered = experimentMeta && experimentMeta.arm === "holdback"
+      ? coherence.renderCoherenceDetailed(result, { maxChars: 1000, includeOverlaps: false })
+      : wouldRender;
     if (!rendered.text) return;
     const safe = require("../lib/cli").stripUnsafeXmlTags(rendered.text);
     const deliveredMeta = {
@@ -462,7 +659,48 @@ async function maybeReportAgentReturn(root, data) {
       `<sextant-agent-coherence>\n${safe}\n</sextant-agent-coherence>`
     );
     recordEvent(root, "coherence.delta_delivered", deliveredMeta);
+    recordEvent(root, "coherence.report", {
+      ...metrics.buildDeliveryPayload(result, rendered.delivered, {
+        boundaryId: reportBoundaryId,
+        surface: "tool_return",
+      }),
+      stage: "delivery",
+      outcome: "delivered",
+      reportBytes: Buffer.byteLength(safe, "utf8"),
+      experiment: experimentMeta && experimentMeta.experiment,
+      experimentArm: experimentMeta && experimentMeta.arm,
+    });
+    if (experimentMeta && experimentMeta.arm === "armed") {
+      const { paths, ...event } = experimentMeta;
+      recordEvent(root, "coherence.overlap.exposed", event);
+    }
   } catch {
+    try {
+      if (reportAnalysisAttempt && !reportAnalysisRecorded) {
+        recordEvent(root, "coherence.report", {
+          ...reportAnalysisAttempt.metrics.buildFailedAnalysisPayload({
+            taskId: reportAnalysisAttempt.taskId,
+            boundaryId: reportAnalysisAttempt.boundaryId,
+            surface: reportAnalysisAttempt.surface,
+          }),
+          stage: "analysis",
+          outcome: "failed",
+          reason: "analysis_exception",
+          durationMs: Math.max(0, Date.now() - reportAnalysisAttempt.startedAt),
+        });
+      } else if (reportAnalysisRecorded && reportAnalysisMeta) {
+        recordEvent(root, "coherence.report", {
+          schemaVersion: 1,
+          incidentId: reportAnalysisMeta.incidentId,
+          boundaryId: reportAnalysisMeta.boundaryId,
+          taskKey: reportAnalysisMeta.taskKey,
+          surface: "tool_return",
+          stage: "suppression",
+          outcome: "not_delivered",
+          reason: "report_pipeline_exception",
+        });
+      }
+    } catch {}
     // Join reporting is best-effort and may never break an Agent tool result.
   }
 }
@@ -599,6 +837,21 @@ async function run() {
     const sessionKey = deriveSessionKey(data);
     const repoRel = toRepoRel(root, filePath);
     if (repoRel == null) return; // outside the repo → not ours to score or annotate
+
+    // Score the next bounded file-touch window for the overlap-only randomized
+    // trial. Reads and mutations remain distinct; an edit before a read of the
+    // same target path is the pre-registered primary behavior outcome.
+    try {
+      const experiment = require("../lib/coherence-experiment");
+      // Default-off installs have no exposure state, and completed experiments
+      // retain only dedupe history. Neither case pays the lock/write path.
+      if (experiment.hasActiveExposure(root, sessionKey)) {
+        recordExperimentEvents(root, experiment.scoreTouch(root, sessionKey, {
+          path: repoRel,
+          action: MUTATE_TOOLS.has(tool) ? "mutation" : "read",
+        }));
+      }
+    } catch {}
 
     // --- Lane 1: outcome scoring (out-of-band telemetry, semantics unchanged) ---
     const parsed = readInjectedRaw(root, sessionKey);

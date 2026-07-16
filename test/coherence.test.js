@@ -686,4 +686,40 @@ describe("coherence factual rendering", () => {
     assert.deepEqual(detailed.delivered, { changed: 0, invalidated: 1, overlapPairs: 0 });
     assert.doesNotMatch(detailed.text, /Recorded worksets share/);
   });
+
+  it("can hold back overlap rows without suppressing claim retractions", () => {
+    const observation = {
+      snapshotCount: 2,
+      currentAgentKey: "parent_a",
+      agentClaims: [{
+        agentKey: "child_b",
+        changed: [{
+          claim: { subject: { path: "lib/changed.js", symbol: "run" } },
+          from: "L1",
+          to: "L2",
+        }],
+        invalidated: [],
+      }],
+      overlaps: [{
+        agentA: "parent_a",
+        agentB: "child_b",
+        sharedPaths: ["lib/shared.js"],
+        sharedRegions: [],
+      }],
+      overlapPairTotal: 1,
+    };
+    const armed = C.renderCoherenceDetailed(observation, { maxChars: 1000 });
+    const heldback = C.renderCoherenceDetailed(observation, {
+      maxChars: 1000,
+      includeOverlaps: false,
+    });
+    assert.match(armed.text, /lib\/shared\.js/);
+    assert.deepEqual(armed.overlapPaths, ["lib/shared.js"]);
+    assert.equal(armed.delivered.overlapPairs, 1);
+    assert.match(heldback.text, /lib\/changed\.js#run/);
+    assert.doesNotMatch(heldback.text, /lib\/shared\.js/);
+    assert.deepEqual(heldback.overlapPaths, []);
+    assert.equal(heldback.delivered.changed, 1);
+    assert.equal(heldback.delivered.overlapPairs, 0);
+  });
 });

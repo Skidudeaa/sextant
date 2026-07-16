@@ -13,6 +13,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { spawn } = require("child_process");
 
 const telemetry = require("../lib/telemetry");
 
@@ -38,6 +39,7 @@ describe("telemetry.recordEvent + readEvents", () => {
     assert.ok(typeof events[0].ts === "number");
     assert.equal(events[1].name, "test.second");
     assert.equal(events[1].reason, "x");
+    assert.equal(fs.statSync(telemetry.telemetryPath(dir)).mode & 0o777, 0o600);
   });
 
   it("readEvents returns [] when file missing", () => {
@@ -78,10 +80,75 @@ describe("telemetry rotation", () => {
     telemetry.recordEvent(dir, "test.after_rotate", {});
 
     assert.ok(fs.existsSync(oldFile), ".old should exist after rotation");
+    assert.equal(fs.statSync(oldFile).mode & 0o777, 0o600);
     const activeContents = fs.readFileSync(file, "utf8");
     // Active file now starts fresh, containing only our latest event.
     assert.ok(activeContents.includes("test.after_rotate"));
     assert.ok(!activeContents.includes("xxxx"), "active file should not retain pre-rotation filler");
+  });
+
+  it("serializes competing rotations without losing concurrent events", async () => {
+    const concurrent = makeRepo("rotate-concurrent");
+    try {
+      const file = telemetry.telemetryPath(concurrent);
+      fs.writeFileSync(file, JSON.stringify({
+        ts: 0,
+        name: "test.filler",
+        blob: "x".repeat(telemetry.TELEMETRY_MAX_BYTES + 1024),
+      }) + "\n");
+      const lockBase = telemetry.telemetryRotateLockPath(concurrent);
+      const staleToken = "d".repeat(32);
+      const staleLock = `${lockBase}.candidate.${staleToken}`;
+      fs.writeFileSync(staleLock, JSON.stringify({
+        schemaVersion: 1,
+        token: staleToken,
+        pid: 2_147_483_647,
+        processStartIdentity: "dead-generation",
+        choosing: false,
+        ticket: 1,
+        createdAt: 1,
+      }), { mode: 0o600 });
+      const staleAt = new Date(Date.now() - 120_000);
+      fs.utimesSync(staleLock, staleAt, staleAt);
+      const modulePath = path.resolve(__dirname, "..", "lib", "telemetry.js");
+      const script =
+        `require(${JSON.stringify(modulePath)}).recordEvent(process.argv[1], ` +
+        `"test.concurrent", { worker: Number(process.argv[2]) });`;
+      const workers = Array.from({ length: 12 }, (_, worker) => new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ["-e", script, concurrent, String(worker)], {
+          stdio: "ignore",
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => code === 0
+          ? resolve()
+          : reject(new Error(`telemetry worker exited ${code}`)));
+      }));
+      await Promise.all(workers);
+
+      const events = [];
+      for (const candidate of [telemetry.telemetryOldPath(concurrent), file]) {
+        if (!fs.existsSync(candidate)) continue;
+        for (const line of fs.readFileSync(candidate, "utf8").split("\n")) {
+          if (!line) continue;
+          try { events.push(JSON.parse(line)); } catch {}
+        }
+      }
+      const workerIds = events
+        .filter((event) => event.name === "test.concurrent")
+        .map((event) => event.worker)
+        .sort((a, b) => a - b);
+      assert.deepEqual(workerIds, Array.from({ length: 12 }, (_, index) => index));
+      assert.equal(fs.existsSync(telemetry.telemetryRotateLockPath(concurrent)), false);
+      const lockName = path.basename(telemetry.telemetryRotateLockPath(concurrent));
+      assert.deepEqual(
+        fs.readdirSync(path.dirname(file)).filter((name) =>
+          name.startsWith(`${lockName}.candidate.`)
+        ),
+        []
+      );
+    } finally {
+      fs.rmSync(concurrent, { recursive: true, force: true });
+    }
   });
 });
 

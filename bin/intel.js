@@ -19,7 +19,9 @@ Usage:
   sextant explain <file|dir/> [--root <path>] [--json]
   sextant closure [--root <path>]
   sextant sprawl [--root <path>] [--within <N>] [--json]
-  sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old]
+  sextant telemetry [--root <path>] [--json | --tail <N>] [--include-old] [--days <N>]
+  sextant telemetry --coherence-scorecard [--root <path>] [--days <N>] [--json]
+  sextant telemetry --review <incidentId> --verdict <verdict> --reviewed-findings <N>
   sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
   sextant tune [--projects <path>] [--repo <name>] [--json]
   sextant hook sessionstart

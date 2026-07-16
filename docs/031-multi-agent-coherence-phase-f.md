@@ -269,6 +269,11 @@ strip unsafe XML from repository-derived report text.
 
 ## Telemetry
 
+The decision-grade schema, operational scorecard, factual-review workflow, and
+overlap-only holdback experiment are specified in
+[docs/032](032-decision-grade-coherence-telemetry.md). The events below are the
+original Phase-F volume counters retained for continuity.
+
 The append-only telemetry stream gains:
 
 - `coherence.agent_registered { kind, state, claims, agentType? }`
@@ -336,8 +341,10 @@ the reports:
 - justify locking, cancellation, reassignment, or automatic conflict resolution.
 
 The branch's dogfood telemetry must first establish non-trivial eligible volume,
-delivery reliability, skip reasons, and a zero-false-retraction safety record. A
-treatment/holdback outcome measure would still be required before claiming behavioral
+delivery reliability, skip reasons, and a zero-false-retraction safety record.
+Docs/032 adds a randomized overlap-only touch-behavior instrument, but even a credible
+arm difference does not identify duplicate work or prove conflict reduction. An
+unambiguous task/user outcome would still be required before claiming behavioral
 benefit or enabling coherence by default. Until then, this is a measurement-capable
 visibility substrate, not a coordination system.
 
