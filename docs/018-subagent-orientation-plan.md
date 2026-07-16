@@ -1,5 +1,13 @@
 # 018 — Subagent orientation: research + plan
 
+> **Historical design note.** Claude Code 2.1.211 later proved that
+> `SubagentStart` `additionalContext` reaches the child before its first prompt.
+> The current rollout therefore uses that additive surface by default and keeps
+> the PreToolUse input rewrite only for the explicit coherence experiment that
+> needs the Task prompt and `tool_use_id`. See docs/032. The channel table below
+> records the evidence available when this plan was written; it is not the
+> current installer contract.
+
 > **Phase 0 recon RAN 2026-07-10 — GO.** Results + verdicts:
 > `docs/022-subagent-recon.md`. R-A PASS (updatedInput works end-to-end for
 > general-purpose AND Explore; `subagent_type` visible at hook time), R-B

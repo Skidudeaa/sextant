@@ -121,9 +121,12 @@ hash, so a new retraction cannot be deduped behind an unchanged retrieval body.
 
 ### Child spawn — `commands/hook-pretask.js`
 
-The already field-verified PreToolUse `Agent|Task` channel still appends the compact
-Lane-A orientation block. When coherence is enabled and top-level `tool_use_id` is
-present, Phase F additionally:
+This path exists only in an explicitly enabled capsule+coherence experiment.
+Ordinary repositories use the additive `SubagentStart` orientation path described
+in docs/032 and do not rewrite Task/Agent inputs. The experiment keeps the
+field-verified PreToolUse `Agent|Task` channel because the task prompt and top-level
+`tool_use_id` are required inputs to its prepared snapshot and later return join.
+It appends the compact Lane-A orientation block and:
 
 1. records the rendered task-file list as a neutral, path-only context workset (the
    compact block does not expose Task Capsule roles or regions);
@@ -142,13 +145,14 @@ child lifecycle state.
 The combined orientation plus coherence payload remains under the existing 1100-byte
 spawn budget. Reports drop whole factual lines rather than truncate facts. The exact
 scan fingerprint freshness validated is checked again immediately before publication
-for every Lane-A rewrite, even when Phase F is off; if it moved, the whole rewrite is
-withheld rather than returning stale structural claims. The parent retrieval path has
-the same publication fence. Its bounded fingerprint hashes dirty-file content, so a
-second edit to an already-dirty path is visible; path count and bytes are capped and
-over-budget state fails closed. Snapshot-write failure falls back to the proven
-orientation-only behavior; serialization failure returns the original tool call
-unchanged. Neither publishes a usable ghost Phase-F record.
+for every experiment rewrite, including cases where a missing identity prevents a
+child snapshot; if it moved, the whole rewrite is withheld rather than returning
+stale structural claims. The parent retrieval path has the same publication fence.
+Its bounded fingerprint hashes dirty-file content, so a second edit to an
+already-dirty path is visible; path count and bytes are capped and over-budget state
+fails closed. Snapshot-write failure falls back to orientation-only behavior;
+serialization failure returns the original tool call unchanged. Neither publishes
+a usable ghost Phase-F record.
 
 A repeated tool id with the same complete rewritten payload is a retry. Reuse with a
 different complete-payload hash is identity ambiguity; Phase F is skipped and only
@@ -160,8 +164,8 @@ rejected identity.
 
 ### Parent-side tool return — `commands/hook-posttooluse.js`
 
-The dogfood PostToolUse matcher includes `Agent|Task` as a separate matcher from the
-existing file-tool hook. A matching return tool id uses the exact child-key lookup,
+The init-installed PostToolUse matcher includes `Task|Agent` as a separate matcher
+from the existing file-tool hook. A matching return tool id uses the exact child-key lookup,
 records a new `tool_returned` generation, re-checks same-session-task snapshots, and
 may send the factual report to the parent through the existing `additionalContext`
 channel.
@@ -291,8 +295,8 @@ conflicts fell.
 
 ## Verification status
 
-Final verification on 2026-07-15, after the contention-poison and immutable
-export-binding audit fixes:
+Commit-pinned Phase-F baseline at `edf40e3` on 2026-07-15, after the
+contention-poison and immutable export-binding audit fixes:
 
 ```text
 npm run test:unit
@@ -312,10 +316,10 @@ git diff --check
 clean
 ```
 
-The final adversarial review also reran the graph/static/intel/freshness/summary
+That commit-pinned adversarial review also reran the graph/static/intel/freshness/summary
 matrix (100/100 across 33 suites) and the hook/coherence/holdback/telemetry matrix
 (114/114 across 24 suites), with syntax checks clean and no remaining actionable
-finding. Coverage includes default-off gating, collision-safe/no-fallback identity,
+finding at that baseline. Coverage includes default-off gating, collision-safe/no-fallback identity,
 concurrent immutable generations, contention poison, TTL/schema/cap behavior,
 per-agent claim isolation, deterministic bounded overlap, factual non-attributing
 rendering, spawn and return hook paths, conversational-prompt invalidation,

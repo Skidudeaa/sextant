@@ -55,6 +55,17 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sextant hook subagentstart"
+          }
+        ]
+      }
     ]
   }
 }

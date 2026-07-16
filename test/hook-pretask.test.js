@@ -21,8 +21,22 @@ const os = require("os");
 const { spawnSync, execSync } = require("child_process");
 
 const { buildOrientationBlock, ORIENT_MAX_BYTES } = require("../lib/orient");
+const { hasKnownStaticInputConflict } = require("../commands/hook-pretask");
 
 const BIN = path.resolve(__dirname, "..", "bin", "intel.js");
+let hookClaudeConfigDir = null;
+let hookScopePreloadDir = null;
+let hookScopePreload = null;
+
+function mergeNodeOptions(...values) {
+  return values.filter((value) => typeof value === "string" && value.trim()).join(" ");
+}
+
+after(() => {
+  if (hookScopePreloadDir) {
+    fs.rmSync(hookScopePreloadDir, { recursive: true, force: true });
+  }
+});
 
 function hermeticEnv() {
   return {
@@ -30,6 +44,14 @@ function hermeticEnv() {
     SEXTANT_HOLDBACK_PCT: "0",
     SEXTANT_HOLDBACK_FORCE: "",
     SEXTANT_SYNC_RESCAN: "0",
+    SEXTANT_CAPSULE: "1",
+    SEXTANT_COHERENCE: "1",
+    CLAUDE_CONFIG_DIR:
+      hookClaudeConfigDir || path.join(os.tmpdir(), "sextant-no-claude-config"),
+    NODE_OPTIONS: mergeNodeOptions(
+      process.env.NODE_OPTIONS,
+      hookScopePreload ? `--require=${hookScopePreload}` : ""
+    ),
   };
 }
 
@@ -41,10 +63,13 @@ function gitInit(dir) {
 }
 
 function runHook(cwd, stdinObj, extraEnv = {}) {
+  const baseEnv = hermeticEnv();
+  const env = { ...baseEnv, ...extraEnv };
+  env.NODE_OPTIONS = mergeNodeOptions(baseEnv.NODE_OPTIONS, extraEnv.NODE_OPTIONS);
   const res = spawnSync(process.execPath, [BIN, "hook", "pretask"], {
     cwd,
     encoding: "utf8",
-    env: { ...hermeticEnv(), ...extraEnv },
+    env,
     input: typeof stdinObj === "string" ? stdinObj : JSON.stringify(stdinObj),
     timeout: 30000,
   });
@@ -79,6 +104,19 @@ describe("hook pretask — Lane A injection", () => {
 
   before(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-pretask-"));
+    hookClaudeConfigDir = path.join(root, ".test-claude-config");
+    fs.mkdirSync(hookClaudeConfigDir, { recursive: true });
+    hookScopePreloadDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-hook-scopes-"));
+    hookScopePreload = path.join(hookScopePreloadDir, "managed-empty.js");
+    const claudeHooksPath = path.resolve(__dirname, "..", "lib", "claude-hooks.js");
+    fs.writeFileSync(
+      hookScopePreload,
+      `"use strict";\n` +
+        `const claudeHooks = require(${JSON.stringify(claudeHooksPath)});\n` +
+        `const inspect = claudeHooks.inspectClaudeHookScopes;\n` +
+        `claudeHooks.inspectClaudeHookScopes = (root, options = {}) => ` +
+        `inspect(root, { ...options, managedFiles: [] });\n`
+    );
     fs.writeFileSync(
       path.join(root, "widgetizer.js"),
       "const helper = require('./helper');\nmodule.exports.widgetize = () => helper();\n"
@@ -101,7 +139,11 @@ describe("hook pretask — Lane A injection", () => {
     const out = JSON.parse(res.stdout);
     const hso = out.hookSpecificOutput;
     assert.equal(hso.hookEventName, "PreToolUse");
-    assert.equal(hso.permissionDecision, "allow");
+    assert.equal(
+      Object.hasOwn(hso, "permissionDecision"),
+      false,
+      "orientation must preserve the host's normal permission flow"
+    );
     const updated = hso.updatedInput;
     // never mangle: every original key survives, prompt starts byte-identical
     assert.equal(updated.description, "probe");
@@ -119,6 +161,100 @@ describe("hook pretask — Lane A injection", () => {
     const inj = readTelemetry(root).filter((e) => e.name === "pretask.injected");
     assert.ok(inj.length >= 1);
     assert.equal(inj[inj.length - 1].subagentType, "general-purpose");
+  });
+
+  it("is silent outside the explicit coherence experiment", () => {
+    const res = runHook(root, taskInput("Inspect widgetize."), {
+      SEXTANT_COHERENCE: "0",
+    });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, "");
+  });
+
+  it("fails closed at runtime when another static scope has an input rewriter", () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-pretask-conflict-"));
+    fs.writeFileSync(
+      path.join(configDir, "settings.json"),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [{
+            matcher: "Task|Agent",
+            hooks: [{ type: "command", command: "foreign-task-rewriter" }],
+          }],
+        },
+      })
+    );
+    const payload = taskInput("Inspect widgetize without racing another rewrite.");
+    payload.session_id = "static-conflict-parent";
+    payload.tool_use_id = "static-conflict-spawn";
+    try {
+      const res = runHook(root, payload, { CLAUDE_CONFIG_DIR: configDir });
+      assert.equal(res.status, 0, res.stderr);
+      assert.equal(res.stdout, "", "known static conflicts must suppress updatedInput");
+      const events = readTelemetry(root);
+      assert.ok(events.some((event) =>
+        event.name === "pretask.skipped" && event.reason === "static_hook_conflict"
+      ));
+      assert.ok(events.some((event) =>
+        event.name === "coherence.lifecycle" &&
+        event.stage === "child_spawn" &&
+        event.outcome === "withheld" &&
+        event.reason === "static_hook_conflict"
+      ));
+    } finally {
+      fs.rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores inactive user conflicts under allowManagedHooksOnly", () => {
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-policy-user-"));
+    const managedDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-policy-managed-"));
+    try {
+      fs.writeFileSync(
+        path.join(configDir, "settings.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [{
+              matcher: "Task|Agent",
+              hooks: [{ type: "command", command: "inactive-user-rewriter" }],
+            }],
+          },
+        })
+      );
+      const managedFile = path.join(managedDir, "managed-settings.json");
+      fs.writeFileSync(managedFile, JSON.stringify({ allowManagedHooksOnly: true }));
+      const scopeOptions = {
+        home: path.join(root, ".test-home"),
+        configDir,
+        managedFiles: [managedFile],
+      };
+      assert.equal(
+        hasKnownStaticInputConflict(root, scopeOptions),
+        false,
+        "inactive user hooks cannot race a managed Sextant provider"
+      );
+
+      fs.writeFileSync(
+        managedFile,
+        JSON.stringify({
+          allowManagedHooksOnly: true,
+          hooks: {
+            PreToolUse: [{
+              matcher: "Task|Agent",
+              hooks: [{ type: "command", command: "active-managed-rewriter" }],
+            }],
+          },
+        })
+      );
+      assert.equal(
+        hasKnownStaticInputConflict(root, scopeOptions),
+        true,
+        "an active managed rewriter must still suppress Sextant"
+      );
+    } finally {
+      fs.rmSync(configDir, { recursive: true, force: true });
+      fs.rmSync(managedDir, { recursive: true, force: true });
+    }
   });
 
   it("never double-injects: a prompt already carrying a block passes unmodified", () => {
@@ -156,6 +292,47 @@ describe("hook pretask — Lane A injection", () => {
     assert.deepEqual(child.workset.primary, [], "compact child context must not invent roles");
     assert.ok(child.workset.context.every((entry) => !entry.region));
     assert.ok(child.servedClaims.some((c) => c.subject.path === "widgetizer.js"));
+  });
+
+  it("freezes child-spawn latency before telemetry append work", () => {
+    const preloadDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-pretask-clock-"));
+    const preload = path.join(preloadDir, "advance-clock-on-telemetry.js");
+    const telemetryPath = path.resolve(__dirname, "..", "lib", "telemetry.js");
+    fs.writeFileSync(
+      preload,
+      [
+        `const telemetry = require(${JSON.stringify(telemetryPath)});`,
+        `const realNow = Date.now;`,
+        `let offsetMs = 0;`,
+        `Date.now = () => realNow() + offsetMs;`,
+        `const originalRecordEvent = telemetry.recordEvent;`,
+        `telemetry.recordEvent = (...args) => {`,
+        `  offsetMs += 10000;`,
+        `  return originalRecordEvent(...args);`,
+        `};`,
+      ].join("\n")
+    );
+    const payload = taskInput("Measure the widgetize spawn boundary.");
+    payload.session_id = "latency-boundary-parent";
+    payload.tool_use_id = "latency-boundary-spawn";
+    const before = readTelemetry(root).filter(
+      (event) => event.name === "coherence.lifecycle" && event.stage === "child_spawn"
+    ).length;
+    try {
+      const res = runHook(root, payload, { NODE_OPTIONS: `--require=${preload}` });
+      assert.equal(res.status, 0, res.stderr);
+      assert.ok(res.stdout);
+      const lifecycle = readTelemetry(root).filter(
+        (event) => event.name === "coherence.lifecycle" && event.stage === "child_spawn"
+      )[before];
+      assert.ok(lifecycle, "expected one new child-spawn lifecycle event");
+      assert.ok(
+        lifecycle.durationMs < 5000,
+        `telemetry clock advance leaked into lifecycle duration: ${lifecycle.durationMs}ms`
+      );
+    } finally {
+      fs.rmSync(preloadDir, { recursive: true, force: true });
+    }
   });
 
   it("Phase F surfaces factual overlap to a second recorded spawn under the same parent", () => {

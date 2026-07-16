@@ -119,6 +119,22 @@ sextant doctor            # detailed diagnostics + Actions block with copy-paste
 
 On the next Claude Code session the watcher auto-starts, the SessionStart hook injects the static summary, and the UserPromptSubmit hook classifies each prompt and injects code-relevant context.
 
+Existing repos self-repair on the next Sextant-backed SessionStart or prompt
+hook after an upgrade. Run `sextant init` in a repo when you want that repair
+immediately, then start a new Claude Code session. Init writes the additive
+settings update atomically, preserves unrelated hooks and the existing file
+mode, and is safe to rerun. Ordinary repos receive child orientation through
+Claude's additive `SubagentStart` context channel; Sextant does not rewrite the
+Task/Agent tool input there. Only repos that explicitly enable both Task Capsules
+and coherence install the prompt-derived PreToolUse experiment hook. For those
+repos, init checks project, local, user, and file-managed settings for an
+overlapping Task/Agent input rewriter and fails closed on a conflict. The
+experiment hook repeats that read-only static check at execution time, so a
+user- or managed-scope Sextant copy cannot bypass the installer decision.
+Dynamic plugin, skill, agent, server-managed, and session hook sources are
+visible in Claude's `/hooks` browser and must also be checked before running
+that experiment.
+
 ### Status line (optional but recommended)
 
 To see sextant status at the bottom of Claude Code, install the status line script:
@@ -143,10 +159,12 @@ That's it. On the next Claude Code session:
 
 1. The **SessionStart hook** injects the codebase summary and starts the file watcher
 2. The **UserPromptSubmit hook** classifies each prompt and injects code-relevant context
-3. The **PostToolUse hook** scores whether the agent opened what was surfaced, and after an edit may inject a one-line blast-radius note (untouched dependents + co-change partners)
-4. The **watcher** keeps the index fresh as you edit files
+3. The **SubagentStart hook** adds freshness-gated, repo-generic orientation before each child agent's first prompt
+4. In an explicitly enabled coherence experiment, the **Task/Agent PreToolUse hook** replaces that base delivery with prompt-derived orientation and records the spawn boundary
+5. The **PostToolUse hooks** score surfaced-file opens, emit bounded blast-radius notes after edits, and join Task/Agent returns for coherence reporting
+6. The **watcher** keeps the index fresh as you edit files
 
-Everything is automatic from here — staleness detection, rescans (in-hook when the repo's own scan history proves they're fast, background otherwise), and telemetry all run inside the hooks. The only manual command you'll ever be prompted for is whatever `sextant doctor` or the status line explicitly tells you to run.
+For ordinary/default operation, everything is automatic from here — staleness detection, rescans (in-hook when the repo's own scan history proves they're fast, background otherwise), and telemetry all run inside the hooks. Manual intervention is limited to actions reported by `sextant doctor` or the status line. The optional coherence experiment has one additional operator gate: inspect Claude's merged `/hooks` view for dynamic input rewriters before enabling it.
 
 ### Codex CLI (optional)
 
@@ -158,6 +176,11 @@ sextant init --codex   # writes .codex/hooks.json, AGENTS.md section, and a glob
 ```
 
 Codex requires persisted hook trust: restart Codex once after wiring and accept the prompt (or `codex exec --dangerously-bypass-hook-trust` for automation). Verified end-to-end on Codex CLI 0.141.0 — including the freshness gate serving the honest minimal body through Codex.
+
+Current Codex wiring provides session/prompt orientation only. Codex 0.144.4 has
+a viable `spawn_agent` lifecycle seam, but the Phase-F overlap experiment remains
+Claude Code-only because Codex does not yet provide equivalent decision-grade
+parent file-outcome observation.
 
 ## What You'll See
 
@@ -210,7 +233,7 @@ There is no channel that both the user and Claude see simultaneously.
 - **Health-gated scoring** -- graph boosts disabled when import resolution drops below 90%
 - **Freshness gate** -- when stored graph state diverges from git HEAD / status / scanner version, the injection drops to a minimal body (filesystem + git fields only) instead of leaking stale numbers; dirty-file bytes and stabilized HEAD/status captures close repeated-edit races, while a graph-generation manifest binds exact `summary.md` bytes to the graph validated for SessionStart/refresh/inject/summary. Missing manifests self-heal from a fresh graph; stale graphs enqueue an atomic single-flight rescan
 - **Adaptive sync rescan** -- when a repo's own recorded scan history proves rescans are fast (p95 ≤ 2.5s over ≥5 scans), a stale read runs the rescan *inside* the hook and injects a fresh body instead of the minimal one — ~1–2s of prompt latency instead of an orientation-less turn. Evidence-based per repo; slow or unknown repos keep the background path unchanged
-- **Subagent orientation** -- subagents (Task/Agent tool) receive no hook injection of their own; a PreToolUse hook appends a compact facts-only orientation block (repo, health, hotspots, task-relevant files) to the spawning prompt, byte-capped and freshness-gated. Paired with the `sextant_orient` MCP tool for on-demand pulls
+- **Subagent orientation** -- ordinary Claude repos use additive `SubagentStart` context to deliver a compact facts-only repo/health/hotspot block before the child's first prompt, byte-capped and freshness-gated. Explicit capsule+coherence experiments instead use a guarded Task/Agent PreToolUse rewrite so the task prompt, tool-use identity, prepared snapshot, and later return can be joined. The two delivery paths are mutually exclusive at runtime. Paired with the `sextant_orient` MCP tool for on-demand pulls
 - **Task and multi-agent coherence** -- optional Task Capsules preserve the role-based workset and served claims; an independently opt-in Phase-F layer records immutable parent-delivered and child-spawn-prepared snapshots, re-checks each recorded agent's claims, and reports exact recorded workset overlap. Schema-v1 lifecycle/report telemetry, factual review, and a sticky overlap-only holdback on parent-visible prompt/return reports provide a conservative decision scorecard ([docs/032](docs/032-decision-grade-coherence-telemetry.md)). The experiment scores only parent `Read`/`Edit`/`Write`/`MultiEdit`/`NotebookEdit` calls; child actions and Bash/script mutations are outside its outcome boundary. Visibility only: integrity locks and fail-closed contention markers protect observation-state transitions, never code/work ownership, edit attribution, or coordination
 - **Three-layer retrieval** -- rg text search + export-graph symbol lookup + re-export chain tracing
 - **Swift declarations + relations** -- tree-sitter walker produces top-level types, members one level deep, and conformance/inheritance edges with `confidence={direct|heuristic}`
@@ -227,7 +250,7 @@ There is no channel that both the user and Claude see simultaneously.
 
 | Command | Description |
 |---------|-------------|
-| `sextant init [--codex]` | Create `.planning/intel/`, wire Claude Code hooks, register MCP server; `--codex` additionally wires Codex CLI (`.codex/hooks.json`, `AGENTS.md`, global `~/.codex/config.toml` MCP entry) |
+| `sextant init [--codex]` | Create `.planning/intel/`, safely add the base Sextant Claude hooks plus the gated coherence-experiment hook when enabled, and register the MCP server; safe to rerun for existing repos. `--codex` additionally wires Codex CLI (`.codex/hooks.json`, `AGENTS.md`, global `~/.codex/config.toml` MCP entry) |
 | `sextant scan [--force]` | Index imports/exports, build dependency graph |
 | `sextant rescan [--force]` | Scan + prune deleted files |
 | `sextant watch` | Live file watching with terminal dashboard |
@@ -253,7 +276,8 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant hook sessionstart` | SessionStart hook entry point |
 | `sextant hook refresh` | UserPromptSubmit hook entry point (retrieval + holdback arm) |
 | `sextant hook posttooluse` | PostToolUse hook — scores whether the agent opened what was surfaced; emits blast-radius notes after edits |
-| `sextant hook pretask` | PreToolUse hook (matcher `Task\|Agent`) — appends the subagent orientation block to spawning Task prompts (dogfood wiring; not yet added by `sextant init`) |
+| `sextant hook subagentstart` | SubagentStart hook — adds repo-generic orientation through Claude's additive child-context channel in ordinary repos |
+| `sextant hook pretask` | PreToolUse hook (matcher `Task\|Agent`) — experiment-only prompt-derived orientation and child-spawn snapshot; installed only when both capsule and coherence are enabled |
 
 ## Configuration
 

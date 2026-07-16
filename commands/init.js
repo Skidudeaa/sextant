@@ -32,8 +32,9 @@ function ensureMcpJson(root) {
 }
 
 // WHY: init was silent — users had no feedback on what it did.  intel.init()
-// (called from run() below) DOES wire the SessionStart + UserPromptSubmit
-// hooks into .claude/settings.json via ensureClaudeSettingsUnlocked.  These
+// (called from run() below) DOES wire the base Sextant Claude hook set plus
+// the gated PreToolUse experiment hook when capsule+coherence are enabled
+// into .claude/settings.json via ensureClaudeSettingsUnlocked.  These
 // helpers VERIFY the write landed and report it.  The "add to settings.json"
 // fallback in printStatus only fires in the rare case ensureClaudeSettings
 // bailed without writing — a pre-existing settings.json that isn't readable
@@ -53,20 +54,116 @@ function hasSextantHook(settings, event) {
   return false;
 }
 
-function checkClaudeHooks(root) {
+// Unlike hasSextantHook(), this verifies one exact lifecycle surface. A generic
+// "some Sextant PostToolUse exists" check cannot distinguish file scoring from
+// the Task/Agent return join, and used to report incomplete Phase-F wiring as
+// healthy.
+function hasHookCommand(settings, event, command, matcher) {
+  const events = settings?.hooks?.[event];
+  if (!Array.isArray(events)) return false;
+  return events.some((group) => {
+    if (!group || typeof group !== "object") return false;
+    if (!intel.matcherCovers(group.matcher, matcher)) return false;
+    if (!Array.isArray(group.hooks)) return false;
+    return group.hooks.some((hook) =>
+      intel.exactSynchronousShellHook(hook, command));
+  });
+}
+
+function hasHookConflict(settings, event, command, matcher) {
+  return intel.settingsHookConflict(settings, event, command, matcher);
+}
+
+function checkClaudeHooks(root, scopeOptions = {}) {
   const p = path.join(root, ".claude", "settings.json");
+  const scopeState = intel.inspectClaudeHookScopes(root, scopeOptions);
+  const preTaskRequired = require("../lib/coherence").coherenceEnabled(root);
   if (!fs.existsSync(p)) {
-    return { path: p, exists: false, sessionStart: false, userPromptSubmit: false };
+    return {
+      path: p,
+      exists: false,
+      sessionStart: false,
+      userPromptSubmit: false,
+      filePostToolUse: false,
+      subagentStart: false,
+      taskPreToolUse: false,
+      taskPostToolUse: false,
+      preTaskRequired,
+      taskPreToolUseConflict:
+        preTaskRequired && scopeState.externalPreTaskConflicts.length > 0,
+      externalPreTaskConflicts: scopeState.externalPreTaskConflicts,
+      hooksDisabled: scopeState.hooksDisabled,
+      hooksDisabledSource: scopeState.hooksDisabledSource,
+      projectHooksBlockedByPolicy: scopeState.projectHooksBlockedByPolicy,
+      managedOnlySource: scopeState.managedOnlySource,
+    };
   }
   let data = {};
   try { data = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
   return {
     path: p,
     exists: true,
-    sessionStart: hasSextantHook(data, "SessionStart"),
-    userPromptSubmit: hasSextantHook(data, "UserPromptSubmit"),
-    postToolUse: hasSextantHook(data, "PostToolUse"),
+    sessionStart: hasHookCommand(
+      data, "SessionStart", "sextant hook sessionstart", "*"
+    ),
+    userPromptSubmit: hasHookCommand(
+      data, "UserPromptSubmit", "sextant hook refresh", "*"
+    ),
+    filePostToolUse: hasHookCommand(
+      data,
+      "PostToolUse",
+      "sextant hook posttooluse",
+      "Read|Edit|Write|MultiEdit|NotebookEdit"
+    ),
+    subagentStart: hasHookCommand(
+      data, "SubagentStart", "sextant hook subagentstart", "*"
+    ),
+    taskPreToolUse: hasHookCommand(
+      data, "PreToolUse", "sextant hook pretask", "Task|Agent"
+    ),
+    taskPostToolUse: hasHookCommand(
+      data, "PostToolUse", "sextant hook posttooluse", "Task|Agent"
+    ),
+    preTaskRequired,
+    taskPreToolUseConflict: preTaskRequired && (
+      hasHookConflict(data, "PreToolUse", "sextant hook pretask", "Task|Agent") ||
+      scopeState.externalPreTaskConflicts.length > 0
+    ),
+    externalPreTaskConflicts: scopeState.externalPreTaskConflicts,
+    hooksDisabled: scopeState.hooksDisabled,
+    hooksDisabledSource: scopeState.hooksDisabledSource,
+    projectHooksBlockedByPolicy: scopeState.projectHooksBlockedByPolicy,
+    managedOnlySource: scopeState.managedOnlySource,
   };
+}
+
+function claudeHooksComplete(hooks) {
+  return Boolean(
+    hooks.exists &&
+    hooks.sessionStart &&
+    hooks.userPromptSubmit &&
+    hooks.filePostToolUse &&
+    hooks.subagentStart &&
+    (!hooks.preTaskRequired || hooks.taskPreToolUse) &&
+    hooks.taskPostToolUse &&
+    !hooks.taskPreToolUseConflict &&
+    !hooks.hooksDisabled &&
+    !hooks.projectHooksBlockedByPolicy
+  );
+}
+
+function displayHookSource(root, source) {
+  if (!source || !source.file) return "another Claude settings scope";
+  const home = os.homedir();
+  const configDir = process.env.CLAUDE_CONFIG_DIR;
+  if (configDir && source.file === path.join(configDir, "settings.json")) {
+    return "$CLAUDE_CONFIG_DIR/settings.json";
+  }
+  if (source.file === path.join(home, ".claude", "settings.json")) {
+    return "~/.claude/settings.json";
+  }
+  const relative = path.relative(root, source.file);
+  return relative && !relative.startsWith("..") ? relative : source.file;
 }
 
 function printStatus(root, mcp, hooks) {
@@ -80,27 +177,59 @@ function printStatus(root, mcp, hooks) {
   } else {
     lines.push(`  ✓ Registered MCP server in ${rel(mcp.path)}`);
   }
-  if (!hooks.exists) {
+  if (hooks.hooksDisabled) {
+    lines.push(`  ⚠ Claude Code hooks are disabled by ${displayHookSource(root, hooks.hooksDisabledSource)}`);
+  } else if (hooks.projectHooksBlockedByPolicy) {
+    lines.push(`  ⚠ Project hooks are blocked by managed allowManagedHooksOnly policy`);
+  } else if (!hooks.exists) {
     lines.push(`  ⚠ .claude/settings.json not found — Claude Code hooks NOT configured`);
-  } else if (!hooks.sessionStart || !hooks.userPromptSubmit || !hooks.postToolUse) {
+  } else if (!claudeHooksComplete(hooks)) {
     const missing = [];
     if (!hooks.sessionStart) missing.push("SessionStart");
     if (!hooks.userPromptSubmit) missing.push("UserPromptSubmit");
-    if (!hooks.postToolUse) missing.push("PostToolUse");
+    if (!hooks.filePostToolUse) missing.push("PostToolUse(file tools)");
+    if (!hooks.subagentStart) missing.push("SubagentStart");
+    if (hooks.preTaskRequired && !hooks.taskPreToolUse) missing.push("PreToolUse(Task|Agent experiment)");
+    if (!hooks.taskPostToolUse) missing.push("PostToolUse(Task|Agent)");
+    if (hooks.taskPreToolUseConflict) missing.push("PreToolUse(Task|Agent conflict)");
     lines.push(`  ⚠ Missing Claude Code hook(s): ${missing.join(", ")}`);
+    if (hooks.taskPreToolUseConflict) {
+      lines.push("    Existing Task/Agent PreToolUse handler left untouched; input rewriters cannot be auto-composed safely.");
+      if (hooks.externalPreTaskConflicts?.length) {
+        const sources = hooks.externalPreTaskConflicts
+          .map((source) => displayHookSource(root, source))
+          .join(", ");
+        lines.push(`    Overlap found outside project settings: ${sources}`);
+      }
+    }
   } else {
     lines.push(`  ✓ Claude Code hooks configured`);
   }
   lines.push("");
   lines.push("Next:");
   lines.push("  sextant scan --force        # build the dependency graph");
-  if (!hooks.exists || !hooks.sessionStart || !hooks.userPromptSubmit || !hooks.postToolUse) {
+  if (hooks.hooksDisabled) {
+    lines.push("");
+    lines.push(`Set disableAllHooks to false or remove it in ${displayHookSource(root, hooks.hooksDisabledSource)}.`);
+  } else if (hooks.projectHooksBlockedByPolicy) {
+    lines.push("");
+    lines.push("Managed policy allows only managed hooks; ask the policy owner to deploy Sextant there.");
+  } else if (hooks.taskPreToolUseConflict) {
+    lines.push("");
+    lines.push("Resolve the existing Task/Agent PreToolUse handler before adding Sextant's input rewriter.");
+    lines.push("Sextant leaves it untouched because concurrent updatedInput rewrites are not safely composable.");
+  } else if (!claudeHooksComplete(hooks)) {
     lines.push("");
     lines.push("To wire the Claude Code hooks, add to .claude/settings.json:");
     lines.push('  "hooks": {');
     lines.push('    "SessionStart":     [{ "matcher": "*", "hooks": [{ "type": "command", "command": "sextant hook sessionstart" }] }],');
     lines.push('    "UserPromptSubmit": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "sextant hook refresh"       }] }],');
-    lines.push('    "PostToolUse":      [{ "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "sextant hook posttooluse" }] }]');
+    lines.push('    "PostToolUse":      [{ "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "sextant hook posttooluse" }] },');
+    lines.push('                         { "matcher": "Task|Agent", "hooks": [{ "type": "command", "command": "sextant hook posttooluse" }] }],');
+    lines.push('    "SubagentStart":    [{ "matcher": "*", "hooks": [{ "type": "command", "command": "sextant hook subagentstart" }] }]' + (hooks.preTaskRequired ? ',' : ''));
+    if (hooks.preTaskRequired) {
+      lines.push('    "PreToolUse":       [{ "matcher": "Task|Agent", "hooks": [{ "type": "command", "command": "sextant hook pretask" }] }]');
+    }
     lines.push("  }");
   }
   process.stdout.write(lines.join("\n") + "\n");
@@ -122,9 +251,13 @@ function printStatus(root, mcp, hooks) {
 // JSON and maps SessionStart/UserPromptSubmit onto its internal session_start /
 // user_prompt_submit events (verified: ~/.codex/config.toml stores a trusted_hash
 // for an existing repo's .codex/hooks.json with `user_prompt_submit:0:0`).
-// PostToolUse is intentionally omitted — it's unverified under Codex and an
-// unknown event could break hook parsing; the static+query-aware injection (the
-// two events here) is the proven set.
+// Codex 0.144.4 has an exact `spawn_agent` Pre/PostToolUse identity seam, so an
+// operational Phase-F spawn adapter is feasible. The existing Claude handler
+// is not Codex-wire-compatible (`message` vs `prompt`, and Codex requires an
+// allow decision when returning updatedInput), and Codex lacks the file-tool
+// observation parity required by the overlap experiment. Keep init on the two
+// field-verified hooks until a dedicated spawn adapter can be installed without
+// enrolling Codex in the causal denominator.
 const CODEX_SESSIONSTART = { matcher: "*", hooks: [{ type: "command", command: "sextant hook sessionstart" }] };
 const CODEX_USERPROMPT = { hooks: [{ type: "command", command: "sextant hook refresh" }] };
 
@@ -287,6 +420,9 @@ module.exports = {
   ensureMcpJson,
   checkClaudeHooks,
   hasSextantHook,
+  hasHookCommand,
+  hasHookConflict,
+  claudeHooksComplete,
   ensureCodexHooks,
   ensureCodexMcp,
   ensureAgentsMd,

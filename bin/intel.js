@@ -28,6 +28,7 @@ Usage:
   sextant hook refresh
   sextant hook posttooluse
   sextant hook pretask
+  sextant hook subagentstart
   sextant inject
   sextant retrieve <query>
   sextant zoekt <index|serve|search>
@@ -87,6 +88,11 @@ const commandMap = {
     }
     if (sub === "pretask") {
       const { run } = require("../commands/hook-pretask");
+      await run();
+      return;
+    }
+    if (sub === "subagentstart") {
+      const { run } = require("../commands/hook-subagentstart");
       await run();
       return;
     }

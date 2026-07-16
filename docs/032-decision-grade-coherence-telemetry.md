@@ -59,6 +59,79 @@ exposure state and its marker are protected. Orphan dead-lock, inactive-marker, 
 expired temporary sidecars are collected conservatively. The cap is soft only when
 protected states alone exceed it.
 
+## Rollout wiring
+
+Claude Code repositories do not need hand-edited Task/Agent hooks. Existing
+installs self-repair on the next Sextant-backed SessionStart or prompt hook.
+To repair immediately after updating Sextant, run the idempotent installer in
+the repo and start a new Claude Code session:
+
+```bash
+sextant init
+```
+
+The installer always adds the base SessionStart/UserPromptSubmit hooks,
+file-tool PostToolUse scoring, Task/Agent PostToolUse return joins, and a
+`SubagentStart` handler. In ordinary repositories that handler contributes
+freshness-gated, repo-generic context before the child's first prompt. It does
+not replace the spawning tool's input and composes with other additive
+`SubagentStart` context providers. Its `subagentstart.injected` and
+`subagentstart.skipped` events measure hook publication health separately from
+the Phase-F causal scorecard: `injected` proves valid context crossed stdout,
+not that the child received or used it. Behavioral confirmation remains the
+trajectory surface.
+
+Only repositories with both Task Capsules and coherence explicitly enabled add
+the Task/Agent PreToolUse handler. In that experiment, `SubagentStart` stays
+silent and PreToolUse supplies prompt-derived orientation plus the exact
+`tool_use_id` needed for the prepared-snapshot/return join. This split preserves
+the experiment's identity contract without exposing ordinary repos to competing
+`updatedInput` rewrites.
+
+The installer serializes Sextant's own repair processes and writes the additive
+settings update by atomic replacement. It preserves unrelated settings and the
+existing file mode, honors `$CLAUDE_CONFIG_DIR`, and recognizes the historic
+`Agent|Task` matcher spelling without adding a duplicate. For an enabled
+experiment, project, local, user, and file-managed settings are checked for an
+overlapping synchronous Task/Agent PreToolUse handler. When one is found,
+Sextant removes or withholds its own project input rewriter and reports the
+source because concurrent `updatedInput` rewrites cannot be composed safely.
+The PreToolUse command repeats the read-only static-scope check at execution;
+therefore a user- or managed-scope Sextant provider also withholds output when
+another known static rewriter is present.
+`disableAllHooks` and file-managed `allowManagedHooksOnly` are reported
+separately from hook-entry presence.
+
+Claude can additionally load hooks from plugins, active skill/agent frontmatter,
+server-managed policy, and the in-memory session. Those dynamic scopes are not
+reliably enumerable by a repository installer. Experiment operators using them
+for Task/Agent input rewriting must inspect Claude's read-only `/hooks` browser,
+which shows the merged runtime set and each hook's source. Ordinary repos do not
+need this input-rewriter audit because they use additive `SubagentStart` context.
+Hook presence does not enable the experiment: `capsule`, `coherence`, and the
+exact 50% holdback configuration below remain explicit repository gates.
+
+Both channels follow the
+[Claude Code hooks contract](https://code.claude.com/docs/en/hooks) and were
+live-smoked with Claude Code 2.1.211. `SubagentStart` delivered
+`additionalContext` to a real child before its first prompt. In a separate
+experiment smoke, the PreToolUse response delivered the prompt-derived block
+without a `permissionDecision`, so it did not auto-approve the spawn.
+
+Codex 0.144.4 exposes `spawn_agent` on PreToolUse and PostToolUse with a stable
+shared session ID and tool-use ID, so a dedicated adapter can preserve Sextant's
+spawn-preparation/parent-return identity and parent-visible report channel. That
+operational lifecycle adapter is not part of this rollout, and
+`sextant init --codex` still installs only the field-verified SessionStart and
+UserPromptSubmit hooks.
+
+This does not establish decision-grade outcome parity. Codex does not expose the
+same complete parent Read/Edit/Write/MultiEdit/NotebookEdit observation lane;
+`apply_patch`, shell, code-mode, and other function-tool paths have different or
+incomplete file semantics. Codex traffic therefore remains outside the overlap
+experiment and its causal denominator until a runtime-specific file-outcome
+adapter and attribution tests exist.
+
 ## Scorecard
 
 Run the scorecard after the system has accrued real multi-agent work:

@@ -1,5 +1,10 @@
 # 022 — Subagent orientation Phase 0 recon: results + verdicts
 
+> **Historical recon.** Claude Code 2.1.211 subsequently live-verified child-bound
+> `SubagentStart` `additionalContext`. The current safe default and the gated
+> PreToolUse experiment split are documented in docs/032; the results below
+> remain the evidence for the older prompt-rewrite channel.
+
 Date: 2026-07-10, main @ 099aada, Claude Code 2.1.206. The docs/018 Phase 0
 probes (R-A/R-B/R-C; R-D was done 2026-07-02). Raw method + artifacts:
 `docs/recon/018-subagents/`. **Verdict up front: GO for Lane A** — the

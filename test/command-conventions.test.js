@@ -25,6 +25,7 @@ const HOOK_FILES = new Set([
   "hook-sessionstart.js",
   "hook-posttooluse.js",
   "hook-pretask.js",
+  "hook-subagentstart.js",
 ]);
 
 describe("command conventions", () => {

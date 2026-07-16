@@ -1,13 +1,14 @@
 "use strict";
 
-// PreToolUse Task/Agent hook — subagent orientation Lane A (docs/018 + 022).
+// PreToolUse Task/Agent hook — prompt-derived Phase-F orientation (docs/031).
 //
 // Fires in the PARENT session when it is about to spawn a subagent (matcher
 // "Task|Agent"; the tool arrives as tool_name "Agent" with input keys
 // description/prompt/subagent_type/...). Returns `updatedInput` with a
 // compact facts-only <codebase-intelligence> block APPENDED to
-// tool_input.prompt — the injection-equivalent for subagents, which receive
-// NO hook injection of their own (0/~205 transcripts, docs/016 R4 + 022 R-B).
+// tool_input.prompt. Ordinary repos now use Claude's additive SubagentStart
+// context surface; this input-rewriting path is retained only where the
+// coherence experiment needs the task prompt and tool-use identity.
 //
 // THE PRIME DIRECTIVE — never-modify-on-doubt: a corrupted Task call breaks
 // agent spawning for the whole session, which is strictly worse than an
@@ -15,23 +16,24 @@
 // 0 with NO stdout (tool call proceeds byte-identical). This is stronger
 // than the other hooks' never-throw rule.
 //
-// Field-verified output pattern (docs/recon/018-subagents/pretask-hook.js,
-// R-A PASS on general-purpose + Explore): hookSpecificOutput with
-// permissionDecision "allow" + updatedInput. Residual pre-registered risk:
-// how updatedInput renders in the INTERACTIVE permission dialog was not
-// observable headless — this hook stays dogfood-wired (not in `sextant init`)
-// until that spot check happens.
+// The original R-A probe field-verified the updatedInput shape with an explicit
+// allow decision. The rollout form intentionally omits that decision: Claude's
+// current hook contract keeps the normal permission flow when no decision is
+// returned, and docs/032 records the Claude Code 2.1.211 live smoke. This hook
+// must never auto-approve a Task call. `sextant init` installs the parent-side
+// hook only for explicit capsule+coherence experiment repos. Default Lane-A
+// orientation uses the composable SubagentStart context surface instead. Every
+// uncertain path remains silent so an orientation failure cannot become a
+// failed Task call.
 
 const { recordEvent } = require("../lib/telemetry");
 const crypto = require("crypto");
 
-function serializedUpdate(toolInput, appended, reason) {
+function serializedUpdate(toolInput, appended) {
   const updated = { ...toolInput, prompt: toolInput.prompt + "\n\n" + appended };
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      permissionDecisionReason: reason,
       updatedInput: updated,
     },
   });
@@ -48,10 +50,42 @@ function sameValidatedRepo(validated, current) {
   );
 }
 
+// A project copy may be removed when init sees a static input-rewriter
+// conflict, but the same Sextant command can also be supplied by user, local,
+// or managed scope. Guard again at the execution boundary so an external
+// Sextant provider cannot race the known foreign rewriter that caused project
+// installation to fail closed. Dynamic plugin/skill/agent/session hooks remain
+// the documented `/hooks` operator boundary because the process cannot
+// enumerate them here.
+function hasKnownStaticInputConflict(root, scopeOptions = {}) {
+  try {
+    const claudeHooks = require("../lib/claude-hooks");
+    const state = claudeHooks.inspectClaudeHookScopes(root, scopeOptions);
+    const managedOnly = state.projectHooksBlockedByPolicy;
+    if (state.externalPreTaskConflicts.some((source) =>
+      !managedOnly || source.scope === "managed"
+    )) return true;
+    if (managedOnly) return false;
+    return state.sources.some((source) =>
+      source.scope === "project" &&
+      claudeHooks.settingsHookConflict(
+        source.settings,
+        "PreToolUse",
+        "sextant hook pretask",
+        "Task|Agent"
+      )
+    );
+  } catch {
+    // Never rewrite on doubt. A later init/status pass can explain and repair
+    // static configuration; this spawn must remain byte-identical.
+    return true;
+  }
+}
+
 // Orientation is upstream of the Phase-F snapshot path, but it is still part
 // of the spawn pipeline whose reliability the scorecard gates. Record these
 // early exits so the denominator is not selected only after Lane A succeeds.
-function recordUnavailableSpawnLifecycle(root, data, outcome, reason, startedAt) {
+function recordUnavailableSpawnLifecycle(root, data, outcome, reason, durationMs) {
   try {
     const coherence = require("../lib/coherence");
     if (!coherence.coherenceEnabled(root)) return;
@@ -78,7 +112,7 @@ function recordUnavailableSpawnLifecycle(root, data, outcome, reason, startedAt)
       generation: 0,
       claims: 0,
       worksetPaths: 0,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     }));
   } catch {}
 }
@@ -94,6 +128,11 @@ async function run() {
     const { checkRoot } = require("../lib/root-guard");
     if (!checkRoot(root, { requireMarker: true }).ok) return;
 
+    // updatedInput values from matching hooks race rather than compose. Keep
+    // this path exclusive to the explicit Phase-F experiment; ordinary repos
+    // receive repo-generic orientation through SubagentStart instead.
+    if (!require("../lib/coherence").coherenceEnabled(root)) return;
+
     const { readStdinJson } = require("../lib/cli");
     const data = await readStdinJson();
     if (!data || typeof data !== "object") return;
@@ -102,6 +141,20 @@ async function run() {
     if (!ti || typeof ti !== "object" || Array.isArray(ti)) return;
     if (typeof ti.prompt !== "string" || !ti.prompt) return;
 
+    const orientationStarted = Date.now();
+    if (hasKnownStaticInputConflict(root)) {
+      const durationMs = Math.max(0, Date.now() - orientationStarted);
+      recordUnavailableSpawnLifecycle(
+        root,
+        data,
+        "withheld",
+        "static_hook_conflict",
+        durationMs
+      );
+      recordEvent(root, "pretask.skipped", { reason: "static_hook_conflict" });
+      return;
+    }
+
     // Never double-inject: a re-fired hook, a retried Task call, or a
     // subagent spawning its own subagent may already carry a block.
     if (ti.prompt.includes("</codebase-intelligence>")) {
@@ -109,31 +162,32 @@ async function run() {
       return;
     }
 
-    const orientationStarted = Date.now();
     const { buildOrientationBlock, ORIENT_MAX_BYTES } = require("../lib/orient");
     let built;
     try {
       built = await buildOrientationBlock(root, ti.prompt);
     } catch {
+      const durationMs = Math.max(0, Date.now() - orientationStarted);
       recordUnavailableSpawnLifecycle(
         root,
         data,
         "failed",
         "orientation_exception",
-        orientationStarted
+        durationMs
       );
       return;
     }
     if (!built) {
       // Silent absence: content-stale graph / no graph / internal error.
-      recordEvent(root, "pretask.skipped", { reason: "no_block" });
+      const durationMs = Math.max(0, Date.now() - orientationStarted);
       recordUnavailableSpawnLifecycle(
         root,
         data,
         "withheld",
         "orientation_unavailable",
-        orientationStarted
+        durationMs
       );
+      recordEvent(root, "pretask.skipped", { reason: "no_block" });
       return;
     }
 
@@ -144,7 +198,14 @@ async function run() {
     let coherenceReportMeta = null;
     let coherenceEligibleMeta = null;
     let coherenceReportV1 = null;
+    let coherenceAnalysisV1 = null;
     let recordCoherenceLifecycle = null;
+    const flushCoherenceAnalysis = () => {
+      if (!coherenceAnalysisV1) return;
+      const event = coherenceAnalysisV1;
+      coherenceAnalysisV1 = null;
+      recordEvent(root, "coherence.report", event);
+    };
 
     // PHASE F — a child capsule is the immutable record of facts this hook
     // prepared for one Agent/Task spawn. It does not prove the tool accepted
@@ -166,7 +227,12 @@ async function run() {
           : "task_" + capsuleLib.shortHash(parentSessionKey);
         const metrics = require("../lib/coherence-metrics");
         let lifecycleRecorded = false;
-        recordCoherenceLifecycle = (outcome, reason, state = "spawn_prepared") => {
+        recordCoherenceLifecycle = (
+          outcome,
+          reason,
+          state = "spawn_prepared",
+          durationMs = Math.max(0, Date.now() - orientationStarted)
+        ) => {
           if (lifecycleRecorded) return;
           lifecycleRecorded = true;
           recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
@@ -183,12 +249,13 @@ async function run() {
               ? snapshot.servedClaims.length
               : 0,
             worksetPaths: built.taskFiles.length,
-            durationMs: Date.now() - orientationStarted,
+            durationMs,
           }));
         };
         if (!childKey) {
+          const durationMs = Math.max(0, Date.now() - orientationStarted);
+          recordCoherenceLifecycle("missing", "no_spawn_id", null, durationMs);
           recordEvent(root, "coherence.skipped", { reason: "no_spawn_id" });
-          recordCoherenceLifecycle("missing", "no_spawn_id", null);
         } else {
           const workset = coherence.contextPathWorkset(built.taskFiles || []);
           const servedClaims = require("../lib/claims").mintClaims(root, built.taskFiles || [], {
@@ -313,26 +380,28 @@ async function run() {
             boundaryId: reportBoundaryId,
             surface: "child_spawn",
           });
-          recordEvent(root, "coherence.report", {
+          coherenceAnalysisV1 = {
             ...analysis,
             stage: "analysis",
             outcome: analysis.reportFindings > 0 ? "eligible" : "none",
             durationMs: Math.max(0, Date.now() - reportStarted),
-          });
+          };
 
         }
       }
     } catch {
       // Phase F absence must never endanger the proven Lane-A spawn rewrite.
       if (recordCoherenceLifecycle) {
-        recordCoherenceLifecycle("failed", "phase_f_exception");
+        const durationMs = Math.max(0, Date.now() - orientationStarted);
+        recordCoherenceLifecycle("failed", "phase_f_exception", "spawn_prepared", durationMs);
       } else {
+        const durationMs = Math.max(0, Date.now() - orientationStarted);
         recordUnavailableSpawnLifecycle(
           root,
           data,
           "failed",
           "phase_f_setup_exception",
-          orientationStarted
+          durationMs
         );
       }
       snapshot = null;
@@ -348,18 +417,8 @@ async function run() {
     let coherenceOut;
     let laneOut;
     try {
-      coherenceOut = serializedUpdate(
-        ti,
-        appended,
-        snapshot
-          ? "sextant: appended codebase orientation and spawn coherence"
-          : "sextant: appended codebase orientation block"
-      );
-      laneOut = serializedUpdate(
-        ti,
-        built.block,
-        "sextant: appended codebase orientation block"
-      );
+      coherenceOut = serializedUpdate(ti, appended);
+      laneOut = serializedUpdate(ti, built.block);
       if (snapshot) {
         // Hash the exact serialized rewrite, including every original
         // tool_input field and the complete appended payload. Same prompt text
@@ -371,8 +430,10 @@ async function run() {
       }
     } catch {
       if (recordCoherenceLifecycle) {
-        recordCoherenceLifecycle("failed", "serialization_failed");
+        const durationMs = Math.max(0, Date.now() - orientationStarted);
+        recordCoherenceLifecycle("failed", "serialization_failed", "spawn_prepared", durationMs);
       }
+      flushCoherenceAnalysis();
       return;
     }
 
@@ -408,11 +469,13 @@ async function run() {
         // The registrar rechecked the graph anchors while holding the identity
         // lock and persisted nothing. Lane A is stale too, so preserve the
         // original tool call byte-for-byte.
+        if (recordCoherenceLifecycle) {
+          const durationMs = Math.max(0, Date.now() - orientationStarted);
+          recordCoherenceLifecycle("moved", "fingerprint_moved", "spawn_prepared", durationMs);
+        }
+        flushCoherenceAnalysis();
         recordEvent(root, "pretask.skipped", { reason: "fingerprint_moved" });
         recordEvent(root, "coherence.skipped", { reason: "fingerprint_moved" });
-        if (recordCoherenceLifecycle) {
-          recordCoherenceLifecycle("moved", "fingerprint_moved");
-        }
         return;
       }
     }
@@ -432,19 +495,25 @@ async function run() {
             );
           } catch {}
         }
+        if (snapshot) {
+          if (recordCoherenceLifecycle) {
+            const durationMs = Math.max(0, Date.now() - orientationStarted);
+            recordCoherenceLifecycle("moved", "fingerprint_moved", "spawn_withheld", durationMs);
+          }
+        }
+        flushCoherenceAnalysis();
         recordEvent(root, "pretask.skipped", { reason: "fingerprint_moved" });
         if (snapshot) {
           recordEvent(root, "coherence.skipped", { reason: "fingerprint_moved" });
-          if (recordCoherenceLifecycle) {
-            recordCoherenceLifecycle("moved", "fingerprint_moved", "spawn_withheld");
-          }
         }
         return;
       }
     } catch {
       if (recordCoherenceLifecycle) {
-        recordCoherenceLifecycle("failed", "fingerprint_check_failed");
+        const durationMs = Math.max(0, Date.now() - orientationStarted);
+        recordCoherenceLifecycle("failed", "fingerprint_check_failed", "spawn_prepared", durationMs);
       }
+      flushCoherenceAnalysis();
       return;
     }
 
@@ -455,10 +524,31 @@ async function run() {
       process.stdout.write(out);
     } catch {
       if (recordCoherenceLifecycle) {
-        recordCoherenceLifecycle("failed", "stdout_failed", "spawn_withheld");
+        const durationMs = Math.max(0, Date.now() - orientationStarted);
+        recordCoherenceLifecycle("failed", "stdout_failed", "spawn_withheld", durationMs);
       }
+      flushCoherenceAnalysis();
       return;
     }
+    const operationDurationMs = Math.max(0, Date.now() - orientationStarted);
+    if (snapshot && recordCoherenceLifecycle) {
+      const outcome = registration && registration.status === "written"
+        ? "written"
+        : registration && registration.status === "retry"
+          ? "retry"
+          : registration && registration.status === "ambiguous"
+            ? "ambiguous"
+            : registration && registration.status === "withheld"
+              ? "withheld"
+              : "failed";
+      recordCoherenceLifecycle(
+        outcome,
+        coherenceSkipReason,
+        "spawn_prepared",
+        operationDurationMs
+      );
+    }
+    flushCoherenceAnalysis();
     recordEvent(root, "pretask.injected", {
       subagentType: typeof ti.subagent_type === "string" ? ti.subagent_type : null,
       bytes: built.bytes,
@@ -473,18 +563,6 @@ async function run() {
           claims: snapshot.servedClaims.length,
           agentType: snapshot.agentType,
         });
-      }
-      if (recordCoherenceLifecycle) {
-        const outcome = registration && registration.status === "written"
-          ? "written"
-          : registration && registration.status === "retry"
-            ? "retry"
-            : registration && registration.status === "ambiguous"
-              ? "ambiguous"
-              : registration && registration.status === "withheld"
-                ? "withheld"
-                : "failed";
-        recordCoherenceLifecycle(outcome, coherenceSkipReason);
       }
     }
     if (coherenceSkipReason) {
@@ -502,4 +580,4 @@ async function run() {
   }
 }
 
-module.exports = { run };
+module.exports = { run, hasKnownStaticInputConflict };
