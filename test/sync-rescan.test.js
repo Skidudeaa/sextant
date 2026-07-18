@@ -201,9 +201,20 @@ describe("applyFreshnessGate — sync rescue end-to-end", () => {
     // make it stale: new commit moves HEAD past the recorded scan state
     fs.writeFileSync(path.join(root, "c.js"), "module.exports = 2;\n");
     execSync("git add -A && git -c user.email=t@t -c user.name=t commit -qm change", { cwd: root });
-    // fast recorded history so the stats gate opens (overwrites the real
-    // scan.completed the init scan recorded — deterministic decision)
-    seedScanDurations(root, [500, 500, 500, 500, 500]);
+    // Fast recorded history so the stats gate WOULD independently choose sync
+    // (a realistic ~2s p95 — a cold `sextant` scan is dominated by node +
+    // sql.js WASM + zoekt startup, not a fictional 500ms). The gate decision
+    // itself is locked by the "shouldSyncRescan — evidence-based decision"
+    // subtest; here we exercise the end-to-end RESCUE.
+    seedScanDurations(root, [2000, 2000, 2000, 2000, 2000]);
+    // Force the max (8s) kill window rather than the history-DERIVED one. This
+    // subtest spawns a REAL `sextant rescan`; inside the full parallel suite,
+    // CPU saturation stretches even a 3-file scan to 2.5-5.9s (measured), so a
+    // derived window racing the child was a load-dependent flake. env=1 gives a
+    // deterministic 8000ms window (> observed worst case) without altering the
+    // production timeout bounds; the seed above keeps the repo fast-shaped so
+    // the forced path matches what the stats gate would pick anyway.
+    process.env.SEXTANT_SYNC_RESCAN = "1";
     process.env.SEXTANT_BIN = BIN;
 
     const out = await cli.applyFreshnessGate(FAKE_RAW, root);
