@@ -92,7 +92,7 @@ as independent samples inflates the effective n by ~10× and understates the CI.
 `HOLDBACK_MIN_SCORED = 30` gate protects against small n but not against the wrong unit, so
 `benefitDelta` would become "citable" while remaining statistically wrong.
 
-## 5. Sync rescan is one heavy day from switching itself off
+## 5. Sync rescan is reading history instead of reality
 
 Live gate decision on this repo:
 
@@ -104,10 +104,26 @@ Clean measured scans now run **1.91 / 1.99 / 2.12 s** (lifetime p50 was 1.14s). 
 297ms under its own cap.
 
 `shouldSyncRescan` (`lib/freshness.js:908`) ingests **every** `scan.completed` in the
-telemetry file — no recency window, no trigger filter, 147 all-time samples. That pool
-includes two 18.8s scans recorded on 2026-07-18 while the full test suite was running. One
-heavy day raises the all-time p95 above the cap and blacks out the rescue lane; because old
-fast samples never expire preferentially, recovery is slow and arbitrary.
+telemetry file — no recency window, no robustness, 147 all-time samples.
+
+A first reading of this said "one heavy day trips the gate". Measuring it refuted that, and
+the real shape is worse in a more interesting way:
+
+| pool | p50 | p95 | verdict at the 2500ms cap |
+|------|----:|----:|---------------------------|
+| all-time (n=152) | 1154 | 2202 | passes, barely |
+| last 80 | 1568 | 2569 | **fails** |
+| last 50 | 1769 | 3609 | **fails** |
+| last 30 | 1863 | 7524 | **fails** |
+| last 20 | 1958 | 10816 | **fails** |
+
+The two 18.8s / 10.4s scans recorded on 2026-07-18 under full-suite load sit *above* the
+all-time p95, so they barely move it — the all-time pool is accidentally protected by
+dilution. Shorten the window and those same spikes become 4–10% of the sample and dominate
+the percentile. So a recency window **alone would have disabled the lane**, and the gate
+currently passes only because it is reading months of history rather than the present.
+
+Both halves need fixing together: window for recency, trim for robustness.
 
 Meanwhile the blackout rate went **up**: 38.1% of reads in the last 12 days vs 31.2%
 lifetime. And the dominant stale reason inverted — `scanner_version_changed` is now 76.2% of
@@ -115,8 +131,24 @@ stale reads (vs `head_changed` 62.4% lifetime). Most blackouts are now caused by
 shipping, which is the most predictable stale reason there is.
 
 Scan duration itself roughly doubled (p50 1.14s → ~2.0s). Co-change mining is not the cause
-(`git log -n3000 --name-only` measures 37ms); the regression is elsewhere in the Phase C–E
-additions.
+(`git log -n3000 --name-only` measures 37ms). A CPU profile of a forced scan located it:
+
+```
+33.2%  node_modules/@babel/parser      <- every JS/TS file parsed TWICE
+14.9%  node:internal/child_process     <- git subprocesses (4x captureCurrentStateDetailed
+11.2%  node_modules/sql.js                + cochange + getGitInfo + getRecentGitFiles)
+ 7.2%  wasm (sql.js)
+```
+
+`extractImports()` and `extractExports()` run back-to-back on the same source at
+`intel.js:1067-1068`, and `js_ast_imports.js` / `js_ast_exports.js` each called
+`parser.parse(code, PARSE_OPTS)` with *byte-identical* options. Roughly half of the 33% was
+redundant.
+
+The `spawnSync` share is real but is NOT safe to memoize: `captureCurrentStateDetailed` is
+deliberately re-invoked at distinct points (indexing, `persistGraphUnlocked`, summary
+binding), and caching its result across a scan would record a pre-scan status as if it were
+post-scan — breaking the atomicity invariant the freshness gate depends on. Left alone.
 
 ## 6. Phases C and F shipped dark
 
@@ -170,17 +202,30 @@ single dogfood repo.
    per arm) and gate on turns per arm, not opens per arm. This is the unit the randomization
    actually happened at.
 
-### Tier 2 — stop the blackouts
+### Tier 2 — stop the blackouts — **SHIPPED**
 
-4. **Bound the sync-rescan gate's sample pool** to a recency window (last ~50 scans or 14
-   days) and exclude scans recorded under test-suite load, so one heavy day cannot disable
-   the rescue lane for months.
-5. **Handle `scanner_version_changed` without a blackout.** It is 76% of stale reads and is
-   entirely self-inflicted: a version bump on an otherwise-unchanged tree invalidates no
-   structural fact that a rescan cannot immediately restore. This is the highest-yield
-   blackout reduction available.
-6. **Investigate the p50 1.14s → 2.0s scan regression** introduced somewhere in Phases C–E.
-   Co-change mining is ruled out (37ms).
+4. **Windowed + outlier-trimmed sync-rescan gate.** Pool is now the most recent 50 successful
+   scans with the slowest tenth dropped (`SYNC_RESCAN_WINDOW` / `SYNC_RESCAN_TRIM_FRACTION`).
+   On this repo that reads p95 2201ms over 45 kept samples, where the raw last-50 p95 of
+   3609ms would have disabled the lane. Trimming weakens the worst-case guarantee to roughly
+   the raw p85, which is only acceptable because the in-hook child is already hard-killed at
+   `timeoutMs` — the tail risk is bounded by the kill, not by this estimate. The decision now
+   reports `windowed` and `trimmed` counts for observability.
+
+5. **Version-only staleness bypasses the stats gate.** When the sole stale signal is
+   `scanner_version_changed` / `schema_version_changed` *and* `contentChanged === false`,
+   `shouldSyncRescan(root, {versionOnly: true})` authorises a synchronous rescan regardless of
+   recorded history, at the maximum timeout. Content is unchanged, so the rescan cannot lose a
+   race against the working tree and the post-scan re-verify has nothing to catch; the cost is
+   once per upgrade per repo. The env kill switch, the per-repo config opt-out and the failure
+   cooldown all still apply. A version bump that *coincides* with a checkout is excluded —
+   `contentChanged` is computed independently of the single-valued reason race. Telemetry
+   carries `gate: "version_only" | "stats"` so the two arms stay separable.
+
+6. **Scan regression fixed: single-parse front-end.** `lib/extractors/js_ast_cache.js` gives
+   both AST lanes one shared, single-entry, source-keyed parse cache (failures cached too).
+   Measured scans went **1.91 / 1.99 / 2.12 s → 1.60 / 1.64 / 1.77 s** (~17%), matching the
+   predicted saving from halving babel. Self-eval byte-identical.
 
 ### Tier 3 — earn a verdict on the dark phases
 

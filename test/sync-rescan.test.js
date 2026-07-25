@@ -131,6 +131,103 @@ describe("shouldSyncRescan — evidence-based decision", () => {
     ]);
     assert.equal(freshness.shouldSyncRescan(root).sync, true);
   });
+
+  // RECENCY WINDOW + OUTLIER TRIM (docs/033 Tier 2 #4). The pool used to be
+  // every scan ever recorded, which read history instead of reality; a naive
+  // recency window alone made things WORSE, because load-spike outliers are a
+  // large fraction of a short window. Measured on the dogfood repo: all-time
+  // p95 2202ms / last-50 raw 3609ms / last-50 trimmed 2182ms.
+  it("ignores history beyond the recency window", () => {
+    const root = mkRoot();
+    // 60 slow scans then 50 fast ones: only the fast tail may count.
+    seedScanDurations(root, [
+      ...Array.from({ length: 60 }, () => 9000),
+      ...Array.from({ length: 50 }, () => 1000),
+    ]);
+    const d = freshness.shouldSyncRescan(root);
+    assert.equal(d.sync, true, "an old slow era must not veto a now-fast repo");
+    assert.equal(d.p95, 1000);
+    assert.equal(d.windowed, freshness.SYNC_RESCAN_WINDOW);
+  });
+
+  it("trims load-spike outliers instead of letting them veto the lane", () => {
+    const root = mkRoot();
+    // 46 fast scans + 4 spikes: raw p95 would exceed the 2500ms ceiling,
+    // trimmed p95 does not. This is the 2026-07-18 full-suite-load shape.
+    seedScanDurations(root, [
+      ...Array.from({ length: 46 }, () => 1800),
+      18831, 10394, 4016, 3111,
+    ]);
+    const d = freshness.shouldSyncRescan(root);
+    assert.equal(d.sync, true);
+    assert.equal(d.trimmed, 5, "the slowest tenth of the window is set aside");
+    assert.ok(d.p95 <= freshness.SYNC_RESCAN_MAX_P95_MS, `p95 ${d.p95} must clear the ceiling`);
+  });
+
+  it("still refuses a repo that is genuinely slow throughout", () => {
+    const root = mkRoot();
+    // Trimming must not rescue a repo where the TYPICAL scan is slow — only
+    // the tail is treated as noise.
+    seedScanDurations(root, Array.from({ length: 50 }, () => 9000));
+    const d = freshness.shouldSyncRescan(root);
+    assert.equal(d.sync, false);
+    assert.equal(d.reason, "p95_too_slow");
+  });
+});
+
+// VERSION-ONLY BYPASS (docs/033 Tier 2 #5). scanner_version_changed was 76.2%
+// of stale reads on the dogfood repo — blackouts we inflict on ourselves by
+// shipping. Content is unchanged in that case, so the rescan cannot race the
+// working tree and the post-scan re-verify has nothing to catch.
+describe("shouldSyncRescan — version-only bypass (docs/033)", () => {
+  it("syncs with no scan history at all when only the version moved", () => {
+    const root = mkRoot();
+    seedScanDurations(root, [100, 100]); // below the sample floor
+    assert.equal(freshness.shouldSyncRescan(root).reason, "insufficient_samples");
+    const d = freshness.shouldSyncRescan(root, { versionOnly: true });
+    assert.equal(d.sync, true);
+    assert.equal(d.reason, "version_only");
+    assert.equal(d.timeoutMs, 8000, "version-only takes the maximum timeout");
+  });
+
+  it("syncs past a slow p95 when only the version moved", () => {
+    const root = mkRoot();
+    seedScanDurations(root, Array.from({ length: 50 }, () => 9000));
+    assert.equal(freshness.shouldSyncRescan(root).sync, false);
+    assert.equal(freshness.shouldSyncRescan(root, { versionOnly: true }).sync, true);
+  });
+
+  it("still honours the explicit env kill switch", () => {
+    const root = mkRoot();
+    const prev = process.env.SEXTANT_SYNC_RESCAN;
+    process.env.SEXTANT_SYNC_RESCAN = "0";
+    try {
+      const d = freshness.shouldSyncRescan(root, { versionOnly: true });
+      assert.equal(d.sync, false);
+      assert.equal(d.reason, "env_disabled");
+    } finally {
+      if (prev === undefined) delete process.env.SEXTANT_SYNC_RESCAN;
+      else process.env.SEXTANT_SYNC_RESCAN = prev;
+    }
+  });
+
+  it("still honours the per-repo config opt-out", () => {
+    const root = mkRoot();
+    fs.writeFileSync(path.join(root, ".codebase-intel.json"), JSON.stringify({ syncRescan: false }));
+    const d = freshness.shouldSyncRescan(root, { versionOnly: true });
+    assert.equal(d.sync, false);
+    assert.equal(d.reason, "config_disabled");
+  });
+
+  it("still backs off after a recent failed sync attempt", () => {
+    const root = mkRoot();
+    seedScanDurations(root, [100, 100, 100, 100, 100], [
+      { ts: Date.now() - 60_000, name: "freshness.sync_rescan", ok: false, state: "failed" },
+    ]);
+    const d = freshness.shouldSyncRescan(root, { versionOnly: true });
+    assert.equal(d.sync, false);
+    assert.equal(d.reason, "failure_cooldown");
+  });
 });
 
 describe("syncRescan — single-flight + marker lifecycle", () => {
@@ -231,6 +328,77 @@ describe("applyFreshnessGate — sync rescue end-to-end", () => {
     assert.equal(stale.length, 1);
     assert.equal(stale[0].rescanState, "sync");
     assert.equal(events.filter((e) => e.name === "freshness.blackout_turn").length, 0);
+  });
+
+  // VERSION-ONLY RESCUE (docs/033 Tier 2 #5). The sharp form: give the repo NO
+  // usable scan history, so the stats gate would refuse outright. Only the
+  // version-only bypass can rescue this turn — which is exactly the case that
+  // produced 76.2% of the dogfood repo's blackouts.
+  it("rescues a version-only stale read even with no scan history", async () => {
+    const root = mkRoot();
+    fs.writeFileSync(path.join(root, "a.js"), "const x = require('./b');\n");
+    fs.writeFileSync(path.join(root, "b.js"), "module.exports = 1;\n");
+    gitInitAndScan(root);
+
+    // Age the graph's scanner stamp WITHOUT touching a single file: this is
+    // "we shipped a new sextant", not "the user changed the repo".
+    const db = await graph.loadDb(root);
+    graph.setMetaValue(db, "scanner_version", "0.0.0-ancient");
+    await graph.persistDb(root);
+
+    const check = await freshness.checkFreshness(root);
+    assert.equal(check.fresh, false);
+    assert.equal(check.reason, "scanner_version_changed");
+    assert.equal(check.contentChanged, false, "content must be untouched for this case");
+
+    // No seeded durations at all — the stats arm cannot authorise this.
+    delete process.env.SEXTANT_SYNC_RESCAN;
+    process.env.SEXTANT_BIN = BIN;
+    assert.equal(freshness.shouldSyncRescan(root).sync, false, "stats arm must refuse here");
+
+    const out = await cli.applyFreshnessGate(FAKE_RAW, root);
+
+    assert.doesNotMatch(out, /Structural claims unavailable/, "must not blackout");
+    assert.match(out, /Indexed files/, "must carry the fresh structural body");
+    const events = fs
+      .readFileSync(path.join(root, ".planning", "intel", "telemetry.jsonl"), "utf8")
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const sync = events.filter((e) => e.name === "freshness.sync_rescan");
+    assert.equal(sync.length, 1);
+    assert.equal(sync[0].ok, true);
+    assert.equal(sync[0].gate, "version_only", "the bypass must be attributable in telemetry");
+    assert.equal(events.filter((e) => e.name === "freshness.blackout_turn").length, 0);
+  });
+
+  it("does NOT take the version-only bypass when content also moved", async () => {
+    const root = mkRoot();
+    fs.writeFileSync(path.join(root, "a.js"), "module.exports = 1;\n");
+    gitInitAndScan(root);
+
+    // Version bump AND a real content move in the same turn. contentChanged is
+    // computed independently of the single-valued reason race, so the coincidence
+    // must not be mistaken for a safe version-only rescan.
+    const db = await graph.loadDb(root);
+    graph.setMetaValue(db, "scanner_version", "0.0.0-ancient");
+    await graph.persistDb(root);
+    fs.writeFileSync(path.join(root, "c.js"), "module.exports = 2;\n");
+    execSync("git add -A && git -c user.email=t@t -c user.name=t commit -qm change", { cwd: root });
+
+    const check = await freshness.checkFreshness(root);
+    assert.equal(check.reason, "scanner_version_changed");
+    assert.equal(check.contentChanged, true, "the checkout must still register");
+
+    delete process.env.SEXTANT_SYNC_RESCAN;
+    process.env.SEXTANT_BIN = BIN;
+    const out = await cli.applyFreshnessGate(FAKE_RAW, root);
+
+    // No history + content moved ⇒ stats arm refuses, bypass does not apply.
+    assert.match(out, /Structural claims unavailable/);
+    const events = fs
+      .readFileSync(path.join(root, ".planning", "intel", "telemetry.jsonl"), "utf8")
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.equal(events.filter((e) => e.name === "freshness.sync_rescan").length, 0);
+    assert.equal(events.filter((e) => e.name === "freshness.blackout_turn").length, 1);
   });
 
   it("falls through to blackout when the sync arm is disabled", async () => {
