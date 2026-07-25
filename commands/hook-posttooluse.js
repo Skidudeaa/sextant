@@ -162,6 +162,22 @@ function readInjectedArm(parsed) {
   return parsed && typeof parsed.arm === "string" ? parsed.arm : "armed";
 }
 
+// TURN IDENTITY (docs/033 Tier 1 #1). The injected-set file is OVERWRITTEN once
+// per injection, so its `ts` already uniquely identifies the turn every scored
+// open belongs to — no new hook state, no extra write. Stamping it on each
+// path_hit/path_miss lets the audit group opens by turn and report a
+// session-shape-INDEPENDENT hit rate (turns with >=1 hit / turns scored).
+//
+// WHY this matters: per-open precision divides by every file the agent touched
+// after an injection, which is unbounded and unrelated to retrieval quality. It
+// fell 34.4% -> 1.6% purely because opens/turn rose 3.4 -> 28.4 (docs/033 §1).
+//
+// null when the set predates this field — the audit then counts the open as
+// turn-unscored rather than silently folding it into a turn bucket.
+function readInjectedTurn(parsed) {
+  return parsed && typeof parsed.ts === "number" ? parsed.ts : null;
+}
+
 // Back-compat wrapper kept for existing callers/tests: Map<relPath, source>.
 function readInjectedSet(root, sessionKey) {
   return buildInjectedMap(readInjectedRaw(root, sessionKey));
@@ -861,13 +877,15 @@ async function run() {
       // the armed−holdback delta is the actual benefit signal (009 #1 follow-up).
       // On a holdback turn the block was NOT shown, so these opens are the baseline.
       const arm = readInjectedArm(parsed);
+      // turn = which injection this open scores against (docs/033 Tier 1 #1).
+      const turn = readInjectedTurn(parsed);
       const verdict = classifyOpen(injectedMap, repoRel);
       if (verdict) {
         if (verdict.hit) {
           // source = the signal that surfaced this file → per-signal open attribution.
-          recordEvent(root, "retrieval.path_hit", { source: verdict.source, tool, arm });
+          recordEvent(root, "retrieval.path_hit", { source: verdict.source, tool, arm, turn });
         } else {
-          recordEvent(root, "retrieval.path_miss", { tool, arm });
+          recordEvent(root, "retrieval.path_miss", { tool, arm, turn });
         }
       }
 
@@ -1008,6 +1026,7 @@ module.exports = {
   readInjectedRaw,
   buildInjectedMap,
   readInjectedArm,
+  readInjectedTurn,
   readInjectedRegion,
   injectedPathsFile,
   buildEmittedMap,

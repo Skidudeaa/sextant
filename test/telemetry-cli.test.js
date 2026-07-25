@@ -942,3 +942,112 @@ describe("telemetry CLI: Phase F factual review", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// TURN-LEVEL OUTCOME METRIC (docs/033 Tier 1 #1 and #3)
+//
+// openPrecision divides by every file touched after an injection, so it tracks
+// SESSION SHAPE, not retrieval quality: it fell 34.4% -> 1.6% while the
+// surfaced-set size stayed flat and opens/turn rose 3.4 -> 28.4. The turn-level
+// rate must be invariant to that. These tests lock the invariance and the
+// randomization-unit gate.
+// ---------------------------------------------------------------------------
+
+// ts is required by printSummary's observation-window header; turn is the
+// injected-set identity the hook stamps.
+let _seq = 0;
+const hit = (turn, arm = "armed") => ({ name: "retrieval.path_hit", source: "text_only", tool: "Read", arm, turn, ts: 1_700_000_000_000 + _seq++ });
+const miss = (turn, arm = "armed") => ({ name: "retrieval.path_miss", tool: "Read", arm, turn, ts: 1_700_000_000_000 + _seq++ });
+
+describe("summarize: turn-level outcome (docs/033)", () => {
+  it("turn hit-rate is invariant to opens-per-turn; open-precision is not", () => {
+    // Same OUTCOME both ways: 2 turns, each with exactly one surfaced-file open.
+    // Only the volume of unrelated opens differs.
+    const lean = [hit(1), miss(1), hit(2), miss(2)];
+    const heavy = [hit(1), ...Array.from({ length: 27 }, () => miss(1)),
+                   hit(2), ...Array.from({ length: 27 }, () => miss(2))];
+
+    const a = summarize(lean).retrieval;
+    const b = summarize(heavy).retrieval;
+
+    assert.equal(a.turnsScored, 2);
+    assert.equal(b.turnsScored, 2);
+    assert.equal(a.turnHitRate, 1);
+    assert.equal(b.turnHitRate, 1, "turn hit-rate must not move with session shape");
+
+    // The metric this replaces collapses on the same data.
+    assert.equal(a.openPrecision, 0.5);
+    assert.ok(b.openPrecision < 0.04, `open-precision collapsed to ${b.openPrecision}`);
+  });
+
+  it("counts a turn as a hit once, however many surfaced files it opened", () => {
+    const r = summarize([hit(1), hit(1), hit(1), miss(2)]).retrieval;
+    assert.equal(r.turnsScored, 2);
+    assert.equal(r.turnsWithHit, 1);
+    assert.equal(r.turnHitRate, 0.5);
+  });
+
+  it("median first-touch rank is the position of the first hit within the turn", () => {
+    // turn 1: miss, miss, hit -> rank 3.   turn 2: hit -> rank 1.   median of [1,3] = 1
+    const r = summarize([miss(1), miss(1), hit(1), hit(2)]).retrieval;
+    assert.equal(r.medianFirstTouchRank, 1);
+    // turn 3 pushes the median up to 3
+    const r2 = summarize([miss(1), miss(1), hit(1), hit(2), miss(3), miss(3), hit(3)]).retrieval;
+    assert.equal(r2.medianFirstTouchRank, 3);
+  });
+
+  it("excludes pre-stamp events from the turn rate instead of folding them in", () => {
+    const legacy = [{ name: "retrieval.path_hit", source: "text_only", tool: "Read", arm: "armed" },
+                    { name: "retrieval.path_miss", tool: "Read", arm: "armed" }];
+    const r = summarize([...legacy, hit(7), miss(7)]).retrieval;
+    assert.equal(r.turnUnscoredOpens, 2);
+    assert.equal(r.turnsScored, 1, "legacy opens must not invent a turn bucket");
+    assert.equal(r.turnHitRate, 1);
+    // The per-open view still counts everything, so the two views stay reconcilable.
+    assert.equal(r.pathHits + r.pathMisses, 4);
+  });
+
+  it("computes the benefit delta per TURN — the unit the arm randomizes at", () => {
+    // armed: 2 of 2 turns hit.  holdback: 0 of 2 turns hit.  delta = +1.0
+    const r = summarize([
+      hit(1, "armed"), miss(1, "armed"),
+      hit(2, "armed"), miss(2, "armed"),
+      miss(3, "holdback"), miss(3, "holdback"),
+      miss(4, "holdback"),
+    ]).retrieval;
+    assert.equal(r.turnCountsByArm.armed.turns, 2);
+    assert.equal(r.turnCountsByArm.holdback.turns, 2);
+    assert.equal(r.turnHitRateByArm.armed, 1);
+    assert.equal(r.turnHitRateByArm.holdback, 0);
+    assert.equal(r.turnBenefitDelta, 1);
+  });
+
+  it("keeps the turn delta DORMANT until both arms clear the turn floor", () => {
+    // 40 armed turns vs 2 holdback turns: the per-OPEN gate would pass on volume
+    // alone, but only 2 turns were ever randomized into holdback.
+    const events = [];
+    for (let t = 1; t <= 40; t++) events.push(hit(t, "armed"), miss(t, "armed"));
+    events.push(miss(1001, "holdback"), miss(1002, "holdback"));
+    const sum = summarize(events);
+    assert.equal(sum.retrieval.turnCountsByArm.holdback.turns, 2);
+    const text = printSummary("/tmp/x", sum);
+    assert.match(text, /turn benefit delta: DORMANT/);
+    assert.doesNotMatch(text, /TURN BENEFIT DELTA/);
+  });
+
+  it("renders the turn delta as a claim once both arms clear the floor", () => {
+    const events = [];
+    for (let t = 1; t <= 30; t++) events.push(hit(t, "armed"), miss(t, "armed"));
+    for (let t = 101; t <= 130; t++) events.push(miss(t, "holdback"));
+    const text = printSummary("/tmp/x", summarize(events));
+    assert.match(text, /TURN BENEFIT DELTA \(armed − holdback\): 100\.0 pts/);
+  });
+
+  it("leads the rendered outcome section with the turn rate", () => {
+    const text = printSummary("/tmp/x", summarize([hit(1), miss(1)]));
+    const turnAt = text.indexOf("turn hit-rate:");
+    const openAt = text.indexOf("open-precision:");
+    assert.ok(turnAt > -1 && openAt > turnAt, "turn hit-rate must precede open-precision");
+    assert.match(text, /session-shape sensitive/);
+  });
+});

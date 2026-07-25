@@ -24,6 +24,14 @@ const telemetry = require("../lib/telemetry");
 // floor. Below this the summary prints a DORMANT line with the raw counts.
 const HOLDBACK_MIN_SCORED = 30;
 
+// Minimum scored TURNS per arm before the turn-level benefit delta renders as a
+// citable claim (docs/033 Tier 1 #3). The turn is the unit the holdback arm
+// actually randomizes at (decideArm runs once per injection), so it is the unit
+// the delta must be computed and gated at. HOLDBACK_MIN_SCORED gates the older
+// per-OPEN delta, whose samples are ~10x correlated within a turn and therefore
+// overstate the effective n.
+const HOLDBACK_MIN_TURNS = 30;
+
 // Phase-F decision floors. These are intentionally conservative operational
 // gates, not proof of behavioral benefit. The scorecard cannot graduate while
 // factual review is thin or a confirmed false fact exists.
@@ -96,6 +104,40 @@ function fmtPct(num, denom) {
   return `${((num / denom) * 100).toFixed(1)}%`;
 }
 
+// Render the armed-vs-holdback contrast at the TURN level (docs/033 Tier 1 #3).
+// Same gating discipline as the per-open delta — the raw value always lives in
+// --json; only the human-readable causal CLAIM waits for volume — but the floor
+// counts TURNS, the unit decideArm actually randomizes at.
+function renderTurnArms(lines, r) {
+  const counts = r.turnCountsByArm || {};
+  const armedTurns = (counts.armed || {}).turns || 0;
+  const holdbackTurns = (counts.holdback || {}).turns || 0;
+  if (!holdbackTurns) return; // holdback-disabled install: nothing to contrast
+  const rates = r.turnHitRateByArm || {};
+  lines.push("  by arm (injection-OFF holdback), at the randomization unit:");
+  for (const arm of ["armed", "holdback"]) {
+    const c = counts[arm];
+    if (!c) continue;
+    const rate = rates[arm] == null ? "n/a" : `${(rates[arm] * 100).toFixed(1)}%`;
+    lines.push(`    - ${arm.padEnd(10)} turn hit-rate ${rate}  (${c.hitTurns}/${c.turns} turns)`);
+  }
+  const atVolume =
+    r.turnBenefitDelta != null &&
+    armedTurns >= HOLDBACK_MIN_TURNS &&
+    holdbackTurns >= HOLDBACK_MIN_TURNS;
+  if (atVolume) {
+    lines.push(
+      `  TURN BENEFIT DELTA (armed − holdback): ${(r.turnBenefitDelta * 100).toFixed(1)} pts` +
+      `  — the causal lift, measured per turn`
+    );
+  } else {
+    lines.push(
+      `  turn benefit delta: DORMANT (accruing) — holdback ${holdbackTurns} turns, ` +
+      `armed ${armedTurns} turns; need >=${HOLDBACK_MIN_TURNS} per arm before the delta is citable.`
+    );
+  }
+}
+
 function summarize(events) {
   const byName = new Map();
   const staleByReason = new Map();
@@ -138,6 +180,38 @@ function summarize(events) {
   // holdback events exist, openPrecision stays correlational (baseline pending).
   const pathHitsByArm = new Map();
   const pathMissesByArm = new Map();
+
+  // TURN-LEVEL OUTCOME (docs/033 Tier 1 #1). openPrecision divides by every file
+  // touched after an injection — an unbounded denominator driven by session
+  // shape, not retrieval quality (it fell 34.4% -> 1.6% while opens/turn rose
+  // 3.4 -> 28.4; see docs/033 §1). The turn-level rate asks the bounded question
+  // instead: of the turns where we surfaced something, in how many did the agent
+  // open at least one surfaced file?
+  //
+  // Keyed by the injected-set `ts` the PostToolUse hook stamps as `turn`. Events
+  // predating that stamp carry no turn and are counted as turnUnscored — never
+  // folded into a bucket, so the covered fraction stays visible.
+  const turns = new Map(); // turn -> { arm, opens, hits, firstHitRank }
+  let turnUnscoredOpens = 0;
+  const noteTurn = (e, isHit) => {
+    const turn = e.turn;
+    if (!Number.isFinite(turn)) {
+      turnUnscoredOpens++;
+      return;
+    }
+    let t = turns.get(turn);
+    if (!t) {
+      t = { arm: e.arm || "armed", opens: 0, hits: 0, firstHitRank: null };
+      turns.set(turn, t);
+    }
+    t.opens++;
+    if (isHit) {
+      t.hits++;
+      // Rank = position of this open among the turn's scored opens, in append
+      // order. Reconstructed here so the hook needs no per-turn counter state.
+      if (t.firstHitRank == null) t.firstHitRank = t.opens;
+    }
+  };
 
   // REGION LANE (docs/025 Phase A): sharper than path_hit — on a mutation of a
   // surfaced file, did the edit land in the REGION we pointed at (region_hit) or
@@ -237,12 +311,14 @@ function summarize(events) {
       pathHitsBySource.set(source, (pathHitsBySource.get(source) || 0) + 1);
       const arm = e.arm || "armed"; // legacy events w/o arm were effectively armed
       pathHitsByArm.set(arm, (pathHitsByArm.get(arm) || 0) + 1);
+      noteTurn(e, true);
     }
 
     if (name === "retrieval.path_miss") {
       pathMisses++;
       const arm = e.arm || "armed";
       pathMissesByArm.set(arm, (pathMissesByArm.get(arm) || 0) + 1);
+      noteTurn(e, false);
     }
 
     if (name === "retrieval.region_hit") {
@@ -387,6 +463,11 @@ function summarize(events) {
       pathMisses,
       openPrecision: pathHits + pathMisses ? pathHits / (pathHits + pathMisses) : null,
       pathHitsBySource: Object.fromEntries(pathHitsBySource),
+      // TURN-LEVEL (docs/033 Tier 1): the session-shape-independent read of the
+      // same substrate. Lead with this; openPrecision above is the secondary,
+      // session-shape-SENSITIVE view kept for continuity with prior reports.
+      ...summarizeTurns(turns),
+      turnUnscoredOpens,
       // HOLDBACK ARM split. benefitDelta = armed openPrecision − holdback
       // openPrecision: the causal lift the injection buys. null until BOTH arms
       // have data (a holdback-disabled install only ever has the armed arm).
@@ -486,6 +567,59 @@ function benefitDelta(hitsByArm, missesByArm) {
     return +(p.armed - p.holdback).toFixed(4);
   }
   return null;
+}
+
+// TURN-LEVEL OUTCOME SUMMARY (docs/033 Tier 1 #1 and #3).
+//
+// turnHitRate = turns with >=1 surfaced-file open / turns scored. Bounded in
+// [0,1] and independent of how many files the agent touched per turn, so it is
+// comparable week over week in a way openPrecision is not.
+//
+// medianFirstTouchRank = median position of the first hit among a turn's scored
+// opens (hit turns only). Low rank = we surfaced it before the agent wandered.
+//
+// turnBenefitDelta = armed turnHitRate − holdback turnHitRate. This is the
+// armed-vs-holdback contrast computed at the unit the arm is RANDOMIZED at; the
+// per-open delta treats ~10x correlated within-turn opens as independent.
+function summarizeTurns(turns) {
+  const byArm = new Map(); // arm -> { turns, hitTurns }
+  let scored = 0;
+  let hitTurns = 0;
+  const ranks = [];
+  for (const t of turns.values()) {
+    scored++;
+    let a = byArm.get(t.arm);
+    if (!a) {
+      a = { turns: 0, hitTurns: 0 };
+      byArm.set(t.arm, a);
+    }
+    a.turns++;
+    if (t.hits > 0) {
+      hitTurns++;
+      a.hitTurns++;
+      if (t.firstHitRank != null) ranks.push(t.firstHitRank);
+    }
+  }
+  ranks.sort((a, b) => a - b);
+  const rateByArm = {};
+  const countsByArm = {};
+  for (const [arm, a] of byArm) {
+    rateByArm[arm] = a.turns ? a.hitTurns / a.turns : null;
+    countsByArm[arm] = { turns: a.turns, hitTurns: a.hitTurns };
+  }
+  const delta =
+    typeof rateByArm.armed === "number" && typeof rateByArm.holdback === "number"
+      ? +(rateByArm.armed - rateByArm.holdback).toFixed(4)
+      : null;
+  return {
+    turnsScored: scored,
+    turnsWithHit: hitTurns,
+    turnHitRate: scored ? hitTurns / scored : null,
+    medianFirstTouchRank: ranks.length ? ranks[Math.floor((ranks.length - 1) / 2)] : null,
+    turnHitRateByArm: rateByArm,
+    turnCountsByArm: countsByArm,
+    turnBenefitDelta: delta,
+  };
 }
 
 function finiteCount(value) {
@@ -1986,9 +2120,34 @@ function printSummary(rootAbs, sum) {
     // counterfactual yet. Both halves must travel to the surface that's read.
     lines.push("");
     lines.push("Outcome substrate (did the agent open what we surfaced?)");
+    // LEAD WITH THE TURN-LEVEL RATE (docs/033 Tier 1 #1). open-precision below
+    // divides by every file touched after an injection, so it tracks session
+    // shape more than retrieval quality — it fell 34.4% -> 1.6% while opens/turn
+    // rose 3.4 -> 28.4 with the surfaced-set size flat. The turn rate is bounded
+    // and comparable across windows; it is the number to trend.
+    if (r.turnsScored > 0) {
+      lines.push(
+        `  turn hit-rate: ${fmtPct(r.turnsWithHit, r.turnsScored)}  ` +
+        `(${r.turnsWithHit} of ${r.turnsScored} injection turns had >=1 surfaced file opened)`
+      );
+      if (r.medianFirstTouchRank != null) {
+        lines.push(
+          `  median first-touch rank: ${r.medianFirstTouchRank}  ` +
+          `(position of the first hit among that turn's scored opens)`
+        );
+      }
+      renderTurnArms(lines, r);
+    }
+    if (r.turnUnscoredOpens > 0) {
+      lines.push(
+        `  turn-unscored opens: ${r.turnUnscoredOpens}  ` +
+        `(recorded before the turn stamp shipped — excluded from the turn rate, not folded in)`
+      );
+    }
     lines.push(
       `  open-precision: ${fmtPct(r.pathHits, r.pathHits + r.pathMisses)}  ` +
-      `(${r.pathHits} hit / ${r.pathHits + r.pathMisses} scored opens)`
+      `(${r.pathHits} hit / ${r.pathHits + r.pathMisses} scored opens)` +
+      `  [session-shape sensitive — see turn hit-rate above]`
     );
     // The "baseline pending" half of the caveat is only honest UNTIL a holdback
     // arm provides the counterfactual; once benefitDelta exists AT VOLUME, drop

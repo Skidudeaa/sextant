@@ -265,3 +265,70 @@ describe("computeLift", () => {
     assert.deepEqual(a, b);
   });
 });
+
+// ---------------------------------------------------------------------------
+// REPO FILTER (docs/033 Tier 1 #2)
+//
+// repoOf returns Claude Code's MANGLED project dir (`-root-sextant`), so a
+// `===` comparison against the natural `--repo sextant` matched nothing and
+// buildReport rendered a confident 0-of-0 report while the corpus held 150
+// sessions. These lock the suffix matcher and its refusals.
+// ---------------------------------------------------------------------------
+describe("repoMatches (docs/033)", () => {
+  const { repoMatches } = require("../lib/trajectory");
+
+  it("matches the bare repo name against a mangled project dir", () => {
+    assert.equal(repoMatches("-root-sextant", "sextant"), true);
+    assert.equal(repoMatches("-root-somaNotes", "somaNotes"), true);
+  });
+
+  it("matches path-shaped and raw-dir queries", () => {
+    assert.equal(repoMatches("-root-sextant", "root/sextant"), true);
+    assert.equal(repoMatches("-root-sextant", "/root/sextant"), true);
+    assert.equal(repoMatches("-root-sextant", "-root-sextant"), true);
+  });
+
+  it("is case-insensitive", () => {
+    assert.equal(repoMatches("-root-somaNotes", "somanotes"), true);
+  });
+
+  it("does not match on a bare substring — the boundary must be a separator", () => {
+    // "extant" is a suffix of "sextant" but not a path segment of it.
+    assert.equal(repoMatches("-root-sextant", "extant"), false);
+    assert.equal(repoMatches("-root-sextant", "sex"), false);
+    assert.equal(repoMatches("-root-sextant-memory", "sextant"), false);
+  });
+
+  it("refuses empty and non-string queries instead of matching everything", () => {
+    assert.equal(repoMatches("-root-sextant", ""), false);
+    assert.equal(repoMatches("-root-sextant", "/"), false);
+    assert.equal(repoMatches("-root-sextant", null), false);
+    assert.equal(repoMatches(null, "sextant"), false);
+  });
+});
+
+describe("listRepos + buildReport filter (docs/033)", () => {
+  const traj = require("../lib/trajectory");
+  const fsx = require("fs");
+  const osx = require("os");
+  const pathx = require("path");
+
+  it("lists project dirs holding transcripts, and the filter reaches them", () => {
+    const root = fsx.mkdtempSync(pathx.join(osx.tmpdir(), "traj-repo-"));
+    try {
+      for (const dir of ["-root-sextant", "-root-other"]) {
+        fsx.mkdirSync(pathx.join(root, dir), { recursive: true });
+        fsx.writeFileSync(pathx.join(root, dir, "s.jsonl"), "");
+      }
+      assert.deepEqual(traj.listRepos(root), ["-root-other", "-root-sextant"]);
+      // The natural query must now reach exactly one project.
+      const matched = traj.listRepos(root).filter((n) => traj.repoMatches(n, "sextant"));
+      assert.deepEqual(matched, ["-root-sextant"]);
+      // And buildReport must scan it rather than reporting 0-of-0.
+      assert.equal(traj.buildReport(root, { repo: "sextant" }).sessionsScanned, 1);
+      assert.equal(traj.buildReport(root, { repo: "nope" }).sessionsScanned, 0);
+    } finally {
+      fsx.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

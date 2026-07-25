@@ -337,6 +337,12 @@ describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
     assert.equal(hit.tool, "Read");
     assert.equal(typeof hit.source, "string");
     assert.ok(hit.source.length > 0, "hit must carry the surfacing source for attribution");
+    // TURN STAMP (docs/033 Tier 1 #1): the open must carry the identity of the
+    // injection it scores against, and it must equal the injected set's own ts
+    // — that equality is what lets the audit group opens into turns and report
+    // a hit rate that does not move with how many files the agent touched.
+    const setTs = JSON.parse(fs.readFileSync(injectedPathsFile(dir, SESSION), "utf8")).ts;
+    assert.equal(hit.turn, setTs, "path_hit.turn must be the injected set's ts");
   });
 
   it("PostToolUse on an un-surfaced file emits retrieval.path_miss", () => {
@@ -350,6 +356,10 @@ describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
     assert.equal(evs.length, before + 1);
     assert.equal(evs[evs.length - 1].name, "retrieval.path_miss");
     assert.equal(evs[evs.length - 1].tool, "Edit");
+    // A miss must carry the same turn as the hit above — both opens belong to
+    // one injection, which is what makes them one denominator unit.
+    const setTs = JSON.parse(fs.readFileSync(injectedPathsFile(dir, SESSION), "utf8")).ts;
+    assert.equal(evs[evs.length - 1].turn, setTs);
   });
 
   it("Phase F joins a matching spawn outside the 64-agent report cap and records its return", () => {

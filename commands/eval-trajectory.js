@@ -57,8 +57,27 @@ function printReport(report) {
   out.push(row("query-retrieval", L.retrieval));
   out.push(row("static-summary", L.static));
   out.push("");
+  // VERDICT MUST FOLLOW THE NUMBER (docs/033 Tier 1 #2 follow-on). This line
+  // used to assert "genuinely steers" unconditionally — it printed that verdict
+  // over a 0.8x lift (i.e. BELOW chance) the moment the --repo filter started
+  // matching. A hardcoded conclusion under a variable number is exactly the
+  // false-confidence failure the freshness gate exists to prevent; gate it on
+  // the lift AND on having enough surfaced rows to mean anything.
   if (L.retrieval.lift != null) {
-    out.push(`  → query-relevance opens at ~${L.retrieval.lift}x chance — the retrieval signal genuinely steers.`);
+    const thin = L.retrieval.surfaced < LIFT_MIN_SURFACED;
+    if (thin) {
+      out.push(
+        `  → lift ${L.retrieval.lift}x on only ${L.retrieval.surfaced} surfaced rows — too thin to read.` +
+        ` Widen the corpus (drop --repo) before drawing a conclusion.`
+      );
+    } else if (L.retrieval.lift > 1) {
+      out.push(`  → query-relevance opens at ~${L.retrieval.lift}x chance — the retrieval signal steers.`);
+    } else {
+      out.push(
+        `  → lift ${L.retrieval.lift}x is AT OR BELOW chance on this corpus — the retrieval` +
+        ` signal did not steer opens here.`
+      );
+    }
   }
   if (L.static.lift != null && L.retrieval.lift != null && L.static.lift < L.retrieval.lift) {
     out.push(`  → the static summary's higher RAW rate (${pct(L.static.actualPct)}) is mostly correlation`);
@@ -112,6 +131,11 @@ function printReport(report) {
   return out.join("\n");
 }
 
+// Below this many surfaced rows the permutation lift is noise — a handful of
+// opens moves it by whole multiples. Mirrors `sextant tune`'s n>=30
+// prior-eligibility floor.
+const LIFT_MIN_SURFACED = 30;
+
 async function run() {
   const argv = process.argv;
   const projectsRoot = flag(argv, "--projects") || defaultProjectsRoot();
@@ -121,6 +145,25 @@ async function run() {
   const repo = flag(argv, "--repo") || null;
   const K = parseInt(flag(argv, "--perms"), 10) || 200;
   const seed = parseInt(flag(argv, "--seed"), 10) || 12345;
+
+  // FAIL LOUD ON A ZERO-MATCH FILTER (docs/033 Tier 1 #2). An empty report reads
+  // exactly like a real "this repo has no injected sessions" finding, and that
+  // is how `--repo sextant` silently reported 0-of-0 for weeks while the corpus
+  // held 150 sessions. A filter that matches nothing is a usage error, not data.
+  if (repo) {
+    const available = traj.listRepos(projectsRoot, { includeSubagents });
+    const matched = available.filter((name) => traj.repoMatches(name, repo));
+    if (!matched.length) {
+      process.stderr.write(
+        `sextant eval-trajectory: --repo ${repo} matched no sessions under ${projectsRoot}\n` +
+          (available.length
+            ? `  available projects:\n${available.map((n) => `    ${n}`).join("\n")}\n`
+            : `  no session transcripts found at all — is --projects correct?\n`)
+      );
+      process.exitCode = 1;
+      return;
+    }
+  }
 
   const report = traj.buildReport(projectsRoot, { repo, includeSubagents, sizeMatched, K, seed });
   report._includeSubagents = includeSubagents;
