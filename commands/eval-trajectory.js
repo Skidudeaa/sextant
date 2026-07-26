@@ -47,6 +47,14 @@ function printReport(report) {
   out.push(`  projects:    ${report.projectsRoot}`);
   out.push(`  population:  ${report.sessionsWithInjection} sessions with injection across ${report.repos.length} repos` +
     `  (of ${report.sessionsScanned} scanned; subagent transcripts ${report._includeSubagents ? "INCLUDED" : "excluded"})`);
+  // Name the matched project dirs, don't just count them (docs/033 Tier 3).
+  // repoMatches is a SUFFIX match, so one --repo can pool several project
+  // directories (`--repo somaNotes` matches both `-root-somaNotes` and
+  // `-root--claude-projects--root-somaNotes`). A bare count discloses the
+  // pooling only by accident.
+  if (Array.isArray(report.repos) && report.repos.length) {
+    out.push(`  matched:     ${report.repos.join(", ")}`);
+  }
   out.push(`  file-opens:  ${a.opensTotal} observed`);
   out.push("");
 

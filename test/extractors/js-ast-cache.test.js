@@ -99,4 +99,45 @@ describe("js_ast_cache — single-parse front-end (docs/033)", () => {
     assert.deepEqual(extractImportsAST("", "js"), []);
     assert.deepEqual(extractExportsAST("", "js"), []);
   });
+
+  // The whole cache rests on both walkers being READ-ONLY over the shared AST.
+  // CLAUDE.md carries that as a prose warning ("a future walker that annotates
+  // AST nodes must copy first or this sharing becomes a cross-extractor bug");
+  // this turns it into a test that fails the moment someone writes to a node.
+  // Both extractor modules are "use strict", so any property write on a frozen
+  // object throws TypeError rather than failing silently.
+  it("both walkers are read-only over the shared AST (deep-frozen)", () => {
+    const cache = require("../../lib/extractors/js_ast_cache");
+    // Cover the construct families the walkers branch on, not just one shape.
+    const forms = [
+      { ext: "ts", src: "import a from './a';\nexport const x: number = 1;\nexport default class C {}\n" },
+      { ext: "js", src: "const m = require('./m');\nmodule.exports = { m };\nexports.n = 2;\n" },
+      { ext: "tsx", src: "import React from 'react';\nexport function F() { return <div a={1} />; }\n" },
+      { ext: "ts", src: "export * from './barrel';\nexport { q as r } from './q';\nexport type T = { a: string };\n" },
+      { ext: "js", src: "export async function* gen() { yield 1; }\nexport let [d, e] = [1, 2];\n" },
+    ];
+
+    const deepFreeze = (node, seen = new Set()) => {
+      if (!node || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      Object.freeze(node);
+      for (const key of Object.keys(node)) deepFreeze(node[key], seen);
+    };
+
+    for (const { ext, src } of forms) {
+      cache._resetCache();
+      const ast = cache.parseJs(src, ext);
+      assert.ok(ast, `fixture must parse: ${ext}`);
+      deepFreeze(ast);
+      // Served from cache, so both lanes walk the frozen tree we just froze.
+      assert.doesNotThrow(
+        () => extractImportsAST(src, ext),
+        `extractImportsAST mutated the shared AST (${ext})`
+      );
+      assert.doesNotThrow(
+        () => extractExportsAST(src, ext),
+        `extractExportsAST mutated the shared AST (${ext})`
+      );
+    }
+  });
 });

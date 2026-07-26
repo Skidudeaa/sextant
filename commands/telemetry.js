@@ -677,6 +677,13 @@ function benefitDelta(hitsByArm, missesByArm) {
 //
 // medianFirstTouchRank = median position of the first hit among a turn's scored
 // opens (hit turns only). Low rank = we surfaced it before the agent wandered.
+// Uses the LOWER median on even n (ranks[floor((n-1)/2)]), so [1,2,3,4] gives 2,
+// not 2.5 — a rank is a position, and a half-position is not one.
+//
+// NOTE on the turnHitRate denominator: a turn with scored opens but no hit IS
+// counted; a turn with ZERO scored opens emits no events at all and is absent.
+// So the rate is conditioned on "the agent did file work this turn", not on
+// "we injected" — which is why the printed label says so explicitly.
 //
 // turnBenefitDelta = armed turnHitRate − holdback turnHitRate. This is the
 // armed-vs-holdback contrast computed at the unit the arm is RANDOMIZED at; the
@@ -2339,7 +2346,7 @@ function printSummary(rootAbs, sum) {
     if (r.turnsScored > 0) {
       lines.push(
         `  turn hit-rate: ${fmtPct(r.turnsWithHit, r.turnsScored)}  ` +
-        `(${r.turnsWithHit} of ${r.turnsScored} injection turns had >=1 surfaced file opened)`
+        `(${r.turnsWithHit} of ${r.turnsScored} injection turns WITH A SCORED OPEN had >=1 surfaced file opened)`
       );
       if (r.medianFirstTouchRank != null) {
         lines.push(

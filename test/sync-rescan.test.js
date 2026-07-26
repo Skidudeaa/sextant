@@ -150,6 +150,28 @@ describe("shouldSyncRescan — evidence-based decision", () => {
     assert.equal(d.windowed, freshness.SYNC_RESCAN_WINDOW);
   });
 
+  // docs/033 Tier 3 note: shouldSyncRescan now ingests `.old` BEFORE the current
+  // file so the tail of its pool really is the most recent scans. There is
+  // deliberately no behavioural test for that, because the fix is currently
+  // UNOBSERVABLE through the decision: the `.old` branch only runs when the
+  // current file holds < SYNC_RESCAN_MIN_SAMPLES (5) rows, so at most 4 rows can
+  // ever be misordered, and the trim discards 5. The change makes the code match
+  // its own documented recency claim and protects against a future edit to
+  // SYNC_RESCAN_TRIM_FRACTION / SYNC_RESCAN_MIN_SAMPLES; asserting a decision
+  // difference here would be asserting something the constants cannot produce.
+
+  it("labels an env-forced sync as its own telemetry arm, not as stats", () => {
+    const root = mkRoot();
+    process.env.SEXTANT_SYNC_RESCAN = "1";
+    const d = freshness.shouldSyncRescan(root);
+    assert.equal(d.sync, true);
+    assert.equal(
+      d.reason,
+      "env_forced",
+      "a forced sync consults no statistics and must not be logged as gate:stats"
+    );
+  });
+
   it("trims load-spike outliers instead of letting them veto the lane", () => {
     const root = mkRoot();
     // 46 fast scans + 4 spikes: raw p95 would exceed the 2500ms ceiling,
