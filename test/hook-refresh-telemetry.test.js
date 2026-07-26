@@ -181,6 +181,77 @@ describe("hook-refresh telemetry — conversational prompt", () => {
   });
 });
 
+// docs/033 Tier 3 — the dedupe path used to return before persistInjectedSet,
+// so Tier 1's "the injected-set ts identifies the turn" premise broke exactly
+// when two consecutive prompts retrieved the same thing: k real turns
+// collapsed into ONE turn id. The bias is arm-asymmetric (the holdback branch
+// always mints a fresh id), so it landed on turnBenefitDelta itself.
+describe("hook-refresh — a deduped turn is still its own turn", () => {
+  let dir, restoreShim;
+  const injectedSet = () =>
+    JSON.parse(
+      fs.readFileSync(
+        path.join(dir, ".planning", "intel", ".last_injected_paths.retrieval.t13-test"),
+        "utf8"
+      )
+    );
+
+  before(async () => {
+    restoreShim = installSextantShim();
+    dir = await buildFixture();
+  });
+  after(() => {
+    if (restoreShim) restoreShim();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("mints a fresh turn id and records retrieval.deduped when the block repeats", () => {
+    const PROMPT = "where is resolveImportPath defined";
+
+    const first = runHook(dir, PROMPT);
+    assert.ok(
+      first.stdout.includes("<codebase-retrieval>"),
+      `expected a block on the first turn, got:\n${first.stdout}`
+    );
+    const firstSet = injectedSet();
+    assert.equal(firstSet.arm, "armed");
+    assert.ok(firstSet.paths.length > 0, "fixture must surface at least one path");
+
+    const second = runHook(dir, PROMPT);
+    assert.equal(
+      second.stdout,
+      "",
+      "an identical body must still dedupe — this fix must not re-emit the block"
+    );
+
+    const secondSet = injectedSet();
+    assert.notEqual(
+      secondSet.ts,
+      firstSet.ts,
+      "a deduped turn must mint its own turn id, not inherit the previous turn's"
+    );
+    assert.equal(secondSet.deduped, true);
+    assert.equal(secondSet.arm, "armed");
+    assert.deepEqual(
+      secondSet.paths,
+      firstSet.paths,
+      "the surfaced set is unchanged — only the turn identity moves"
+    );
+
+    // An armed turn could previously vanish into the early return with no
+    // telemetry at all, while a holdback turn always recorded — so any
+    // holdback/(holdback+injected) rate was a biased estimator.
+    const deduped = second.events.filter((e) => e.name === "retrieval.deduped");
+    assert.equal(deduped.length, 1, "the deduped turn must appear in the funnel");
+    assert.equal(deduped[0].arm, "armed");
+    assert.equal(
+      second.events.filter((e) => e.name === "retrieval.injected").length,
+      1,
+      "no second injection was emitted, so the injected count must stay at 1"
+    );
+  });
+});
+
 describe("telemetry summarize — retrieval aggregation", () => {
   it("computes fire-rate, empty-injection rate, and source breakdown", () => {
     const events = [

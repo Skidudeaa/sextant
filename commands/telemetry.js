@@ -112,12 +112,23 @@ function renderTurnArms(lines, r) {
   const counts = r.turnCountsByArm || {};
   const armedTurns = (counts.armed || {}).turns || 0;
   const holdbackTurns = (counts.holdback || {}).turns || 0;
-  if (!holdbackTurns) return; // holdback-disabled install: nothing to contrast
+  // A holdback-DISABLED install has nothing to contrast — stay silent. But an
+  // install whose holdback arm HAS run and simply has no turn-stamped holdback
+  // turns yet must render a zero state (docs/033 Tier 3). Returning here left
+  // the live repo showing only the per-OPEN accrual line ("holdback n=17 ...
+  // need >=30"), which reads as "over half way" while the canonical unit sat at
+  // 0 of 30 — ~20x further out at ~28 opens/turn. Suppressing the correct-unit
+  // line while printing the wrong-unit one is the failure mode docs/033 exists
+  // to kill.
+  const armExists =
+    holdbackTurns > 0 || ((r.armCounts || {}).holdback || {}).scored > 0;
+  if (!armExists) return;
   const rates = r.turnHitRateByArm || {};
   lines.push("  by arm (injection-OFF holdback), at the randomization unit:");
   for (const arm of ["armed", "holdback"]) {
-    const c = counts[arm];
-    if (!c) continue;
+    // Render a zero row rather than skipping: "holdback 0/0 turns" is the
+    // honest accrual state, and it is exactly the row a reader needs to see.
+    const c = counts[arm] || { hitTurns: 0, turns: 0 };
     const rate = rates[arm] == null ? "n/a" : `${(rates[arm] * 100).toFixed(1)}%`;
     lines.push(`    - ${arm.padEnd(10)} turn hit-rate ${rate}  (${c.hitTurns}/${c.turns} turns)`);
   }
@@ -155,6 +166,7 @@ function summarize(events) {
   let injectedTotal = 0;
   const injectedBySource = new Map();
   let emptyFallback = 0;
+  let retrievalDeduped = 0;
 
   // T1.2 retrieval freshness-gate counters.  retrievalStaleHits is the
   // retrieval lane's own stale count (distinct from freshness.stale_hit, which
@@ -297,6 +309,14 @@ function summarize(events) {
 
     if (name === "retrieval.empty_fallback") {
       emptyFallback++;
+    }
+
+    // A turn that retrieved the same thing as the previous turn: the block was
+    // suppressed as a duplicate, so it is NOT an injection, but it is still an
+    // armed turn. Counting it keeps the funnel closed — without it, armed turns
+    // silently left the denominator while holdback turns never could.
+    if (name === "retrieval.deduped") {
+      retrievalDeduped++;
     }
 
     if (name === "retrieval.stale_hit") {
@@ -445,6 +465,7 @@ function summarize(events) {
       fireRate: classifiedTotal ? classifiedRetrieve / classifiedTotal : null,
       injected: injectedTotal,
       emptyFallback,
+      deduped: retrievalDeduped,
       emptyInjectionRate: classifiedRetrieve ? emptyFallback / classifiedRetrieve : null,
       injectedBySource: Object.fromEntries(injectedBySource),
       // T1.2 freshness gate on the retrieval lane: staleHits is the count of
@@ -2053,6 +2074,12 @@ function printSummary(rootAbs, sum) {
     lines.push(
       `  empty_fallback: ${r.emptyFallback}  (${fmtPct(r.emptyFallback, r.classifiedRetrieve)} of retrieve-classified)`
     );
+    if (r.deduped) {
+      lines.push(
+        `  deduped:        ${r.deduped}  (armed turns whose block repeated the previous one — ` +
+        `counted so the arm denominator stays unbiased)`
+      );
+    }
     lines.push(
       `  stale_hit:      ${r.staleHits}  (${fmtPct(r.staleHits, r.classifiedRetrieve)} of retrieve-classified)`
     );
@@ -2160,8 +2187,25 @@ function printSummary(rootAbs, sum) {
     const counts = r.armCounts || {};
     const armedScored = (counts.armed || {}).scored || 0;
     const holdbackScored = (counts.holdback || {}).scored || 0;
+    // ALSO gate on the RANDOMIZATION unit (docs/033 Tier 3). docs/033 §4 named
+    // the analysis-unit mismatch a defect — "benefitDelta would become citable
+    // while remaining statistically wrong" — and Tier 1 #3 added the correct
+    // turn-level metric but left this per-OPEN claim able to graduate on its
+    // own. With ~28 opens/turn it clears an opens floor of 30 after ONE
+    // randomized turn per arm, so the shipped surface could print a DORMANT
+    // turn line and an ALL-CAPS causal per-open claim two lines apart. The
+    // per-open figure stays (it is a real descriptive number) but it may not
+    // call itself causal until the unit the arm was actually randomized at
+    // clears its own floor.
+    const turnCounts = r.turnCountsByArm || {};
+    const armedTurnsForDelta = (turnCounts.armed || {}).turns || 0;
+    const holdbackTurnsForDelta = (turnCounts.holdback || {}).turns || 0;
     const deltaAtVolume =
-      r.benefitDelta != null && armedScored >= HOLDBACK_MIN_SCORED && holdbackScored >= HOLDBACK_MIN_SCORED;
+      r.benefitDelta != null &&
+      armedScored >= HOLDBACK_MIN_SCORED &&
+      holdbackScored >= HOLDBACK_MIN_SCORED &&
+      armedTurnsForDelta >= HOLDBACK_MIN_TURNS &&
+      holdbackTurnsForDelta >= HOLDBACK_MIN_TURNS;
     if (!deltaAtVolume) {
       lines.push(
         `  caveat: baseline pending (no injection-OFF arm yet) AND precision-flavored — ` +
@@ -2201,8 +2245,9 @@ function printSummary(rootAbs, sum) {
         );
       } else if (r.benefitDelta != null) {
         lines.push(
-          `  benefit delta: DORMANT (accruing) — holdback n=${holdbackScored}, armed n=${armedScored} scored; ` +
-          `need >=${HOLDBACK_MIN_SCORED} per arm before the armed−holdback delta is citable.`
+          `  benefit delta: DORMANT (accruing) — holdback n=${holdbackScored}, armed n=${armedScored} scored ` +
+          `(${holdbackTurnsForDelta}/${armedTurnsForDelta} turns); need >=${HOLDBACK_MIN_SCORED} opens ` +
+          `AND >=${HOLDBACK_MIN_TURNS} turns per arm — turns are the randomization unit.`
         );
       }
     }

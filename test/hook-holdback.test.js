@@ -136,19 +136,33 @@ describe("telemetry — open-precision split by arm + benefitDelta", () => {
     // n=1 precision as "the causal lift" misleads (73 days at 20%-on-one-repo
     // accrued exactly 1 holdback turn). JSON keeps the raw value; the summary
     // must print DORMANT with the raw counts until both arms reach volume.
-    const ev = (name, arm) => ({ ts: 1752000000000, name, source: "path_match", arm });
+    const ev = (name, arm, turn) => ({ ts: 1752000000000, name, source: "path_match", arm, turn });
     const lowN = [
-      ...Array.from({ length: 40 }, () => ev("retrieval.path_hit", "armed")),
-      ev("retrieval.path_miss", "holdback"),
+      ...Array.from({ length: 40 }, (_, i) => ev("retrieval.path_hit", "armed", i + 1)),
+      ev("retrieval.path_miss", "holdback", 500),
     ];
     const low = printSummary("/x", summarize(lowN));
     assert.match(low, /benefit delta: DORMANT \(accruing\) — holdback n=1, armed n=40 scored/);
     assert.doesNotMatch(low, /BENEFIT DELTA/);
     assert.doesNotMatch(low, /counterfactual present/);
-    // at volume (>=30 per arm) the causal line renders
+
+    // docs/033 Tier 3: opens alone are NOT enough. `decideArm` randomizes once
+    // per TURN, and at ~28 opens/turn an opens-only floor of 30 clears after a
+    // single randomized turn per arm — so the surface could print a DORMANT
+    // turn line and an ALL-CAPS causal per-open claim two lines apart. 30 opens
+    // per arm concentrated in ONE turn per arm must stay DORMANT.
+    const opensButOneTurn = [
+      ...Array.from({ length: 30 }, () => ev("retrieval.path_hit", "armed", 1)),
+      ...Array.from({ length: 30 }, () => ev("retrieval.path_miss", "holdback", 2)),
+    ];
+    const correlated = printSummary("/x", summarize(opensButOneTurn));
+    assert.doesNotMatch(correlated, /BENEFIT DELTA \(armed − holdback\)/);
+    assert.match(correlated, /turns are the randomization unit/);
+
+    // At volume on BOTH floors (>=30 opens and >=30 turns per arm) it renders.
     const atVolume = [
-      ...Array.from({ length: 30 }, () => ev("retrieval.path_hit", "armed")),
-      ...Array.from({ length: 30 }, () => ev("retrieval.path_miss", "holdback")),
+      ...Array.from({ length: 30 }, (_, i) => ev("retrieval.path_hit", "armed", i + 1)),
+      ...Array.from({ length: 30 }, (_, i) => ev("retrieval.path_miss", "holdback", 100 + i)),
     ];
     const ok = printSummary("/x", summarize(atVolume));
     assert.match(ok, /BENEFIT DELTA \(armed − holdback\): 100\.0 pts/);

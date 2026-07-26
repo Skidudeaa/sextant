@@ -99,6 +99,21 @@ function recordUnavailableSpawnLifecycle(root, data, outcome, reason, durationMs
     const toolUseId = typeof data.tool_use_id === "string" ? data.tool_use_id : "";
     const parentKey = coherence.parentAgentKey(rawSessionIdentity(data));
     const childKey = coherence.childAgentKey(parentKey, toolUseId);
+
+    // NEVER record a withheld spawn for an identity that already HAS a prepared
+    // snapshot. `withheld` is a TERMINAL outcome in the scorecard:
+    // lifecycleAttemptUnits collapses child_spawn rows by taskKey\0agentKey and
+    // lets ambiguous/withheld/moved override an earlier `written`
+    // (commands/telemetry.js). A re-fired hook or a retried Task call arrives
+    // with the SAME tool_use_id — hence the same childKey — and its prompt now
+    // carries the block this hook appended the first time, so the
+    // already_injected guard below fires on precisely the case where a
+    // successful `written` row already exists. Emitting here would rewrite a
+    // real success as a withhold and corrupt the lifecycle reliability number
+    // this row exists to make honest. The 07-16 miss that motivated the row is
+    // unaffected: nothing was ever prepared for that identity.
+    if (childKey && coherence.readAgentSnapshot(root, childKey)) return;
+
     const metrics = require("../lib/coherence-metrics");
     recordEvent(root, "coherence.lifecycle", metrics.buildLifecyclePayload({
       taskId,
@@ -157,7 +172,33 @@ async function run() {
 
     // Never double-inject: a re-fired hook, a retried Task call, or a
     // subagent spawning its own subagent may already carry a block.
-    if (ti.prompt.includes("</codebase-intelligence>")) {
+    //
+    // WHY line-anchored and not `includes` (docs/033 Tier 3): a bare substring
+    // test cannot tell a prompt that CARRIES an injected block from one that
+    // merely MENTIONS the tag. On a repo whose subject matter IS this tag that
+    // is not hypothetical — a real Task prompt reading "inspect ... for a block
+    // delimited by <codebase-intelligence> ... </codebase-intelligence>" was
+    // skipped on 2026-07-16, so the child spawned with NO orientation and the
+    // PostToolUse return had no snapshot to join against (the lone
+    // no_spawn_snapshot in the window). buildOrientationBlock always emits the
+    // close tag alone on its own line (lib/orient.js:145), and a quotation
+    // never is. Deliberately NOT tail-anchored: when the coherence block is
+    // appended below, the prompt ends with </sextant-agent-coherence>, so a
+    // `$`-anchored test on the whole prompt would re-inject every time.
+    if (/^<\/codebase-intelligence>$/m.test(ti.prompt)) {
+      // Record the spawn-side lifecycle row like every other post-validation
+      // exit in this file does (see the invariant note above): without it the
+      // instrument keeps the CONSEQUENCE (a return with no snapshot) while
+      // erasing the CAUSE (a withheld preparation), which is precisely why the
+      // 07-16 miss needed a transcript dig instead of being readable off the
+      // scorecard.
+      recordUnavailableSpawnLifecycle(
+        root,
+        data,
+        "withheld",
+        "already_injected",
+        Math.max(0, Date.now() - orientationStarted)
+      );
       recordEvent(root, "pretask.skipped", { reason: "already_injected" });
       return;
     }

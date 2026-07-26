@@ -918,6 +918,33 @@ async function run() {
   const last = tryReadFile(cachePath);
 
   if (last === h) {
+    // TURN IDENTITY on the dedupe path (docs/033 Tier 3). Tier 1 #1 assumed
+    // "the injected-set file is overwritten once per injection, so its ts
+    // already identifies the turn". That is true per EMITTED BLOCK, not per
+    // turn: this early return used to skip persistInjectedSet entirely, so
+    // consecutive prompts with identical retrieval collapsed into ONE turn id.
+    // Merging k turns biases turnHitRate upward (the bucket hits if ANY of the
+    // k did: 1-(1-p)^k >= p) and offsets first-touch ranks by earlier turns'
+    // opens. Worse, the bias is ARM-ASYMMETRIC — the holdback branch above
+    // always mints a fresh id — so it lands squarely on the turnBenefitDelta
+    // Tier 1 built to fix the unit problem. The block is suppressed but the
+    // agent still holds the identical one from when it was first emitted, so
+    // this turn IS treated: mint a new id against the same surfaced set.
+    persistInjectedSet(injPathsFile, {
+      ts: Date.now(),
+      stale: contentStale === true,
+      arm,
+      deduped: true,
+      paths: injectedPaths,
+    });
+    // Armed turns could vanish into this early return without emitting any
+    // telemetry at all, while holdback turns always record. Any rate computed
+    // as holdback/(holdback+injected) was therefore a biased estimator; this
+    // makes the funnel self-describing.
+    recordEvent(root, "retrieval.deduped", {
+      arm,
+      fileCount: injectedPaths.length,
+    });
     recordCoherenceBoundaryOutcome("deduped");
     await statusLinePromise;
     return;

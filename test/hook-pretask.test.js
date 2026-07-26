@@ -171,6 +171,117 @@ describe("hook pretask — Lane A injection", () => {
     assert.equal(res.stdout, "");
   });
 
+  // docs/033 Tier 3: the double-inject guard used to be a bare
+  // `prompt.includes("</codebase-intelligence>")`, which cannot tell a prompt
+  // that CARRIES a block from one that merely QUOTES the tag. A real Task
+  // prompt asking a subagent to look for the tag was skipped on 2026-07-16 —
+  // the child spawned unoriented and its PostToolUse return had no snapshot to
+  // join (the window's lone no_spawn_snapshot).
+  it("still injects when the prompt only MENTIONS the tag inline", () => {
+    const prompt =
+      "Inspect the full text of the prompt you received for a block delimited " +
+      "by <codebase-intelligence> and </codebase-intelligence>, then report " +
+      "whether widgetize appears in it.";
+    const res = runHook(root, taskInput(prompt));
+    assert.equal(res.status, 0);
+    assert.ok(
+      res.stdout,
+      "a prompt that merely quotes the tag must still be oriented"
+    );
+    const updated = JSON.parse(res.stdout).hookSpecificOutput.updatedInput;
+    assert.ok(updated.prompt.startsWith(prompt), "original prompt must lead");
+    assert.match(updated.prompt.slice(prompt.length), /<codebase-intelligence>/);
+  });
+
+  it("skips a prompt that CARRIES a block, and records the spawn-side withhold", () => {
+    // The real block always ends with the close tag alone on its own line
+    // (lib/orient.js) — that, not the bare substring, is the discriminator.
+    const prompt =
+      "Do the thing.\n<codebase-intelligence>\nRepo: x\n</codebase-intelligence>";
+    const before = readTelemetry(root).length;
+    const res = runHook(root, taskInput(prompt));
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, "", "must never double-inject");
+    const fresh = readTelemetry(root).slice(before);
+    const skipped = fresh.filter(
+      (e) => e.name === "pretask.skipped" && e.reason === "already_injected"
+    );
+    assert.equal(skipped.length, 1, "the skip itself must still be recorded");
+    // The invariant this file states for every other post-validation exit:
+    // record the withheld spawn so the scorecard's denominator is not selected
+    // only after Lane A succeeds, and so a later return-side miss is explainable.
+    const lifecycle = fresh.filter(
+      (e) =>
+        e.name === "coherence.lifecycle" &&
+        e.stage === "child_spawn" &&
+        e.outcome === "withheld" &&
+        e.reason === "already_injected"
+    );
+    assert.equal(
+      lifecycle.length,
+      1,
+      "already_injected must emit a child_spawn withheld lifecycle row"
+    );
+  });
+
+  it("does NOT record a withhold when that spawn identity was already prepared", () => {
+    // `withheld` is TERMINAL in the scorecard: lifecycleAttemptUnits collapses
+    // child_spawn rows by taskKey\0agentKey and lets withheld override an
+    // earlier `written`. A re-fired hook / retried Task arrives with the SAME
+    // tool_use_id, and its prompt now carries the block we appended the first
+    // time — so the already_injected guard fires exactly where a success row
+    // already exists. Recording there would rewrite a real success as a
+    // withhold, corrupting the number the row exists to make honest.
+    const C = require("../lib/coherence");
+    const rawSession = "refire-parent";
+    const toolUseId = "toolu_refire_1";
+    const parentKey = C.parentAgentKey(rawSession);
+    const childKey = C.childAgentKey(parentKey, toolUseId);
+    assert.ok(
+      C.writeSnapshot(
+        root,
+        C.buildSnapshot({
+          taskId: "task_refire",
+          agentKey: childKey,
+          parentAgentKey: parentKey,
+          spawnToolUseId: toolUseId,
+          kind: "child",
+          agentType: "general-purpose",
+          state: "spawn_prepared",
+          createdAt: Date.now(),
+          repo: {},
+          intent: { text: "prepared" },
+          workset: { primary: [], support: [], witnesses: [], hazards: [], unknowns: [] },
+          servedClaims: [],
+          blockHash: "prepared",
+        })
+      ),
+      "fixture must persist the prior preparation"
+    );
+
+    const prompt =
+      "Do the thing.\n<codebase-intelligence>\nRepo: x\n</codebase-intelligence>";
+    const before = readTelemetry(root).length;
+    const res = runHook(root, {
+      ...taskInput(prompt),
+      session_id: rawSession,
+      tool_use_id: toolUseId,
+    });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, "", "must still not double-inject");
+    const fresh = readTelemetry(root).slice(before);
+    assert.equal(
+      fresh.filter(
+        (e) =>
+          e.name === "coherence.lifecycle" &&
+          e.stage === "child_spawn" &&
+          e.outcome === "withheld"
+      ).length,
+      0,
+      "a prepared identity must never be re-recorded as a withheld spawn"
+    );
+  });
+
   it("fails closed at runtime when another static scope has an input rewriter", () => {
     const configDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-pretask-conflict-"));
     fs.writeFileSync(

@@ -1050,4 +1050,51 @@ describe("summarize: turn-level outcome (docs/033)", () => {
     assert.ok(turnAt > -1 && openAt > turnAt, "turn hit-rate must precede open-precision");
     assert.match(text, /session-shape sensitive/);
   });
+
+  // docs/033 Tier 3 — three defects found auditing what Tier 1 shipped.
+
+  it("never graduates the per-OPEN delta on opens alone (turns are the unit)", () => {
+    // Exactly ONE randomized turn per arm, but 40 correlated opens in each.
+    // The opens floor (30) clears; the turn floor (30) does not. Before this
+    // gate the surface printed a DORMANT turn line and an ALL-CAPS causal
+    // per-open claim two lines apart — the very error docs/033 §4 named.
+    const events = [];
+    for (let i = 0; i < 20; i++) events.push(hit(1, "armed"));
+    for (let i = 0; i < 20; i++) events.push(miss(1, "armed"));
+    for (let i = 0; i < 40; i++) events.push(miss(2, "holdback"));
+    const sum = summarize(events);
+    assert.equal(sum.retrieval.armCounts.armed.scored, 40);
+    assert.equal(sum.retrieval.armCounts.holdback.scored, 40);
+    assert.equal(sum.retrieval.turnCountsByArm.armed.turns, 1);
+    const text = printSummary("/tmp/x", sum);
+    assert.doesNotMatch(
+      text,
+      /BENEFIT DELTA \(armed − holdback\)/,
+      "a causal claim must not graduate on 1 randomized turn per arm"
+    );
+    assert.match(text, /turns are the randomization unit/);
+  });
+
+  it("shows the correct-unit accrual at zero rather than suppressing it", () => {
+    // The live-repo shape: armed turns are stamped, but every holdback open
+    // predates the stamp, so holdbackTurns === 0. Suppressing the turn-arm
+    // block here left only the per-OPEN line ("holdback n=40 ... need >=30"),
+    // which reads as most-of-the-way-there while the canonical unit is at 0.
+    const events = [];
+    for (let t = 1; t <= 5; t++) events.push(hit(t, "armed"), miss(t, "armed"));
+    for (let i = 0; i < 40; i++) {
+      events.push({ name: "retrieval.path_miss", tool: "Read", arm: "holdback", ts: 1_700_000_100_000 + i });
+    }
+    const sum = summarize(events);
+    assert.equal((sum.retrieval.turnCountsByArm.holdback || {}).turns, undefined);
+    const text = printSummary("/tmp/x", sum);
+    assert.match(text, /at the randomization unit/, "the turn-arm block must render");
+    assert.match(text, /holdback\s+turn hit-rate n\/a\s+\(0\/0 turns\)/);
+    assert.match(text, /turn benefit delta: DORMANT \(accruing\) — holdback 0 turns/);
+  });
+
+  it("stays silent about arms on a holdback-disabled install", () => {
+    const text = printSummary("/tmp/x", summarize([hit(1), miss(1), hit(2)]));
+    assert.doesNotMatch(text, /at the randomization unit/);
+  });
 });
