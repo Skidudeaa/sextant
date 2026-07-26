@@ -271,6 +271,75 @@ describe("Phase F decision-grade scorecard", () => {
     return events;
   }
 
+  // docs/033 Tier 3 item 9 — the split. ACCRUING and the heading "Accrual
+  // gaps" asserted that elapsed time closes every unmet floor. On the dogfood
+  // repo four of five were false by one to two orders of magnitude and two were
+  // false at rate exactly zero, so the card promised a verdict that could never
+  // arrive. A floor now reports its own ETA and ACCRUING has to be earned.
+  it("refuses to call a floor ACCRUING when the observed rate cannot reach it", () => {
+    const now = Date.now();
+    const start = now - 10 * 24 * 3600 * 1000; // 10-day window
+    const events = [
+      { ts: start, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "parent_0", stage: "parent_serve", outcome: "written", durationMs: 10 },
+      { ts: start + 1000, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "child_0", parentAgentKey: "parent_0", stage: "child_spawn",
+        outcome: "written", durationMs: 10 },
+      { ts: now, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "child_0", parentAgentKey: "parent_0", stage: "tool_return",
+        outcome: "written", durationMs: 10 },
+    ];
+    const card = coherenceScorecard(events);
+    assert.equal(card.status, "UNREACHABLE_AT_OBSERVED_RATE");
+    assert.ok(
+      card.gaps.some((g) => /ETA \d+d at the observed rate/.test(g)),
+      `every unmet floor must carry an ETA, got: ${JSON.stringify(card.gaps)}`
+    );
+    const text = printCoherenceScorecard("/repo", card);
+    assert.match(text, /Unmet floors/);
+    assert.doesNotMatch(text, /Accrual gaps/);
+  });
+
+  it("reports lifecycle integrity as an event-level verdict, outside every volume gate", () => {
+    const now = Date.now();
+    const events = [
+      { ts: now - 5000, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "parent_0", stage: "parent_serve", outcome: "written", durationMs: 5 },
+      // A return with no spawn-side row at all: the real 2026-07-16 shape.
+      { ts: now, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "child_orphan", parentAgentKey: "parent_0", stage: "tool_return",
+        outcome: "missing", reason: "no_spawn_snapshot", durationMs: 5 },
+    ];
+    const card = coherenceScorecard(events);
+    assert.equal(card.lifecycleVerdict, "DEFECT_OPEN");
+    const row = card.lifecycleDefects.find((d) => d.reason === "no_spawn_snapshot");
+    assert.ok(row, "the defect must be itemised");
+    assert.equal(row.explained, false);
+    assert.equal(row.count, 1);
+    // It must be readable without clearing any accrual floor.
+    const text = printCoherenceScorecard("/repo", card);
+    assert.match(text, /Lifecycle integrity: DEFECT_OPEN/);
+    assert.match(text, /UNEXPLAINED/);
+  });
+
+  it("marks a return miss EXPLAINED when its spawn side recorded a withhold", () => {
+    // After the pretask fix, a withheld spawn leaves a matching row, so the
+    // return-side miss is attributable and needs no investigation.
+    const now = Date.now();
+    const events = [
+      { ts: now - 5000, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "child_1", parentAgentKey: "parent_0", stage: "child_spawn",
+        outcome: "withheld", reason: "orientation_unavailable", durationMs: 5 },
+      { ts: now, name: "coherence.lifecycle", schemaVersion: 1, taskKey: "t1",
+        agentKey: "child_1", parentAgentKey: "parent_0", stage: "tool_return",
+        outcome: "missing", reason: "no_spawn_snapshot", durationMs: 5 },
+    ];
+    const card = coherenceScorecard(events);
+    const row = card.lifecycleDefects.find((d) => d.stage === "tool_return");
+    assert.ok(row);
+    assert.equal(row.explained, true, "a recorded spawn-side withhold explains the miss");
+  });
+
   it("uses Wilson lower bounds and never calls operational health behavioral benefit", () => {
     assert.ok(wilsonLowerBound(100, 100) > 0.95);
     const card = coherenceScorecard(matureEvents());
@@ -1096,5 +1165,38 @@ describe("summarize: turn-level outcome (docs/033)", () => {
   it("stays silent about arms on a holdback-disabled install", () => {
     const text = printSummary("/tmp/x", summarize([hit(1), miss(1), hit(2)]));
     assert.doesNotMatch(text, /at the randomization unit/);
+  });
+
+  it("refuses to call a delta causal when its 95% CI spans zero", () => {
+    // 30 turns per arm — the accrual floor — at 18 vs 12 hit turns. The point
+    // estimate is +20 pts, which reads like a win; the interval is roughly
+    // [-5, +42], spanning both zero and harm. HOLDBACK_MIN_TURNS is an accrual
+    // floor, not statistical power: at n=30/arm only effects near +33 pts are
+    // resolvable, so a bare point estimate here would be the same overclaim
+    // docs/033 §4 killed at the open level.
+    const events = [];
+    for (let t = 1; t <= 18; t++) events.push(hit(t, "armed"));
+    for (let t = 19; t <= 30; t++) events.push(miss(t, "armed"));
+    for (let t = 101; t <= 112; t++) events.push(hit(t, "holdback"));
+    for (let t = 113; t <= 130; t++) events.push(miss(t, "holdback"));
+    const sum = summarize(events);
+    assert.equal(sum.retrieval.turnCountsByArm.armed.turns, 30);
+    assert.equal(sum.retrieval.turnCountsByArm.holdback.turns, 30);
+    const text = printSummary("/tmp/x", sum);
+    assert.match(text, /SPANS ZERO, directional only/);
+    assert.doesNotMatch(
+      text,
+      /TURN BENEFIT DELTA/,
+      "an interval that spans zero must not be printed as the causal lift"
+    );
+  });
+
+  it("prints the causal turn delta with its interval when the CI excludes zero", () => {
+    const events = [];
+    for (let t = 1; t <= 30; t++) events.push(hit(t, "armed"));
+    for (let t = 101; t <= 130; t++) events.push(miss(t, "holdback"));
+    const text = printSummary("/tmp/x", summarize(events));
+    assert.match(text, /TURN BENEFIT DELTA \(armed − holdback\): 100\.0 pts, 95% CI \[/);
+    assert.doesNotMatch(text, /SPANS ZERO/);
   });
 });

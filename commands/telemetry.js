@@ -104,6 +104,66 @@ function fmtPct(num, denom) {
   return `${((num / denom) * 100).toFixed(1)}%`;
 }
 
+// How long a scorecard floor may plausibly take to close before "keep waiting"
+// stops being honest advice. 180 days is deliberately generous — the floors it
+// reclassifies on the dogfood repo are 303d, 505d, 1009d and never.
+const COHERENCE_ACCRUAL_HORIZON_DAYS = 180;
+
+// Days to reach `target` at the rate the window actually observed. etaDays
+// null means the observed rate is exactly zero: elapsed time NEVER closes this
+// gap, and no amount of patience is the right response.
+function gapEta(spec, spanDays) {
+  if (spec.timeOnly) return { etaDays: Math.max(0, spec.remainingDays), reachable: true };
+  if (!(spanDays > 0)) return { etaDays: null, reachable: false };
+  if (!(spec.observed > 0)) return { etaDays: null, reachable: false };
+  const perDay = spec.observed / spanDays;
+  const etaDays = (spec.target - spec.observed) / perDay;
+  return { etaDays, reachable: etaDays <= COHERENCE_ACCRUAL_HORIZON_DAYS };
+}
+
+function gapReachable(spec, spanDays) {
+  return gapEta(spec, spanDays).reachable;
+}
+
+function annotateGap(spec, spanDays) {
+  const { etaDays } = gapEta(spec, spanDays);
+  if (spec.timeOnly) return `${spec.label} (ETA ${Math.ceil(Math.max(0, spec.remainingDays))}d)`;
+  if (etaDays == null) {
+    return `${spec.label} (UNREACHABLE: 0 observed in ${spanDays.toFixed(1)}d)`;
+  }
+  return `${spec.label} (ETA ${Math.round(etaDays)}d at the observed rate)`;
+}
+
+// Newcombe hybrid-score 95% interval for the DIFFERENCE of two proportions.
+// Built on the existing wilsonInterval (defined below) — the scorecard's
+// lifecycle gate already uses it, and the arms sit at the 0/2-style extremes
+// where the normal approximation degenerates.
+//
+// WHY an interval and not a minimum-detectable-effect number (docs/033 Tier 3):
+// HOLDBACK_MIN_TURNS is an ACCRUAL floor, not a sufficiency criterion. At 30
+// turns per arm the smallest effect this design can resolve is roughly +33 to
+// +35 points — a near-doubling of the turn hit-rate — so a delta printed the
+// moment the floor clears is "reportable", not "powered". An MDE would have to
+// assume an effect size; the interval is computed from the arms we actually
+// observed and says the same thing more honestly: a 30/30 split at 18 vs 12 hit
+// turns yields +20.0 pts with a 95% CI of roughly [-5, +45], which spans zero
+// AND spans harm. Printing the point estimate alone would call that "the causal
+// lift". This is the identical failure mode docs/033 §4 diagnosed at the open
+// level, reproduced one level up, so it gets the identical treatment.
+function newcombeDiff95(k1, n1, k2, n2) {
+  const a = wilsonInterval(k1, n1);
+  const b = wilsonInterval(k2, n2);
+  if (!a || !b) return null;
+  const p1 = k1 / n1;
+  const p2 = k2 / n2;
+  const d = p1 - p2;
+  return {
+    delta: d,
+    lo: d - Math.sqrt((p1 - a.lower) ** 2 + (b.upper - p2) ** 2),
+    hi: d + Math.sqrt((a.upper - p1) ** 2 + (p2 - b.lower) ** 2),
+  };
+}
+
 // Render the armed-vs-holdback contrast at the TURN level (docs/033 Tier 1 #3).
 // Same gating discipline as the per-open delta — the raw value always lives in
 // --json; only the human-readable causal CLAIM waits for volume — but the floor
@@ -137,14 +197,33 @@ function renderTurnArms(lines, r) {
     armedTurns >= HOLDBACK_MIN_TURNS &&
     holdbackTurns >= HOLDBACK_MIN_TURNS;
   if (atVolume) {
-    lines.push(
-      `  TURN BENEFIT DELTA (armed − holdback): ${(r.turnBenefitDelta * 100).toFixed(1)} pts` +
-      `  — the causal lift, measured per turn`
+    const ci = newcombeDiff95(
+      (counts.armed || {}).hitTurns || 0,
+      armedTurns,
+      (counts.holdback || {}).hitTurns || 0,
+      holdbackTurns
     );
+    const pts = (r.turnBenefitDelta * 100).toFixed(1);
+    if (ci && (ci.lo <= 0) !== (ci.hi <= 0)) {
+      // Interval spans zero: the point estimate is not distinguishable from
+      // "no effect", and may include harm. Say so instead of calling it causal.
+      lines.push(
+        `  turn benefit delta: ${pts} pts, 95% CI [${(ci.lo * 100).toFixed(1)}, ` +
+        `${(ci.hi * 100).toFixed(1)}] — SPANS ZERO, directional only ` +
+        `(${HOLDBACK_MIN_TURNS}/arm is an accrual floor, not statistical power).`
+      );
+    } else if (ci) {
+      lines.push(
+        `  TURN BENEFIT DELTA (armed − holdback): ${pts} pts, 95% CI ` +
+        `[${(ci.lo * 100).toFixed(1)}, ${(ci.hi * 100).toFixed(1)}]` +
+        `  — the causal lift, measured per turn`
+      );
+    }
   } else {
     lines.push(
       `  turn benefit delta: DORMANT (accruing) — holdback ${holdbackTurns} turns, ` +
-      `armed ${armedTurns} turns; need >=${HOLDBACK_MIN_TURNS} per arm before the delta is citable.`
+      `armed ${armedTurns} turns; need >=${HOLDBACK_MIN_TURNS} per arm to REPORT one ` +
+      `(an accrual floor — at that n only effects of roughly +33 pts or larger are resolvable).`
     );
   }
 }
@@ -1579,23 +1658,105 @@ function coherenceScorecard(events) {
   const spawnWilson = wilsonLowerBound(spawnSuccesses, spawnAttempts.length);
   const returnWilson = wilsonLowerBound(returnSuccesses, returnAttempts.length);
 
-  const baseGaps = [];
+  // UNMET FLOORS, each carrying what it would take to close (docs/033 Tier 3).
+  // The word ACCRUING and the heading "Accrual gaps" assert that elapsed time
+  // closes these. On this repo four of five were false by one to two orders of
+  // magnitude and two were false at rate EXACTLY ZERO, so the scorecard was
+  // promising a verdict that could never arrive — the same lying-instrument
+  // failure mode docs/033 §3 found in the --repo filter. A floor now reports
+  // its own ETA, and a status of ACCRUING has to be earned.
+  const gapSpecs = [];
   if (spanDays < COHERENCE_THRESHOLDS.minDays) {
-    baseGaps.push(`window ${spanDays.toFixed(1)}d < ${COHERENCE_THRESHOLDS.minDays}d`);
+    gapSpecs.push({
+      label: `window ${spanDays.toFixed(1)}d < ${COHERENCE_THRESHOLDS.minDays}d`,
+      // Wall-clock closes itself at one day per day; it is the only floor here
+      // for which "just wait" is literally true.
+      timeOnly: true,
+      remainingDays: COHERENCE_THRESHOLDS.minDays - spanDays,
+    });
   }
   if (multiAgentTasks < COHERENCE_THRESHOLDS.minMultiAgentTasks) {
-    baseGaps.push(`multi-agent tasks ${multiAgentTasks} < ${COHERENCE_THRESHOLDS.minMultiAgentTasks}`);
+    gapSpecs.push({
+      label: `multi-agent tasks ${multiAgentTasks} < ${COHERENCE_THRESHOLDS.minMultiAgentTasks}`,
+      observed: multiAgentTasks,
+      target: COHERENCE_THRESHOLDS.minMultiAgentTasks,
+    });
   }
   if (spawnAttempts.length < COHERENCE_THRESHOLDS.minSpawnAttempts) {
-    baseGaps.push(`spawn attempts ${spawnAttempts.length} < ${COHERENCE_THRESHOLDS.minSpawnAttempts}`);
+    gapSpecs.push({
+      label: `spawn attempts ${spawnAttempts.length} < ${COHERENCE_THRESHOLDS.minSpawnAttempts}`,
+      observed: spawnAttempts.length,
+      target: COHERENCE_THRESHOLDS.minSpawnAttempts,
+    });
   }
   if (returnAttempts.length < COHERENCE_THRESHOLDS.minReturnAttempts) {
-    baseGaps.push(`return attempts ${returnAttempts.length} < ${COHERENCE_THRESHOLDS.minReturnAttempts}`);
+    gapSpecs.push({
+      label: `return attempts ${returnAttempts.length} < ${COHERENCE_THRESHOLDS.minReturnAttempts}`,
+      observed: returnAttempts.length,
+      target: COHERENCE_THRESHOLDS.minReturnAttempts,
+    });
   }
-  const incidentGap = eligibleByIncident.size < COHERENCE_THRESHOLDS.minEligibleIncidents
-    ? `eligible incidents ${eligibleByIncident.size} < ${COHERENCE_THRESHOLDS.minEligibleIncidents}`
-    : null;
+  const incidentGapSpec =
+    eligibleByIncident.size < COHERENCE_THRESHOLDS.minEligibleIncidents
+      ? {
+          label:
+            `eligible incidents ${eligibleByIncident.size} < ` +
+            `${COHERENCE_THRESHOLDS.minEligibleIncidents}`,
+          observed: eligibleByIncident.size,
+          target: COHERENCE_THRESHOLDS.minEligibleIncidents,
+        }
+      : null;
+  const baseGaps = gapSpecs.map((spec) => annotateGap(spec, spanDays));
+  const incidentGap = incidentGapSpec ? annotateGap(incidentGapSpec, spanDays) : null;
   const gaps = incidentGap ? [...baseGaps, incidentGap] : [...baseGaps];
+  const baseGapsReachable = gapSpecs.every((spec) => gapReachable(spec, spanDays));
+  const incidentGapReachable = incidentGapSpec
+    ? gapReachable(incidentGapSpec, spanDays)
+    : true;
+
+  // LIFECYCLE VERDICT — the half of Phase F that needs no volume at all
+  // (docs/033 Tier 3 item 9). Spawn/return integrity is an EVENT-level
+  // property: one unexplained join miss is a defect whether or not the repo
+  // ever reaches 30 multi-agent tasks. Reporting it only through a volume-gated
+  // ACCRUING headline is what buried the real no_spawn_snapshot signal for a
+  // week. `explained` marks a return-side miss whose spawn side recorded a
+  // non-success outcome for the same identity — i.e. the cause is already in
+  // the record and the miss needs no further investigation.
+  const spawnSideByIdentity = new Map();
+  for (const event of spawnAttempts) {
+    const id = lifecycleIdentity(event);
+    if (id) spawnSideByIdentity.set(id, event.outcome);
+  }
+  const lifecycleDefectRows = new Map();
+  for (const event of lifecycleUnits) {
+    if (event.outcome === "written" || event.outcome === "retry") continue;
+    const spawnOutcome = spawnSideByIdentity.get(lifecycleIdentity(event));
+    const explained =
+      event.stage === "tool_return" &&
+      spawnOutcome != null &&
+      spawnOutcome !== "written" &&
+      spawnOutcome !== "retry";
+    const key = `${event.stage}\0${event.outcome}\0${event.reason || ""}\0${explained}`;
+    const row = lifecycleDefectRows.get(key) || {
+      stage: event.stage || null,
+      outcome: event.outcome || null,
+      reason: event.reason || null,
+      explained,
+      count: 0,
+      firstTs: null,
+      lastTs: null,
+    };
+    row.count++;
+    if (Number.isFinite(event.ts)) {
+      row.firstTs = row.firstTs == null ? event.ts : Math.min(row.firstTs, event.ts);
+      row.lastTs = row.lastTs == null ? event.ts : Math.max(row.lastTs, event.ts);
+    }
+    lifecycleDefectRows.set(key, row);
+  }
+  const lifecycleDefects = [...lifecycleDefectRows.values()].sort((a, b) => b.count - a.count);
+  const lifecycleVerdict = lifecycleDefects.some((row) => !row.explained)
+    ? "DEFECT_OPEN"
+    : "CLEAN";
 
   let status = "DORMANT";
   const reasons = [];
@@ -1610,7 +1771,9 @@ function coherenceScorecard(events) {
       status = "INVESTIGATE";
       reasons.push(`${hardFailureEvents.length} hard lifecycle failure(s)`);
     } else if (baseGaps.length > 0) {
-      status = "ACCRUING";
+      // ACCRUING has to be EARNED: it may only be printed when every unmet
+      // floor would actually close inside the horizon at the observed rate.
+      status = baseGapsReachable ? "ACCRUING" : "UNREACHABLE_AT_OBSERVED_RATE";
       reasons.push(...baseGaps);
     } else if (
       spawnWilson == null || spawnWilson < COHERENCE_THRESHOLDS.minLifecycleWilsonLower ||
@@ -1632,7 +1795,7 @@ function coherenceScorecard(events) {
       status = "PARK_CANDIDATE";
       reasons.push("finding incidence is below the pre-registered headroom floor");
     } else if (incidentGap) {
-      status = "ACCRUING";
+      status = incidentGapReachable ? "ACCRUING" : "UNREACHABLE_AT_OBSERVED_RATE";
       reasons.push(incidentGap);
     } else if (
       boundaryResolutionRate == null ||
@@ -1676,6 +1839,10 @@ function coherenceScorecard(events) {
       "The randomized overlap trial observes only parent Read/Edit/Write/MultiEdit/NotebookEdit behavior; Bash/script mutations, child work, conflicts, task success, and user value are not instrumented.",
     window: { firstTs, lastTs, spanMs, spanDays },
     thresholds: COHERENCE_THRESHOLDS,
+    accrualHorizonDays: COHERENCE_ACCRUAL_HORIZON_DAYS,
+    // Event-level integrity verdict — deliberately OUTSIDE every volume gate.
+    lifecycleVerdict,
+    lifecycleDefects,
     gaps: status === "PARK_CANDIDATE" ? baseGaps : gaps,
     lifecycle: {
       multiAgentTasks,
@@ -1798,6 +1965,23 @@ function printCoherenceScorecard(rootAbs, card) {
     : "0.0";
   lines.push("");
   lines.push(`Observation window: ${windowDays} days`);
+
+  // The integrity verdict prints FIRST and unconditionally (docs/033 Tier 3).
+  // Spawn/return integrity is an event-level property: one unexplained join
+  // miss is actionable on the day it happens, and does not become more or less
+  // true when the repo reaches 30 multi-agent tasks. It used to be reachable
+  // only by reading the reason histogram underneath a volume-gated headline.
+  if (card.lifecycleVerdict) {
+    lines.push("");
+    lines.push(`Lifecycle integrity: ${card.lifecycleVerdict}  (event-level — no volume gate)`);
+    for (const row of card.lifecycleDefects || []) {
+      lines.push(
+        `  - ${row.stage || "(unknown)"} ${row.outcome || "(unknown)"}` +
+        `${row.reason ? ` [${row.reason}]` : ""} x${row.count}` +
+        `${row.explained ? "  — explained by a recorded spawn-side outcome" : "  — UNEXPLAINED"}`
+      );
+    }
+  }
 
   const lifecycle = card.lifecycle;
   lines.push("");
@@ -2000,7 +2184,7 @@ function printCoherenceScorecard(rootAbs, card) {
 
   if (card.gaps && card.gaps.length) {
     lines.push("");
-    lines.push("Accrual gaps");
+    lines.push("Unmet floors");
     for (const gap of card.gaps) lines.push(`  - ${gap}`);
   }
   return lines.join("\n");
@@ -2448,6 +2632,7 @@ module.exports = {
   printCoherenceScorecard,
   wilsonLowerBound,
   wilsonInterval,
+  newcombeDiff95,
   coherenceExperimentScorecard,
   COHERENCE_THRESHOLDS,
 };

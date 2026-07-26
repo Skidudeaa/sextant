@@ -227,15 +227,141 @@ single dogfood repo.
    Measured scans went **1.91 / 1.99 / 2.12 s → 1.60 / 1.64 / 1.77 s** (~17%), matching the
    predicted saving from halving babel. Self-eval byte-identical.
 
-### Tier 3 — earn a verdict on the dark phases
+### Tier 3 — earn a verdict on the dark phases — **DECIDED**
 
-7. **Raise holdback to 50% on this repo** and verify the arm fires at the configured rate.
-8. **Decide Phase C**: build a test that proves `diffClaims` fires on a real
-   edit-then-reprompt sequence, or accept it is unfalsifiable in single-repo dogfooding and
-   park it with that stated.
-9. **Split the Phase F decision**: keep the lifecycle-reliability half (accruing, already
-   surfaced a real join failure); park the randomized overlap trial, whose 30-task gate is
-   unreachable on one repo.
+Investigated 2026-07-26 by four independent read-only investigations, each finding put
+through adversarial verification. Every verdict below is backed by a probe actually run.
+
+7. **Holdback — VERIFIED FIRING; the item as written was the wrong question.**
+   The arm is not suppressed anywhere between `settings.json` and telemetry. Two
+   independent end-to-end probes in throwaway repos: **119 holdbacks in 240 real `hook
+   refresh` invocations at `pct=50`** (49.58%, exact two-sided binomial p=0.949) — one run
+   carrying the dogfood capsule+coherence config, one driving the full refresh→PostToolUse
+   loop and confirming holdback turns get turn-stamped and scored with `arm:"holdback"` —
+   plus 63/200 at `pct=30` (p=0.71).
+
+   The field number is throughput, not a bug. The true funnel over 87.1 days: 135
+   classified → 114 `retrieve:true` → 56 `empty_fallback` → 58 reach `decideArm` → 20
+   content-stale (forced armed) → **38 holdback-eligible turns = 0.436/day**. Replace §4's
+   "3/56 lifetime is low enough to warrant checking whether the env var reaches the hook at
+   all" with that funnel. The existing hedge — *n is too small to call it a bug* — remains
+   the correct statement: pooled across the three env-var repos the deficit sits at
+   p = 0.027–0.063 depending on a two-turn bookkeeping choice, so neither "it's a bug" nor
+   "it's noise" is supportable. The `retrieval.deduped` event added in Tier 3 makes that
+   choice observable going forward; do not resolve it retroactively.
+
+   **The viability question is the real content of item 7, and on one repo the answer is
+   negative.** Reaching 30 scored turns/arm with 90% probability needs 74 eligible turns at
+   p=0.5 → **170 days solo**. And `HOLDBACK_MIN_TURNS = 30` is an *accrual* floor, not
+   statistical power: at n=30/arm the minimum detectable effect is **+33 to +35 points**, a
+   near-doubling of the turn hit-rate. Detecting a plausible +10pt lift needs ~290–390
+   turns/arm ≈ years. The delta therefore now prints with a **95% Newcombe interval** and
+   refuses the word "causal" whenever that interval spans zero.
+
+   Raised to 50% on this repo. `eval-trajectory` permutation-null lift remains the
+   **primary** benefit proof — it already has three orders of magnitude more data than the
+   A/B will have this year. Pooling the fleet (13 repos, 314 eligible turns, 5.63/day =
+   12.9× sextant) would reach the accrual floor in ~13 days and is the only change that
+   makes the arm reachable at all; it needs multi-root aggregation in
+   `commands/telemetry.js` (`ctx.roots[0]` today) and is **not** done here.
+
+8. **Phase C — DECIDED: it fires. The FIELD RATE is parked.**
+   "Unfalsifiable in single-repo dogfooding" is **refuted** — it was falsified twice, in
+   ~90 seconds each. Driving a real edit-then-reprompt sequence in a throwaway repo emits
+   literal `<sextant-context-delta>` blocks for all four forms (span move on a fresh turn,
+   span move on a content-stale turn, symbol removed, file removed), each with a matching
+   `contextdelta.emitted` event. Re-running `diffClaims` read-only against sextant's **own**
+   persisted `.capsule.266cb3b0…` renders a real 2-line CHANGED delta today. Now locked by
+   `test/claims-hook-e2e.test.js` under its own name and with coherence OFF — the only
+   prior hook-level assertion lived under a Phase-F title behind `SEXTANT_COHERENCE=1`, so
+   a Phase-C regression was indistinguishable from the permanent `contextdelta.emitted = 0`.
+
+   It has never fired in the field because four preconditions must hold at once: capsule
+   mode on, an armed non-content-stale minting turn (8 in 87 days), a later prompt in the
+   same session, and a claimed file mutated in between (9.0% of mutations land on a
+   surfaced file; 3 such mutations in the whole capsule era). Park the field rate with
+   those numbers stated; do not chase it with more dogfooding.
+
+   Two corrections to §6: `claim.served = 36` overstates by 3 — those were minted on a
+   holdback turn before `edf40e3` fixed it, so the honest served count is **33**. And
+   `telemetry.jsonl.old` does not exist on disk; this review read only the current file.
+
+   *Not adopted*: the claim that "0 of 69 persisted rows carry a `symbol`, so the symbol
+   half has never had an eligible field input". Retrieval-side symbol thinness is real, but
+   52 of 59 surviving rows predate `7ecfea1` (the commit that first writes `symbol`) by
+   construction, and `retrieval.path_hit` carries `exported_symbol` four times, three of
+   them after `7ecfea1` landed. The stronger claim does not survive.
+
+9. **Phase F — SPLIT, by verdict TYPE rather than by threshold.**
+   The lifecycle half carries an actionable, volume-free signal that sat buried under a
+   volume-gated headline for a week. It is now reported first and unconditionally as
+   `lifecycleVerdict: CLEAN | DEFECT_OPEN`, itemised by (stage, outcome, reason), with an
+   `explained` flag marking a return-side miss whose spawn side already recorded a
+   non-success outcome for the same identity. Today it reads `DEFECT_OPEN` — one
+   UNEXPLAINED `tool_return missing [no_spawn_snapshot]`, whose root cause is fixed in
+   `fb42694`.
+
+   `ACCRUING` was dishonest for both halves. Measured ETAs at the observed rate: 30
+   multi-agent tasks = 293d, 100 spawn attempts = 1001d, 100 return attempts = 495d, 50
+   eligible incidents = **never** (rate 0). The word asserts that elapsed time closes the
+   gap; for four of five floors that was false by one to two orders of magnitude. Each floor
+   now carries its own ETA, the heading is **Unmet floors**, and the status is
+   `UNREACHABLE_AT_OBSERVED_RATE` unless every unmet floor closes within
+   `COHERENCE_ACCRUAL_HORIZON_DAYS` (180).
+
+   **Gate attribution corrected**: this document previously called the 30-task gate the
+   randomized trial's. `minMultiAgentTasks: 30` is a top-level/shared gate applied only in
+   `coherenceScorecard`'s `baseGaps`; it appears nowhere in `coherenceExperimentScorecard`,
+   whose own floors are 40/arm (pilot) and 150/arm (credible read). Parking the trial does
+   **not** remove the 30-task gate.
+
+   **The trial is parked**: `coherenceHoldbackPct` is now `0` on this repo. It had been
+   switched ON and structurally starved, not awaiting traffic — enrollment requires two
+   concurrently live agent snapshots on one taskId with an overlapping workset, and across
+   all 13 analysis rows in 10.1 days there were **0** with `overlapPairs > 0` and **0** with
+   `sharedPaths > 0` (max concurrent snapshots: 2). Sequential single-repo subagent use
+   cannot produce the precondition. **Unpark condition**: a second enrolled repo, or ≥1
+   eligible overlap pair per week sustained for four weeks. The code stays — dormant cost is
+   one `fs.existsSync` per file-tool PostToolUse, and deleting ~1,471 production lines plus
+   1,275 lines of test whose only missing input is a second repo would convert a config flip
+   into a rewrite of a subtle locking/attrition/GC design.
+
+### Tier 3 defects found while verifying it
+
+Driving the instruments rather than reading them turned up four defects, three of them in
+code that had shipped 48 hours earlier. All are fixed in `fb42694`, each locked by a test
+verified to fail pre-change; see that commit message for the mechanisms.
+
+- The PreToolUse double-inject guard was a bare substring test that could not distinguish a
+  prompt CARRYING an injected block from one MENTIONING the tag — it silently de-oriented a
+  child on 2026-07-16 and broke the downstream join. **1/1 of all observed guard firings
+  were false positives; the guard has never fired a true positive.**
+- `already_injected` was the only post-validation exit that skipped the spawn lifecycle row,
+  so the instrument kept the consequence and erased the cause. Adding that row naively
+  introduces a worse bug — `withheld` is TERMINAL and overrides an earlier `written` for the
+  same identity, which is exactly the re-fired-hook case the tightened regex now isolates —
+  so it is recorded only when nothing was ever prepared for that identity.
+- The dedupe path skipped `persistInjectedSet`, collapsing k real turns into one turn id.
+  The bias is arm-asymmetric (holdback always mints), landing on `turnBenefitDelta` itself.
+- The per-OPEN benefit delta still graduated to an unqualified causal claim on ONE
+  randomized turn per arm, printed two lines under the turn-level DORMANT.
+
+### Still open
+
+- **Multi-root telemetry aggregation** (`--roots a,b,c`) plus enabling holdback on the top-3
+  fleet repos. The only change that makes the A/B reachable; gated on the precondition below.
+- **Establish the armed `turnHitRate` baseline first.** The only two turn-stamped retrieval
+  turns in existence are both zero-hit, and `eval-trajectory --repo sextant` reads 0.68× —
+  at or below chance — on 38 surfaced rows (vs somaNotes 2.61× on 1446). Both samples are
+  far too thin to conclude anything, but if the armed turn hit-rate really is near zero, no
+  delta is detectable at any n. Re-read past ~150 surfaced rows before scaling the A/B.
+- **Sync rescan does not reach the retrieval lane.** `hook-refresh.js` calls bare
+  `checkFreshness` and only ever takes the async arm; the Option-5 sync arm lives in
+  `lib/cli.js:applyFreshnessGate`, so a content-stale *code* prompt that has results still
+  gets the degraded text-only block. Real, and worth shipping as a **product** fix
+  (blackouts on code turns) — but explicitly **not** a holdback-eligibility lever: on
+  `/root/somaNotes`, where 97% of turns are content-stale, `shouldSyncRescan` returns
+  `{sync:false, p95:99452}` and would never fire.
 
 ### Explicitly not planned
 

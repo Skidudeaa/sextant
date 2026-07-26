@@ -1,6 +1,6 @@
 {
   "env": {
-    "SEXTANT_HOLDBACK_PCT": "30"
+    "SEXTANT_HOLDBACK_PCT": "50"
   },
   "hooks": {
     "SessionStart": [
