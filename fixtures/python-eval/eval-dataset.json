@@ -8,8 +8,12 @@
       "id": "py-penalty-001",
       "category": "scope",
       "query": "FLAG_REGISTRY",
-      "relevantFiles": ["app/feature_gate.py"],
-      "relevantHitPatterns": ["FLAG_REGISTRY"],
+      "relevantFiles": [
+        "app/feature_gate.py"
+      ],
+      "relevantHitPatterns": [
+        "FLAG_REGISTRY"
+      ],
       "topK": 5,
       "minUsefulnessScore": 0.6,
       "notes": "B3 CONSTANT-EDGE GUARD (re-purposed 2026-05-29). app/__init__.py re-exports FLAG_REGISTRY through its __all__ barrel; the query must surface the DEFINING module (feature_gate.py) at rank 1, NOT the barrel. Fail-pre/pass-post across the re-export-kind fix stack: revert graph-retrieve's explicit->reexport_chain routing OR the merge fusion-bonus exclusion OR the python_ast.py AnnAssign capture, and the barrel (or its zoekt re-export line) outranks the def -> feature_gate.py drops below rank 1 -> FAIL. HISTORY: this case originally guarded the test-path penalty while FLAG_REGISTRY was signal-less. The AnnAssign export fix (python_ast.py now captures `NAME: T = {...}`) makes FLAG_REGISTRY a `const` export that is floored, so the def now wins via the floor rather than the penalty — this case no longer isolates the test-path penalty. The test-path penalty is now hard-locked solely by test/merge-results.test.js (penalty-sensitive: reverting C.TEST_PENALTY fails 2 of its assertions). See [[project_test_path_penalty_per_language_gap]] and [[project_real_repo_retrieval_failures]]."
@@ -18,8 +22,14 @@
       "id": "py-flag-001",
       "category": "scope",
       "query": "flag",
-      "relevantFiles": ["app/feature_gate.py"],
-      "relevantHitPatterns": ["FLAG_REGISTRY", "def enable_flag", "feature flag"],
+      "relevantFiles": [
+        "app/feature_gate.py"
+      ],
+      "relevantHitPatterns": [
+        "FLAG_REGISTRY",
+        "def enable_flag",
+        "feature flag"
+      ],
       "topK": 5,
       "minUsefulnessScore": 0.5,
       "notes": "Fuzzy single-word query — the closest analog to the dogfooding 'flags flipped' miss. feature_gate.py is the canonical flag module but its filename does NOT contain 'flag', while two co-located test_*.py files do. The penalty effect is visible in the CLI graph-OFF arm: revert the regex and the graph-OFF ranking flips to test_flag_rollout.py #1 (graph-ON keeps feature_gate.py #1 via its fan-in=3 boost, so this is a softer signal than py-penalty-001). Kept as a realistic fuzzy-query case, NOT relied on as the hard guard."
@@ -28,9 +38,15 @@
       "id": "py-sym-001",
       "category": "symbol",
       "query": "CorrectionBroker",
-      "relevantFiles": ["app/broker.py"],
-      "acceptableFiles": ["app/service.py"],
-      "relevantHitPatterns": ["class CorrectionBroker"],
+      "relevantFiles": [
+        "app/broker.py"
+      ],
+      "acceptableFiles": [
+        "app/service.py"
+      ],
+      "relevantHitPatterns": [
+        "class CorrectionBroker"
+      ],
       "topK": 5,
       "minUsefulnessScore": 0.5,
       "notes": "Control case. A class def gets the +65% def-site/exact-symbol stack, so broker.py ranks #1 even though test_broker.py is co-located. Confirms the test penalty does NOT over-fire and bury a symbol that has a genuine strong definition signal."
@@ -39,8 +55,12 @@
       "id": "py-multi-001",
       "category": "multiword",
       "query": "def route",
-      "relevantFiles": ["app/router.py"],
-      "relevantHitPatterns": ["def route"],
+      "relevantFiles": [
+        "app/router.py"
+      ],
+      "relevantHitPatterns": [
+        "def route"
+      ],
       "topK": 5,
       "minUsefulnessScore": 0.5,
       "notes": "Control case. router.py defines both add_route and route; the literal 'def route' must reach router.py's method def at rank #1."
@@ -49,11 +69,17 @@
       "id": "py-nl-001",
       "category": "nl-scatter",
       "query": "clinician reminder escalation acknowledged",
-      "relevantFiles": ["app/notifications.py"],
-      "relevantHitPatterns": ["clinician", "reminder", "escalation"],
+      "relevantFiles": [
+        "app/notifications.py"
+      ],
+      "relevantHitPatterns": [
+        "clinician",
+        "reminder",
+        "escalation"
+      ],
       "topK": 5,
       "minUsefulnessScore": 0.6,
-      "minRecall": 1.0,
+      "minRecall": 1,
       "maxPrimaryRank": 1,
       "notes": "HARD REGRESSION GUARD for A4 (natural-language recall collapse). The four query tokens appear SCATTERED in app/notifications.py and the filename contains none of them, so the multi-token query becomes a zoekt PHRASE query (quoteIfPhrase) that matches nothing, and the graph filename layer cannot reach the file. Pre-fix the canonical file is ABSENT from the candidate set (recall 0 -> FAIL via minRecall). The zero-hit AND-fallback in lib/zoekt.js:searchFast re-issues the query unquoted (whitespace-AND), which content-matches notifications.py -> rank 1 (recall 1.0, MRR 1.0 -> PASS). minRecall/maxPrimaryRank are the gate fields added to eval-hook.js for exactly this class (usefulness alone never inspects recall, which is why A4 shipped silently). REQUIRES a warm zoekt index — graph-only mode cannot recover this. See [[project_real_repo_retrieval_failures]]."
     },
@@ -61,9 +87,16 @@
       "id": "py-reexport-001",
       "category": "reexport",
       "query": "RequestRouter",
-      "relevantFiles": ["app/router.py"],
-      "acceptableFiles": ["app/__init__.py", "app/service.py"],
-      "relevantHitPatterns": ["class RequestRouter"],
+      "relevantFiles": [
+        "app/router.py"
+      ],
+      "acceptableFiles": [
+        "app/__init__.py",
+        "app/service.py"
+      ],
+      "relevantHitPatterns": [
+        "class RequestRouter"
+      ],
       "topK": 5,
       "minUsefulnessScore": 0.5,
       "maxPrimaryRank": 1,
@@ -76,8 +109,21 @@
       "relevantFiles": [],
       "relevantHitPatterns": [],
       "topK": 5,
-      "minUsefulnessScore": 0.0,
+      "minUsefulnessScore": 0,
       "notes": "Garbage query across the Python corpus. Must return zero results."
+    },
+    {
+      "id": "py-token-001",
+      "category": "multiword",
+      "query": "where do we normalize the flag registry",
+      "relevantFiles": [
+        "app/feature_gate.py"
+      ],
+      "topK": 5,
+      "minRecall": 1,
+      "maxPrimaryRank": 1,
+      "minUsefulnessScore": 0.4,
+      "notes": "NL->EXPORT-TOKEN BRIDGE GUARD (docs/035 #4, added 2026-07-27). FAIL-pre reproduced on this exact fixture before Layer 5: the graph lane returned ONLY app/test_flag_rollout.py (a TEST file, via path_match score 60) and zoekt.searchFast returned 0 hits even after its Tier-2 AND fallback, because NL function words break whitespace-AND — so the gold app/feature_gate.py was absent from every layer. findExportsBySymbol is LOWER(name)=LOWER(?) exact-match, so the term \"registry\" could never reach FLAG_REGISTRY. Layer 5 tokenizes export names (FLAG_REGISTRY -> flag, registry) and fires ONLY when Layers 1-3 are empty. MUTATION-CHECKED, and the result corrected an earlier draft of this note: this case does NOT guard the barrel routing. Removing the kind===explicit -> HIT_REEXPORT_CHAIN routing leaves this case PASSING 8/8, because the merge layer keeps the def ahead anyway on this corpus. The def-over-barrel routing, the test-path exclusion, and the fires-only-when-Layers-1-3-are-empty condition are each locked by test/export-token-bridge.test.js, where all three mutations fail a case. What THIS case guards is the recovery itself: revert Layer 5 and the gold file is absent from every layer, so recall drops to 0 and the case fails."
     }
   ]
 }

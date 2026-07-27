@@ -899,9 +899,49 @@ it produces 14.6× more opens.
    was aimed at is now fixed upstream without relaxing silent absence at all, so the degrade arm
    would be spending the project's strictest invariant on a much smaller residual. Re-derive the
    residual from telemetry before reconsidering it.
-5. **Gated on (3): the NL bridge (#4)** in its guarded form (test-path exclusion + fan-in≥5, barrel
+5. ~~**Gated on (3): the NL bridge (#4)** in its guarded form (test-path exclusion + fan-in≥5, barrel
    routing, formatter + `classifyDetailSource` branches, per-repo df percentile). Batch its
-   SCHEMA_VERSION bump with every other pending one.
+   SCHEMA_VERSION bump with every other pending one.~~ **✅ DONE 2026-07-27, with one guard replaced
+   on evidence.**
+
+   **The fan-in floor had to go, and the fixture is why.** The verifier's recommendation was to
+   reuse both docs/012 guards — test-path exclusion AND `EXPORT_INJECT_MIN_FANIN` (5). The
+   test-path exclusion is kept. The fan-in floor would have **broken this candidate's own
+   kill-gate**: the committed fixture's gold file `app/feature_gate.py` has **fan-in 4**, so the
+   floor excludes the very file the FAIL-pre exists to recover. Fan-in asks "is this file
+   important"; a lexical lane needs "is this token discriminating", and **document frequency**
+   answers that directly.
+   - df cap is a **per-repo p95 with a floor of 3**, not the proposed constant `df > 12`. Measured
+     p95: fixture **3**, sextant **5**, jan25 **15**, somaNotes **27** — so 12 is p99 on one repo
+     and ~p85 on another, i.e. two strictnesses wearing one number (the verifier's own point,
+     confirmed with numbers). p95 excludes the real offenders everywhere measured (`default` df=82
+     on sextant, `test` df=666 on somaNotes, `test` df=159 on jan25) while keeping the fixture's
+     `registry` at df=3.
+
+   **FAIL-pre → PASS-post, driven on the committed fixture.** Before: the graph lane returned ONLY
+   `app/test_flag_rollout.py` (a test file, path_match 60), `searchFast` returned 0 hits even after
+   its Tier-2 AND fallback, gold absent from every layer. After: `app/feature_gate.py` at **rank 1**
+   (`export_token`, 87.74), barrel `app/__init__.py` below it at 80 via `reexport_chain` (no B3
+   pathology), and `app/test_feature_gate.py` — which genuinely matches the token — dropped by the
+   test guard.
+
+   **Regression gates byte-identical**, as predicted: self-eval 21/21 (0.904/0.909/+0.015), hook
+   eval 21/21, Vapor **delta +0.0000** both paths. That is the leak-detector working — Layer 5
+   fires only when Layers 1–3 are empty.
+
+   **Both silent wiring gaps closed**: `format-retrieval.js` renders `export name contains: <terms>`
+   (deliberately not "exports X" — the match is on a word INSIDE the name), and
+   `trajectory.js:classifyDetailSource` maps it, so the offline half of the field gate measures
+   something.
+
+   **Mutation-checked, and it corrected the doc.** Three mutations each fail a case in
+   `test/export-token-bridge.test.js`: removing barrel routing, removing the test-path exclusion,
+   and firing Layer 5 unconditionally. **The eval case does NOT guard barrel routing** — with that
+   routing removed it still passes 8/8, because the merge layer keeps the def ahead on this corpus.
+   The first draft of its `notes` claimed otherwise; corrected. Two of my own test bugs were caught
+   the same way: the leak assertion was vacuous until the fixture used a case-distinctive name that
+   actually clears Layer 1's docs/012 gate, and a filename that cannot be reached by Layer 4
+   path-match.
 6. **Subtraction.** MCP `recordEvent` → 30 days → `defer_loading` → cut (#3). D–F disposition on
    surface-area grounds (#8). `swift_relations` (92 rows fleet-wide, zero production row-level
    readers — keep `swift_declarations` and the health counter, drop ~350 lines of the most
