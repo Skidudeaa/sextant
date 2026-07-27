@@ -2,6 +2,12 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-27 — The fleet A/B tells you when it lands
+
+The daily holdback cron read one root, gated on the per-open floor that the metrics review had just demoted, and wrote to a log file nobody opens — three ways of being correct at nobody. It now pools the repos listed in `~/.claude/sextant-fleet-roots`, gates on **both** floors (≥30 scored turns *and* ≥30 scored opens per arm — turns are the unit assignment randomizes at, and at ~28 opens per turn an opens-only floor clears after a single turn per arm), and reports through the statusline, the one channel the user actually sees. A green `ready` banner announces the crossing once and is dismissed by deleting it; a yellow `stall` banner fires when the holdback arm is still empty after two weeks, which is not a patience state — content-stale turns are forced armed by design, so on a churny repo most turns never reach the coin flip and waiting cannot fix it.
+
+Holdback is now at 50% on jan25, somaNotes, glasshud and defGen2. The integration test grew to nine scenarios, including the opens-only trap that must **not** announce, and it now pins `HOME` and the roots file inside its invocation helper — the script's default roots file exists on a dogfooding machine and lists the real fleet, so the previous test would have measured production telemetry and passed or failed on whatever the user did that day.
+
 ## 2026-07-27 — Multi-root telemetry pooling (docs/033 "Still open")
 
 `sextant telemetry` accepted `--roots a,b,c` at the parser and then read only the first one. It now pools, because the holdback A/B randomizes per turn and one repo accrues turns far too slowly to ever clear the floor — 170 days solo.

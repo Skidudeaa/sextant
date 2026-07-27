@@ -153,6 +153,7 @@ fi
 # highest-priority action and surfaces the literal command to copy.
 #
 # Priority (highest to lowest):
+#   0. Fleet holdback A/B ready or stalled -> sextant telemetry --roots-file …
 #   1. Watcher off / heartbeat stale     -> sextant watch-start
 #   2. Resolution < 90% (extractor drift / unresolvable imports en masse)
 #                                         -> sextant scan --force
@@ -160,8 +161,32 @@ fi
 #                                         -> sextant doctor (full diagnostic)
 # Multiple-issue case: show the most severe; when it's resolved, the
 # next-most severe surfaces.  We do NOT auto-execute -- the user copies.
+#
+# FLEET A/B BANNER (priority 0). Written by scripts/check-holdback-benefit.sh
+# (daily cron) when the POOLED holdback experiment crosses both accrual floors,
+# or when it has been enabled long enough that a still-empty holdback arm means
+# something is wrong. It outranks the repo-local hints because it is a
+# time-sensitive, once-in-the-experiment's-life signal, and because the cron's
+# log file is not a surface anybody reads. Fleet-global state, so it lives in
+# $HOME rather than any one repo's .planning/intel.
+#
+# Format: one line, first word is the kind (`ready` | `stall`), remainder is the
+# message. Delete the file to dismiss; the cron's sentinel stops it re-arming.
+fleet_ab_file="${SEXTANT_FLEET_AB_FILE:-$HOME/.claude/.sextant-fleet-ab}"
+fleet_ab_kind=""
+fleet_ab_msg=""
+if [ -r "$fleet_ab_file" ]; then
+    fleet_ab_line=$(head -1 "$fleet_ab_file" 2>/dev/null | cut -c1-160)
+    fleet_ab_kind="${fleet_ab_line%% *}"
+    fleet_ab_msg="${fleet_ab_line#* }"
+fi
+
 action_hint=""
-if [ -n "$coverage_alert" ]; then
+if [ -n "$fleet_ab_msg" ] && [ "$fleet_ab_kind" = "ready" ]; then
+    action_hint="\e[32m${fleet_ab_msg}\e[m"
+elif [ -n "$fleet_ab_msg" ] && [ "$fleet_ab_kind" = "stall" ]; then
+    action_hint="\e[33m${fleet_ab_msg}\e[m"
+elif [ -n "$coverage_alert" ]; then
     # Coverage problem: nothing the watcher or a rescan fixes — the globs (or
     # language support) are the issue. Branch on the KIND token the summary
     # embeds: GLOBS-TOO-NARROW fires on both the empty-index and the
