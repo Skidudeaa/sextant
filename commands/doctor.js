@@ -153,6 +153,52 @@ async function run(ctx) {
     });
   }
 
+  // Zoekt text-lane state (docs/035 #5). Computed HERE, not in the zoekt
+  // section below: the Actions block is rendered into `lines` at the next
+  // statement, so anything pushed further down never appears in it. That
+  // ordering is exactly why the dead-daemon condition had no action for so
+  // long — all 16 existing push sites are above this line.
+  //
+  // The hook path deliberately never starts a daemon (searchFast does not call
+  // ensureWebserver), so a dead or foreign daemon is NOT self-healing: query
+  // retrieval silently degrades to graph-only until someone runs a CLI/MCP
+  // search. That is a real capability loss and the user is the only one who
+  // can see it.
+  let zoektLane = null;
+  try {
+    const zoektMod = require("../lib/zoekt");
+    const dPath = path.join(sd, "zoekt", "daemon.json");
+    let d = null;
+    try { d = JSON.parse(fs.readFileSync(dPath, "utf8")); } catch {}
+    if (!d?.pid || !d?.port) {
+      zoektLane = { state: "absent" };
+      actions.push({
+        msg: "Zoekt webserver has never run for this repo — hook retrieval is graph-only (no text search)",
+        cmd: "sextant zoekt index --force",
+      });
+    } else {
+      let alive = false;
+      try { process.kill(d.pid, 0); alive = true; } catch {}
+      if (!alive) {
+        zoektLane = { state: "dead", pid: d.pid, port: d.port };
+        actions.push({
+          msg: `Zoekt daemon is dead (pid ${d.pid}) — hook retrieval is graph-only; the hook path never restarts one`,
+          cmd: "sextant zoekt index --force",
+        });
+      } else if (!zoektMod._daemonServesThisRootForTest(rootAbs, d.pid)) {
+        zoektLane = { state: "foreign", pid: d.pid, port: d.port };
+        actions.push({
+          msg: `Zoekt daemon on port ${d.port} serves a DIFFERENT repo's index — text search is refused for this repo (it would return another repository's files)`,
+          cmd: "sextant zoekt index --force",
+        });
+      } else {
+        zoektLane = { state: "ok", pid: d.pid, port: d.port };
+      }
+    }
+  } catch {
+    zoektLane = null; // doctor must never fail because of a diagnostic
+  }
+
   // Top-of-output Actions block.  No-op when everything is healthy so
   // the user can scan the rest of the report without waste.
   lines.push(viz.header("Actions"));
@@ -352,13 +398,19 @@ async function run(ctx) {
       let pidAlive = false;
       try { process.kill(daemonInfo.pid, 0); pidAlive = true; } catch {}
 
-      if (pidAlive) {
+      // Identity, not just liveness (docs/035 #5). Reuses the state computed
+      // before the Actions block; the action itself is pushed there, because
+      // this section runs after the block has already been rendered.
+      const servesUs = zoektLane?.state === "ok";
+      if (pidAlive && servesUs) {
         lines.push(viz.metric("webserver", viz.status("ok", `running (pid ${daemonInfo.pid}, port ${daemonInfo.port})`)));
+      } else if (pidAlive) {
+        lines.push(viz.metric("webserver", viz.status("warn", `foreign (pid ${daemonInfo.pid} serves another index, port ${daemonInfo.port})`)));
       } else {
         lines.push(viz.metric("webserver", viz.status("warn", `stale (pid ${daemonInfo.pid} dead, port ${daemonInfo.port})`)));
       }
     } else {
-      lines.push(viz.metric("webserver", viz.status("warn", "not running (will start on next search)")));
+      lines.push(viz.metric("webserver", viz.status("warn", "not running (hook search is graph-only until a CLI/MCP search starts it)")));
     }
 
     // Reindex state

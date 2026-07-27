@@ -191,8 +191,16 @@ describe("intel.scan — prune-missing with wildcard-prefix globs", () => {
       assert.equal(graph.getMetaValue(db, freshness.META_STATUS_HASH), "");
       assert.match(graph.getMetaValue(db, freshness.META_GRAPH_GENERATION), /^[0-9a-f]{32}$/);
       const checked = await freshness.checkFreshness(root6);
+      // The invariant this test exists for is UNCHANGED: a non-git scan stays
+      // usable (exports above) while structural freshness fails closed.
       assert.equal(checked.fresh, false);
-      assert.equal(checked.reason, "head_changed");
+      // The REASON changed (docs/035 #2). It used to be "head_changed", which
+      // named a HEAD move in a directory that has no HEAD — a fabricated fact,
+      // and one that could never clear, so the gate also enqueued a futile
+      // rescan on every read. "git_absent" says the true thing: there is no
+      // anchor here, and rescanning cannot create one.
+      assert.equal(checked.reason, "git_absent");
+      assert.equal(checked.rescanUseless, true);
     } finally {
       fs.rmSync(root6, { recursive: true, force: true });
     }

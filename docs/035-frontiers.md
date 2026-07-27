@@ -814,9 +814,31 @@ it produces 14.6× more opens.
    three deltas with the renderers reading it; eval numbers corrected at **four** sites (a fourth,
    `CLAUDE.md:352`, was missed by the research pass); two of the three sync-rescan overclaims fixed
    and the third resolved independently by `9a55d8f`.
-1. **Honesty defects with a 30-second FAIL-pre.** Non-git root: `gitAvailable` branch + gitignore
+1. ~~**Honesty defects with a 30-second FAIL-pre.** Non-git root: `gitAvailable` branch + gitignore
    filter on the non-git zoekt corpus (#2). Zoekt daemon **identity** guard + doctor action (#5).
-   `clampBlock` (#7 S1). None of these need accrual, a fixture, or a schema bump.
+   `clampBlock` (#7 S1). None of these need accrual, a fixture, or a schema bump.~~
+   **✅ DONE 2026-07-27.** All four FAIL-pres were reproduced by DRIVING them first, and all four
+   are locked by `test/honesty-gaps.test.js` (18 cases). Findings that revised the doc:
+   - **The corpus cannot be filtered at build time.** `zoekt-index` has no file-level exclusion —
+     only `-ignore_dirs`, which cannot name a file. The doc's "gitignore filter on the corpus" is
+     not implementable as written. Enforcement moved to `normalize()`, the single choke point every
+     search result crosses, which is *stronger*: it also protects shards built by an older sextant
+     and covers git roots (a committed `.env` is a common accident).
+   - **The leak is worse than "the shard contains it."** `zoekt.search` returned the whole line —
+     `STRIPE_WEBHOOK_TOKEN=sk_live_…` — at score 501, with the DB password in the `after` context.
+   - **`.env.example` must be KEPT.** It is the declared-manifest signal (required env keys); the
+     denylist exempts the `example|sample|template|dist|defaults` family explicitly.
+   - **The doctor action had to be hoisted.** All 16 existing `actions.push` sites are above the
+     line where the Actions block is rendered into `lines`; an action pushed in the zoekt section
+     never appears. That ordering is why the dead-daemon condition went unnoticed.
+   - **One pre-existing test encoded the old lie.** `test/intel-scan.test.js:184` asserted
+     `reason === "head_changed"` for a non-git root. Its stated invariant (non-git scans usable,
+     structural freshness fail-closed) is unchanged and still asserted; only the fabricated label
+     moved to `git_absent`, plus `rescanUseless`.
+   - **Deferred, deliberately:** starting the daemon from SessionStart/the watcher (#5 mechanism 1).
+     That is a behaviour expansion with the 101 GB home-dir incident in its history and needs to be
+     routed through the root guard, corpus pre-check and circuit breaker in its own change. The
+     9 dark repos stay dark; they are now *loud* about it instead.
 2. **Legibility (#1).** `source` on `path_miss`, the `empty_fallback` payload, `sid` + contamination
    flag, the dominance guard **keyed on git common-dir**, `turn_outcome` with `blockBytes`. Expect
    the pooled surface to print nothing for a long time; that is the correct output.
