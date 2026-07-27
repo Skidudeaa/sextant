@@ -9,6 +9,13 @@
 
 const { recordEvent } = require("../lib/telemetry");
 
+// Spawn paths that hook-pretask (PreToolUse `Task|Agent`) demonstrably does NOT
+// intercept, so the Phase-F coherence gate must not silence this lane for them —
+// there would be no substitute delivery at all. Kept as an explicit, narrow set
+// rather than an inverted rule: a type is added here only after telemetry shows
+// spawns arriving with no corresponding pretask event.
+const PRETASK_UNREACHABLE = new Set(["workflow-subagent"]);
+
 // Compare only the content anchors validated by buildOrientationBlock. A
 // known anchor becoming unknown is a mismatch, so publication fails closed.
 function sameValidatedRepo(validated, current) {
@@ -38,7 +45,26 @@ async function run() {
 
     const startedAt = Date.now();
     const coherence = require("../lib/coherence");
-    if (coherence.coherenceEnabled(root)) {
+    if (coherence.coherenceEnabled(root) && !PRETASK_UNREACHABLE.has(data.agent_type)) {
+      // The gate exists so the Phase-F experiment owns delivery via PreToolUse
+      // `Task|Agent` (hook-pretask), which carries the prompt-derived workset and
+      // the tool_use_id join. That reasoning holds only for spawns pretask can
+      // actually reach.
+      //
+      // It does not reach workflow-spawned agents. Measured over sextant's
+      // window: 34 of 34 `subagentstart.skipped {reason:"coherence_enabled"}`
+      // events carried agentType "workflow-subagent", and ZERO `pretask.*`
+      // events fired for them — every recent coherence.report row is
+      // surface:"parent_prompt" (hook-refresh), not pretask. So for that spawn
+      // path the gate silenced the ONLY lane reaching the child and substituted
+      // nothing, and workflow-subagent is the dominant agentType fleet-wide
+      // (149 of 240 spawns). docs/018 pre-registered exactly this as deferred
+      // debt: "workflow-spawned agents may ride a different spawn path than
+      // Task."
+      //
+      // Yielding for that type only — rather than deleting the gate — keeps the
+      // experiment's delivery contract intact everywhere pretask does fire, so
+      // a coherence repo cannot get two orientation blocks.
       recordEvent(root, "subagentstart.skipped", {
         reason: "coherence_enabled",
         agentType: data.agent_type,

@@ -864,9 +864,41 @@ it produces 14.6× more opens.
 3. ~~**Adjudicate the allocation question** with S4 section tagging (#7 S4) — free, existing corpus,
    6,237 rows. **No eviction from the static body and no further retrieval investment ships before
    this lands.**~~ **✅ DONE 2026-07-27 — ADJUDICATED. See below.**
-4. **Un-dark, upstream first (#6).** Status-fingerprint budget + root-anchored managed-path filter
+4. ~~**Un-dark, upstream first (#6).** Status-fingerprint budget + root-anchored managed-path filter
    (converts 202 events, uncontested). Then the coherence yield for workflow-subagent spawns. The
-   git-only degrade arm last, and only with a `head_changed` fixture.
+   git-only degrade arm last, and only with a `head_changed` fixture.~~
+   **✅ (a) AND (b) DONE 2026-07-27. (c) DEFERRED — see below.**
+
+   **(a) The upstream fix, proven end-to-end on a real repo.** Re-measured with the real status
+   path list (expanding untracked directories — a naive `git status --porcelain` probe undercounts
+   by ~200×, which is worth knowing before anyone re-measures this): somaNotes **316 paths /
+   20.4 MiB**, open-interpreter-fork **309 paths / 392.9 MiB** (dominated by 50–58 MiB pytest
+   artifacts). Both fixes were necessary and neither was sufficient alone — nested `.planning/` is
+   5.0 MiB of somaNotes' 20.4, so excluding it still leaves 15.4 MiB over the 8 MiB cap.
+   - Managed-path exclusion now matches `/.planning/` and `/.claude/` at **any depth**. The doc's
+     4.7 MiB `.design-handoff/.planning/intel/zoekt/index/*.zoekt` is confirmed exactly.
+   - The budget bail-out **degrades instead of nulling**: an over-budget file is fingerprinted by
+     size+mtime+inode (`bytes: 0`, so it doesn't consume the content budget the later files need),
+     and the count is reported as `degradedFiles` rather than implied. The no-read invariant the
+     original guard owned is preserved and now asserted directly.
+   - **Result:** `open-interpreter-fork` went `statusHash: null` → a real anchor, and from
+     permanently `status_changed` → **`fresh: true`** once state was recorded. Driving the hook
+     there then produced `subagentstart.injected` **521 bytes** with real hotspots, where the
+     previous row was `skipped {orientation_unavailable}`.
+   - **Landmine hit and corrected in-flight:** recording scan state without rescanning made that
+     repo assert fresh against a stale graph — a false-fresh I introduced. Fixed by running a real
+     scan (19s, 350 files). Do not use `recordScanState` as a shortcut to "clear" staleness.
+
+   **(b) The coherence gate now yields for spawn paths pretask cannot reach.** 34 of 34
+   `coherence_enabled` skips carried `agentType: "workflow-subagent"` with **zero** `pretask.*`
+   events — the gate removed the only delivery and substituted nothing. Narrow set
+   (`PRETASK_UNREACHABLE`), not a deletion, so the experiment's delivery contract holds everywhere
+   pretask does fire and a coherence repo cannot receive two orientation blocks.
+
+   **(c) The git-only degrade arm stays DEFERRED**, and (a) is the reason. The 202-event class it
+   was aimed at is now fixed upstream without relaxing silent absence at all, so the degrade arm
+   would be spending the project's strictest invariant on a much smaller residual. Re-derive the
+   residual from telemetry before reconsidering it.
 5. **Gated on (3): the NL bridge (#4)** in its guarded form (test-path exclusion + fan-in≥5, barrel
    routing, formatter + `classifyDetailSource` branches, per-repo df percentile). Batch its
    SCHEMA_VERSION bump with every other pending one.

@@ -297,3 +297,85 @@ describe("summary clamp — whole lines only", () => {
     assert.equal(clampBlock(body, 100000), body);
   });
 });
+
+// ─── 5. un-darking the orientation lanes (docs/035 #6, step 4) ──────────────
+
+describe("status fingerprint — a big dirty tree must not be permanently stale", () => {
+  let dir;
+
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-bigdirty-"));
+    const g = (...args) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+    fs.writeFileSync(path.join(dir, "package.json"), '{"name":"bigdirty","version":"1.0.0"}');
+    fs.writeFileSync(path.join(dir, "index.js"), "module.exports = { a: 1 };\n");
+    g("init", "-q");
+    g("config", "user.email", "t@t.t");
+    g("config", "user.name", "t");
+    g("add", "-A");
+    g("-c", "commit.gpgsign=false", "commit", "-qm", "init");
+    // A dirty file larger than STATUS_FILE_MAX_BYTES (2 MiB). Before the fix a
+    // single one of these nulled the anchor for the WHOLE repo, and
+    // checkFreshness turned a null anchor into `status_changed` FOREVER — no
+    // rescan could clear it. Live cost: /root/somaNotes (20.4 MiB dirty) and
+    // /root/open-interpreter-fork (392.9 MiB) were permanently content-stale,
+    // which is 202 of 234 subagent-orientation skips fleet-wide.
+    fs.writeFileSync(path.join(dir, "big.bin"), Buffer.alloc(3 * 1024 * 1024, 7));
+  });
+
+  after(() => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("produces a real status anchor instead of null", () => {
+    const st = freshness.captureCurrentStateDetailed(dir);
+    assert.ok(st.statusHash, "statusHash must not be null with an over-budget dirty file");
+    assert.equal(typeof st.statusHash, "string");
+    assert.ok(st.degradedFiles >= 1, "the over-budget file is fingerprinted in degraded mode");
+  });
+
+  it("the anchor is STABLE across reads (otherwise it is noise, not an anchor)", () => {
+    const a = freshness.captureCurrentStateDetailed(dir).statusHash;
+    const b = freshness.captureCurrentStateDetailed(dir).statusHash;
+    assert.equal(a, b);
+  });
+
+  it("still detects a change to the over-budget file", () => {
+    // Degraded mode is size+mtime, so it is weaker than a content hash — but it
+    // must not be blind. A real edit changes at least the size here.
+    const before = freshness.captureCurrentStateDetailed(dir).statusHash;
+    fs.appendFileSync(path.join(dir, "big.bin"), Buffer.alloc(1024, 9));
+    const after = freshness.captureCurrentStateDetailed(dir).statusHash;
+    assert.notEqual(before, after);
+  });
+
+  it("nested sextant state is excluded from the fingerprint at any depth", () => {
+    // Root-anchored exclusion only covered `.planning/` at the top level, so a
+    // nested project's sextant state was hashed into the PARENT's anchor — on
+    // somaNotes that was a 4.7 MiB zoekt shard, 5.0 MiB of a 20.4 MiB tree,
+    // churning on every scan of the nested project.
+    const before = freshness.captureCurrentStateDetailed(dir).statusHash;
+    const nested = path.join(dir, "sub", ".planning", "intel");
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, "graph.db"), Buffer.alloc(64, 1));
+    const after = freshness.captureCurrentStateDetailed(dir).statusHash;
+    assert.equal(before, after, "a nested .planning/ write must not move the parent's anchor");
+  });
+});
+
+describe("subagent orientation — the coherence gate must not silence the only lane", () => {
+  it("yields for spawn paths hook-pretask cannot reach", () => {
+    // 34 of 34 coherence_enabled skips were agentType "workflow-subagent", with
+    // ZERO pretask events for them: the gate removed the only delivery and
+    // substituted nothing.
+    const src = fs.readFileSync(path.join(__dirname, "..", "commands", "hook-subagentstart.js"), "utf8");
+    assert.match(src, /PRETASK_UNREACHABLE/, "the yield set must exist");
+    assert.match(
+      src,
+      /coherence\.coherenceEnabled\(root\)\s*&&\s*!PRETASK_UNREACHABLE\.has\(data\.agent_type\)/,
+      "the gate must be conditioned on pretask reachability"
+    );
+    assert.match(src, /new Set\(\["workflow-subagent"\]\)/, "workflow-subagent is the observed case");
+  });
+});

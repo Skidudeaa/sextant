@@ -119,14 +119,37 @@ describe("freshness.captureCurrentState", () => {
     fs.writeFileSync(spaced, "one\n");
   });
 
-  it("returns an unverifiable fingerprint before reading an oversized dirty file", () => {
+  it("degrades to a metadata fingerprint rather than reading an oversized dirty file", () => {
+    // THE INVARIANT THIS TEST OWNS IS UNCHANGED: over-budget content is never
+    // READ on the hook path. What changed (docs/035 #6) is the consequence.
+    //
+    // It used to return null, and captureStatusState turns one null into a null
+    // anchor for the WHOLE repo, which checkFreshness reports as
+    // `status_changed` FOREVER — no rescan can clear it. Measured cost:
+    // /root/somaNotes (20.4 MiB dirty) and /root/open-interpreter-fork
+    // (392.9 MiB) were permanently content-stale, which is 202 of 234 subagent
+    // orientation skips fleet-wide, and it suppressed every structural claim on
+    // those repos too. "Fail closed" that can never re-open is not a gate, it is
+    // an outage.
+    //
+    // A file too big to read still has a real fingerprint: size + mtime + inode.
+    // Weaker than a content hash — a change preserving all three is invisible —
+    // but a genuine signal rather than a guess, and reported via `degradedFiles`
+    // rather than implied.
     const file = path.join(dir, "seed.js");
     fs.truncateSync(file, 3 * 1024 * 1024);
-    assert.equal(
-      freshness.captureCurrentState(dir).statusHash,
-      null,
-      "over-budget dirty content must fail closed instead of being read on the hook path"
-    );
+    const state = freshness.captureCurrentState(dir);
+    assert.ok(state.statusHash, "an over-budget dirty file must not null the whole anchor");
+    assert.ok(state.degradedFiles >= 1, "and the weaker mode must be reported, not implied");
+
+    // The no-read invariant, asserted directly: the degraded fingerprint must
+    // change when the file's SIZE changes, and it must be produced without the
+    // content ever entering the hash (a 3 MiB read would exceed the per-file
+    // cap this test exists to enforce).
+    const before = state.statusHash;
+    fs.truncateSync(file, 4 * 1024 * 1024);
+    assert.notEqual(freshness.captureCurrentState(dir).statusHash, before);
+
     fs.writeFileSync(file, "module.exports = 1;\n");
   });
 
