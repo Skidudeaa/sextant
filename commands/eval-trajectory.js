@@ -109,6 +109,22 @@ function printReport(report) {
   }
   out.push("");
 
+  // PER-SECTION static rates (docs/035 #7 S4) — the adjudication surface for
+  // the allocation question. The static body is the lane producing most of the
+  // credited opens; this says which of its sections are doing it, and therefore
+  // which bytes are safe to displace. Sorted by surfaced volume.
+  const staticSrc = Object.entries(report.aggregate.staticBySource || {})
+    .sort((x, y) => y[1].surfaced - x[1].surfaced);
+  if (staticSrc.length) {
+    out.push("PER-SECTION coverage — which part of the STATIC summary earns opens (docs/035 #7 S4)");
+    for (const [src, v] of staticSrc) {
+      const label = src.replace(/^static:/, "");
+      const thin = v.surfaced < 30 ? "  [n<30 — not decision-grade]" : "";
+      out.push(`  ${pad(label, 18)}${pad(pct(v.coveragePct), 10)}(${v.opened}/${v.surfaced})${thin}`);
+    }
+    out.push("");
+  }
+
   const reg = report.regions;
   if (reg && reg.scored > 0) {
     out.push("REGION SUBSTRATE — did the EDIT land in the region we surfaced? (docs/025 Phase A)");

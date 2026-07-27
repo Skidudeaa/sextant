@@ -87,7 +87,46 @@ describe("parseStaticBlock", () => {
     ].join("\n");
     const files = traj.parseStaticBlock(block).map((f) => f.path).sort();
     assert.deepEqual(files, ["docs/handoff.md", "lib/cli.js", "lib/graph.js"]);
-    assert.ok(traj.parseStaticBlock(block).every((f) => f.source === "static_summary"));
+    // Rows are now tagged by SECTION (docs/035 #7 S4), not with one constant
+    // `static_summary` tag. The old assertion is what made "which section earns
+    // its bytes" unanswerable, and the static body is the lane producing most
+    // of the credited opens.
+    assert.ok(traj.parseStaticBlock(block).every((f) => f.source.startsWith("static:")));
+  });
+
+  it("tags each row with the section it came from", () => {
+    const block = [
+      "<codebase-intelligence>",
+      "- **Root**: `/repo`",
+      "- **Misses**: `lib/missing.js` (x1)",
+      "### Dependency hotspots (fan-in)",
+      "- `lib/graph.js`: 25",
+      "### Public API (hotspots)",
+      "- `lib/api.js`: createThing, readThing",
+      "### Likely entry points",
+      "- `bin/cli.js` (js) — declared",
+      "### Recent changes (git)",
+      "- 2026-06-06 `docs/handoff.md`",
+      "</codebase-intelligence>",
+    ].join("\n");
+    const bySection = {};
+    for (const f of traj.parseStaticBlock(block)) bySection[f.path] = f.source;
+    assert.equal(bySection["lib/graph.js"], "static:hotspots");
+    assert.equal(bySection["lib/api.js"], "static:public_api");
+    assert.equal(bySection["bin/cli.js"], "static:entry_points");
+    assert.equal(bySection["docs/handoff.md"], "static:recent");
+    // Rows ABOVE the first heading are the header block, not the first section —
+    // `Misses` carries paths and must not be attributed to hotspots.
+    assert.equal(bySection["lib/missing.js"], "static:header");
+  });
+
+  it("buckets an unrecognized heading rather than dropping its rows", () => {
+    // A renamed section must show up as an unattributed bucket, not silently
+    // vanish from the denominator.
+    const block = ["### Some New Section", "- `lib/new.js`: 3"].join("\n");
+    const rows = traj.parseStaticBlock(block);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].source, "static:other");
   });
 });
 

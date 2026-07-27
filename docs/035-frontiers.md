@@ -861,9 +861,9 @@ it produces 14.6× more opens.
    100% sextant (2 turns), armed is spread over 4 repos with somaNotes dominant (17 of 29). Both
    gates now report `CONFOUNDED`, and the report says the contrast would be *between repos*, not
    between arms — **more data does not fix it**, only enabling the arm on the same repos does.
-3. **Adjudicate the allocation question** with S4 section tagging (#7 S4) — free, existing corpus,
+3. ~~**Adjudicate the allocation question** with S4 section tagging (#7 S4) — free, existing corpus,
    6,237 rows. **No eviction from the static body and no further retrieval investment ships before
-   this lands.**
+   this lands.**~~ **✅ DONE 2026-07-27 — ADJUDICATED. See below.**
 4. **Un-dark, upstream first (#6).** Status-fingerprint budget + root-anchored managed-path filter
    (converts 202 events, uncontested). Then the coherence yield for workflow-subagent spawns. The
    git-only degrade arm last, and only with a `head_changed` fixture.
@@ -882,6 +882,50 @@ Deliberately **not** sequenced: the rg fallback (#11), the Phase-A `start_line` 
 injected fact class.
 
 ---
+
+## THE ALLOCATION QUESTION — ADJUDICATED (2026-07-27)
+
+Section tagging shipped (`lib/trajectory.js:parseStaticBlock` + a per-section split that had been
+gated to `mode === "retrieval"`, which was the other half of the blindness). Run over 152 sessions
+across 11 repos, 6,946 observed file-opens:
+
+| static section | coverage | opened/surfaced |
+|---|---|---|
+| `recent` | **16.3%** | 507/3,103 |
+| `public_api` | 11.7% | 119/1,014 |
+| `hotspots` | 11.2% | 171/1,525 |
+| `entry_points` | **2.0%** | 17/846 |
+
+**The headline result: `entry_points` performs BELOW the permutation null.** The static lane's null
+is **11.31%** — that is the coverage a *random plausible same-repo file set* earns. `entry_points`
+reads **2.0% on n=846**. The row sextant specifically labels "Likely entry points" is opened roughly
+**5.6× less often than a random file from the same repo**. It is not weak signal; on this corpus it
+is anti-signal, and it is spending bytes in the highest-volume injection surface to do it.
+(Caveat, stated because it matters: the null is computed per-lane, not per-section, so this is a
+comparison against the aggregate static null rather than an entry-points-specific one. The gap is
+large enough — 5.6× — that a per-section null is unlikely to reverse it, but it would sharpen it.)
+
+**The `recent` result cuts the other way and settles S3.** Recent changes is both the largest
+section (3,103 surfaced rows) and the highest-earning (16.3%). docs/035 already sent S3 (cut the
+blackout body's derivable bytes) back on derivability grounds; the rate now says the same thing
+quantitatively. **Do not cut `recent`.**
+
+**But the lift caveat governs all of it.** Static coverage is 12.54% against an 11.31% null —
+**lift 1.11×**, essentially chance. Retrieval is 3.10% against a 1.81% null — **lift 1.71×**. So the
+static body's 4× raw-coverage advantage is *mostly the recency correlation trap*: `recent` lists the
+files the agent is already working on, so it predicts opens it did not cause. That is the honest
+resolution of "the two metrics rank the lanes oppositely" — **they are measuring different things,
+and both are right**: static covers more opens, retrieval causes more of the ones it covers.
+
+**Consequences for the plan:**
+1. **`entry_points` is the eviction candidate**, not `recent` and not `public_api`. It is the only
+   section that is decision-grade (n=846), well below the null, and its byte cost buys nothing.
+2. **Raw coverage may no longer be cited for the static lane without its lift.** A 1.11× lift means
+   most of that 12.54% would have happened anyway.
+3. **Retrieval investment is NOT refuted** — it is the only lane with a real lift. What is refuted is
+   the framing that its 6.4% share of credited opens makes it the minor lane; those are the opens it
+   actually steered.
+4. The instrument is permanent, so any future eviction has a before/after.
 
 ## Honest uncertainty
 
