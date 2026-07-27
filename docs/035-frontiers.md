@@ -1001,8 +1001,51 @@ it produces 14.6× more opens.
    measured HARM (34 silenced spawns) with a one-line flag flip, so the remaining case is
    surface-area alone — a scope judgement that belongs to the maintainer, not to an agent
    overriding a prior explicit decision.
-7. **Cost, unhurried.** `extractBatch` (#9) as a CPU move, after a committed perf fixture exists and
-   after the first-ever test of its failure fallback.
+7. ~~**Cost, unhurried.** `extractBatch` (#9) as a CPU move, after a committed perf fixture exists and
+   after the first-ever test of its failure fallback.~~ **PREREQUISITES DONE 2026-07-27; the wiring
+   itself is deliberately NOT shipped.**
+
+   **✅ Committed perf gate.** `scripts/bench-python-extract.js` — a deterministic generator, not N
+   committed files, because 200+ `.py` files would both bloat the repo and be indexed by sextant's
+   own scan, polluting the self-eval corpus. Measured **80.4× on 200 files, output byte-identical**.
+   Report that honestly: 80× is the spawn-overhead ceiling on small uniform files (the per-file arm
+   pays one python3 spawn each), **not** what a real repo sees — the 8.8–14.2× measured on real
+   corpora remains the number to quote for actual scans. The gate's job is regression detection.
+
+   **✅ First-ever failure-path tests** (`test/python-batch-extract.test.js`, 9 cases): batch/per-file
+   equivalence, the AnnAssign constant `py-penalty-001` depends on, totality on degenerate input,
+   chunk-boundary alignment at 260 items, and cache reuse.
+
+   **✅ Robustness fixes the tests forced.** Per-item isolation in `python_ast.py` (one item's
+   uncaught exception used to abort the whole invocation, so the JS side re-extracted the ENTIRE
+   chunk per file — a PERFORMANCE cliff with correct output, which is precisely why it sat here
+   untested), plus **bounded chunking** in `extractBatch`: measured ~9.4 KiB stdin and ~1.1 KiB
+   stdout per file, so stdout only reaches the 4 MiB `maxBuffer` at ~3,665 files but **stdin passes
+   8 MiB at under 900** — an unbounded batch risks a failure whose only symptom is the speedup
+   silently vanishing on exactly the large repos it exists for.
+
+   **⚠ TWO CORRECTIONS to this entry.** (1) The stated `RecursionError` trigger **does not exist** on
+   CPython 3.12 — deep nesting, huge int literals and NUL bytes all raise `SyntaxError`, which
+   `extract()` already catches. The uncaught path is reachable only via a malformed ITEM (non-string
+   content → `TypeError`), and **not through `extractBatch` at all**, since Node's `crypto.update`
+   throws first. So the isolation is tested at the PYTHON layer, where it is genuinely reachable;
+   testing it at the JS layer would have been theatre, and a first attempt that used a
+   syntax-broken file passed with the isolation removed. (2) Effort is **S, not M** — the doc says
+   `AST_CACHE_MAX = 100` forces "a real phase split of `indexOneFileUnlocked`", but processing the
+   scan in windows of ≤ `AST_CACHE_MAX` files (batch-extract a window, then index it against a warm
+   cache) needs no phase split at all.
+
+   **Why the wiring is not shipped:** `indexOneFileUnlocked` has 5 call sites and is the unit that
+   writes every `graph.db`. It is the highest-risk path in the codebase and this is the lowest-value
+   item on the list. Everything it was gated on now exists.
+
+   **🔴 A LATENT HARNESS DEFECT this surfaced, worth more than the perf work.** The Python eval
+   dataset lived at `fixtures/python-eval/eval-dataset.json` — **inside the corpus it measures**. Its
+   own case notes are indexed by zoekt and walked by the scanner, so they compete with the source
+   files under test. A 1,240-char note added for `py-token-001` in step 5, repeating the word
+   "flag", pushed the dataset itself into the **top 3 for query `flag`** and broke `py-flag-001` —
+   the harness scoring itself. Moved to `fixtures/python-eval-dataset.json`, outside the corpus;
+   8/8 restored. The flaw was latent from the fixture's creation and step 5 merely tipped it over.
 
 Deliberately **not** sequenced: the rg fallback (#11), the Phase-A `start_line` repair, and any new
 injected fact class.

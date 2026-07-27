@@ -302,7 +302,33 @@ def main() -> None:
         items = data.get("items", [])
         results = []
         for item in items:
-            result = extract(item.get("path", ""), item.get("content", ""))
+            path_value = item.get("path", "")
+            # PER-ITEM ISOLATION (docs/035 #9). extract() catches SyntaxError but
+            # nothing else, so any other exception raised while parsing ONE file
+            # used to abort the whole invocation: the JS side saw a non-zero exit
+            # and fell back to per-file extraction for the ENTIRE chunk, losing
+            # the batch speedup because of a single pathological input.
+            #
+            # Note the failure mode is a PERFORMANCE cliff, not a correctness one
+            # — the fallback produced correct output — which is exactly why it
+            # could sit here untested and unnoticed.
+            #
+            # Degrading one item to the same empty shape single-file mode already
+            # returns keeps batch and per-file semantics identical, which is the
+            # property the equivalence test asserts.
+            try:
+                result = extract(path_value, item.get("content", ""))
+            except Exception:
+                result = {
+                    "path": path_value,
+                    "imports": [],
+                    "exports": {
+                        "functions": [],
+                        "classes": [],
+                        "assignments": [],
+                        "all": None,
+                    },
+                }
             results.append(result)
         json.dump({"results": results}, sys.stdout)
     else:
