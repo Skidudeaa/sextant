@@ -348,8 +348,36 @@ verified to fail pre-change; see that commit message for the mechanisms.
 
 ### Still open
 
-- **Multi-root telemetry aggregation** (`--roots a,b,c`) plus enabling holdback on the top-3
-  fleet repos. The only change that makes the A/B reachable; gated on the precondition below.
+- ~~**Multi-root telemetry aggregation** (`--roots a,b,c`)~~ — **SHIPPED 2026-07-27.**
+  `sextant telemetry` read `ctx.roots[0]` and dropped the rest; `rootsFromArgs` had parsed
+  `--roots`/`--roots-file` all along. Pooled reads namespace the turn key by source repo
+  (two repos can stamp the same millisecond; a merged turn lets one arm absorb the other's
+  opens — the Tier 3 #3 bias class again), apply the coherence gate per repo, refuse
+  `--coherence-scorecard`/`--review`, and print a contribution row for every requested root
+  including zero-event ones. Single-root output verified byte-identical, text and JSON.
+  Locked by `test/telemetry-multiroot.test.js` (16 cases, mutation-checked: dropping the
+  namespace fails 3, including the CLI-level one).
+
+  **But the measurement it enabled refutes the projection that motivated it.** Pooled over
+  13 fleet repos: **armed 26 turns, holdback 1** — because only sextant has
+  `SEXTANT_HOLDBACK_PCT` set. Pooling armed turns does nothing; the binding constraint is
+  holdback turns, and that is a per-repo settings change (next-step 5 in docs/034, a user
+  decision). Two corrections to the docs/034 estimate: (a) it cited *eligible* turns
+  (`decideArm` invocations, 5.63/day) but the floor counts **scored** turns — turns with ≥1
+  scored open — a strictly smaller denominator; (b) the fleet's post-stamp scored-turn rate
+  measured **12.5/day pooled** (25 turns over the two days in which every event carries the
+  Tier 1 turn stamp). At 50% assignment fleet-wide that is ~6 holdback scored turns/day →
+  the 30-turn floor in **~5 days**, versus 170 solo. Caveat: a two-day base rate inflated by
+  heavy dogfooding, including the session that shipped this.
+
+  **Known limitation, printed in the report rather than absorbed**: the pooled contrast is
+  **unstratified**. Randomization is within-repo, but repos differ in baseline hit-rate and
+  may differ in `SEXTANT_HOLDBACK_PCT`, so cross-repo arm imbalance confounds the pooled
+  delta (Simpson's-paradox shape). The per-root arm counts are printed so the imbalance is
+  visible. A Mantel-Haenszel stratified estimator is the correct fix; it was deliberately
+  NOT implemented here rather than shipped half-verified.
+- **Enabling holdback on the fleet repos** is now the whole remaining unlock — and it is
+  still gated on the `turnHitRate` precondition below.
 - **Establish the armed `turnHitRate` baseline first.** The only two turn-stamped retrieval
   turns in existence are both zero-hit, and `eval-trajectory --repo sextant` reads 0.68× —
   at or below chance — on 38 surfaced rows (vs somaNotes 2.61× on 1446). Both samples are

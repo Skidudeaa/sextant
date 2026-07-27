@@ -137,7 +137,11 @@ Do not chase it with more dogfooding.
 ## Next steps, ranked
 
 1. **Push / open the PR.** Six commits, all gates green, tree clean.
-2. **Multi-root telemetry aggregation** (`commands/telemetry.js:2322` is
+2. ~~**Multi-root telemetry aggregation**~~ — **DONE 2026-07-27.** See docs/033 "Still open"
+   for the shipped behaviour AND for the two corrections the measurement forced: the floor
+   counts *scored* turns, not the *eligible* turns estimated below, and pooling alone
+   changes nothing while only sextant has a holdback arm (pooled: armed 26, holdback 1).
+   Original note kept for the record: (`commands/telemetry.js:2322` is
    `ctx.roots[0]`). Accept `--roots a,b,c` and pool turns for
    `turnCountsByArm`/`turnHitRateByArm` — pooling is valid because randomization is
    per turn. This is the **only** change that makes the holdback A/B reachable:

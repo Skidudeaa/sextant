@@ -2,6 +2,16 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-27 — Multi-root telemetry pooling (docs/033 "Still open")
+
+`sextant telemetry` accepted `--roots a,b,c` at the parser and then read only the first one. It now pools, because the holdback A/B randomizes per turn and one repo accrues turns far too slowly to ever clear the floor — 170 days solo.
+
+Pooling is the operation most likely to corrupt the unit it accumulates, so three things are guarded rather than assumed. Turn keys are namespaced by source repo: the key is an injected-set timestamp in milliseconds, two repos can stamp the same one, and a merged turn would let one arm absorb the other's opens — the identical bias class Tier 3 #3 removed at the dedupe path. The coherence gate is evaluated per repo at read time, so a gate-on repo can never drag a gate-off repo's events into the pool. `--coherence-scorecard` and `--review` refuse a pooled read outright instead of silently joining across repos on `(taskKey, agentKey)`, which are unique only within one. Every requested root gets a contribution row, including roots that contributed nothing — a repo missing from a pooled denominator makes a one-repo number read as a fleet number. Single-root output is byte-identical to the previous command, text and JSON.
+
+**The measurement it enabled refutes the projection that motivated it.** Pooled across 13 fleet repos the arms come out **armed 26, holdback 1**, because only sextant has `SEXTANT_HOLDBACK_PCT` set — pooling armed turns buys nothing, and the binding constraint is a per-repo settings change. The earlier estimate also counted *eligible* turns where the floor counts *scored* turns (turns with at least one scored open), a strictly smaller denominator. Measured post-stamp, the fleet produces 12.5 scored turns/day pooled; at 50% assignment fleet-wide that reaches the 30-turn floor in roughly five days rather than 170 — on a two-day base rate inflated by heavy dogfooding.
+
+The pooled arm contrast is **unstratified**, and the report says so on every pooled read. Randomization is within-repo, but repos differ in baseline hit-rate and may differ in assignment percentage, so cross-repo arm imbalance confounds the delta; the per-root arm counts are printed so that imbalance is visible. A stratified estimator is the correct fix and was deliberately not shipped half-verified. Locked by `test/telemetry-multiroot.test.js` — 16 cases, mutation-checked: removing the namespacing fails three of them, including the end-to-end CLI case, while the paired control still passes.
+
 ## 2026-07-26 — Metrics review and instrument repair (docs/033, Tiers 1–3)
 
 The first metrics review after the context-coherence arc found that **two of the three alarming numbers were measurement artifacts, and the instruments that should have caught that were themselves broken.** Tiers 1–3 fix the instruments, cut the blackouts at their source, and close the three open decisions with measurements rather than assertions.

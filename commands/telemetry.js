@@ -81,6 +81,76 @@ function readAllEvents(rootAbs, includeOld) {
   return events;
 }
 
+function coherenceExposed(rootAbs) {
+  try {
+    return require("../lib/coherence").coherenceEnabled(rootAbs);
+  } catch {
+    return false;
+  }
+}
+
+// MULTI-ROOT POOLING (docs/033 "Still open"). `decideArm` randomizes per TURN,
+// so turns from different repos are exchangeable units and pooling them is the
+// only lever that makes the holdback accrual floor reachable: sextant alone
+// accrues 0.436 eligible turns/day (170 days to HOLDBACK_MIN_TURNS), the fleet
+// accrues an order of magnitude more.
+//
+// Three things pooling must NOT do, each guarded here or at the use site:
+//   1. Collide turn ids. The turn key is an injected-set `ts` in milliseconds;
+//      two repos can stamp the same millisecond. A collision would silently
+//      MERGE two real turns and let one arm's turn absorb the other arm's opens
+//      — the exact bias class docs/033 Tier 3 #3 just finished removing. Every
+//      pooled event carries `__root` and summarize() namespaces the turn key
+//      with it. A single-root read never sets `__root`, so its output stays
+//      byte-identical to the pre-pooling command.
+//   2. Leak coherence events out of a repo whose gate is off. The gate is
+//      per-repo config, so it is evaluated per repo at read time — not once for
+//      the whole pool.
+//   3. Hide a root that contributed nothing. See rootContributions().
+function readPooledEvents(roots, includeOld) {
+  const multi = roots.length > 1;
+  const out = [];
+  for (const rootAbs of roots) {
+    const expose = coherenceExposed(rootAbs);
+    for (const e of readAllEvents(rootAbs, includeOld)) {
+      if (!expose && String((e && e.name) || "").startsWith("coherence.")) continue;
+      if (multi && e && typeof e === "object") e.__root = rootAbs;
+      out.push(e);
+    }
+  }
+  // Chronological across repos, so --tail, the observation window and the
+  // duration percentiles read the fleet as one timeline instead of repo-major
+  // blocks. Single-root reads keep their on-disk order untouched.
+  if (multi) out.sort((a, b) => (Number(a && a.ts) || 0) - (Number(b && b.ts) || 0));
+  return out;
+}
+
+// Per-root contribution rows, rendered for EVERY requested root including ones
+// that contributed zero events. A repo silently missing from a pooled
+// denominator reads as "the fleet says X" when the fleet was one repo; the
+// zero row is what makes that visible.
+function rootContributions(roots, events) {
+  const byRoot = new Map(roots.map((r) => [r, []]));
+  for (const e of events) {
+    const r = (e && e.__root) || roots[0];
+    if (!byRoot.has(r)) byRoot.set(r, []);
+    byRoot.get(r).push(e);
+  }
+  return roots.map((rootAbs) => {
+    const sub = byRoot.get(rootAbs) || [];
+    const s = summarize(sub);
+    const counts = s.retrieval.turnCountsByArm || {};
+    return {
+      root: rootAbs,
+      events: sub.length,
+      turnsScored: s.retrieval.turnsScored,
+      armedTurns: (counts.armed || {}).turns || 0,
+      holdbackTurns: (counts.holdback || {}).turns || 0,
+      spanDays: s.spanMs != null ? +(s.spanMs / (1000 * 60 * 60 * 24)).toFixed(1) : null,
+    };
+  });
+}
+
 function percentile(sortedAsc, p) {
   if (sortedAsc.length === 0) return null;
   // Linear interpolation between adjacent ranks.  We don't need fancy
@@ -290,10 +360,15 @@ function summarize(events) {
       turnUnscoredOpens++;
       return;
     }
-    let t = turns.get(turn);
+    // Namespace the key by source repo when pooling — `__root` is set only by
+    // readPooledEvents on a >1-root read, so a single-root map keeps raw numeric
+    // keys and byte-identical output. Without this, two repos stamping the same
+    // millisecond merge into one turn and one arm absorbs the other's opens.
+    const key = e.__root ? `${e.__root}\u0000${turn}` : turn;
+    let t = turns.get(key);
     if (!t) {
       t = { arm: e.arm || "armed", opens: 0, hits: 0, firstHitRank: null };
-      turns.set(turn, t);
+      turns.set(key, t);
     }
     t.opens++;
     if (isHit) {
@@ -2197,7 +2272,44 @@ function printCoherenceScorecard(rootAbs, card) {
   return lines.join("\n");
 }
 
-function printSummary(rootAbs, sum) {
+// WHAT POOLING IS AND IS NOT VALID FOR — printed, not just commented, because
+// the pooled report is read by whoever is deciding whether the A/B has landed.
+//
+// VALID: the turn-level arms. decideArm randomizes per turn within each repo, so
+// turns are exchangeable units and the accrual floor is a count of them.
+//
+// MIXTURES, not any one repo's number: every rate whose denominator is per-repo
+// behaviour — scan duration percentiles, stale/blackout rate, fire rate. They
+// are still printed (a fleet-wide scan p95 is a real fleet fact) but they must
+// not be quoted as "sextant's p95".
+//
+// KNOWN LIMITATION, stated rather than silently absorbed: the pooled arm
+// contrast is UNSTRATIFIED. Randomization is within-repo, but repos differ in
+// baseline hit-rate and may differ in SEXTANT_HOLDBACK_PCT, so an arm imbalance
+// across repos confounds the pooled delta (Simpson's-paradox shape). The
+// per-root armed/holdback counts below are printed so that imbalance is visible;
+// a stratified (Mantel-Haenszel) estimator is the correct fix and is NOT
+// implemented here — do not read the pooled delta as a stratified one.
+function renderContributions(contributions) {
+  const lines = [];
+  lines.push("");
+  lines.push("Pooled roots");
+  lines.push("  Valid pooled: turn-level arm counts (randomization is per turn).");
+  lines.push("  Fleet MIXTURES: scan percentiles, stale/blackout rate, fire rate.");
+  lines.push("  The arm contrast below is UNSTRATIFIED — check the per-root arm balance.");
+  for (const c of contributions) {
+    const span = c.spanDays == null ? "no window" : `${c.spanDays}d`;
+    lines.push(`    ${c.root}`);
+    lines.push(
+      `      ${String(c.events).padStart(6)} events, ${span}, ` +
+      `${c.turnsScored} scored turns (armed ${c.armedTurns}, holdback ${c.holdbackTurns})` +
+      (c.events === 0 ? "   <-- CONTRIBUTED NOTHING" : "")
+    );
+  }
+  return lines;
+}
+
+function printSummary(rootAbs, sum, contributions) {
   const lines = [];
   lines.push(`sextant telemetry — ${rootAbs}`);
   lines.push("─".repeat(60));
@@ -2209,8 +2321,11 @@ function printSummary(rootAbs, sum) {
     );
   } else {
     lines.push(`  No events recorded.`);
+    if (contributions) lines.push(...renderContributions(contributions));
     return lines.join("\n");
   }
+
+  if (contributions) lines.push(...renderContributions(contributions));
 
   lines.push("");
   lines.push("Freshness gate");
@@ -2526,7 +2641,13 @@ function printSummary(rootAbs, sum) {
 }
 
 async function run(ctx) {
-  const root = ctx.roots[0];
+  // rootsFromArgs already parses --root / --roots a,b,c / --roots-file; this
+  // command used to read ctx.roots[0] and silently drop the rest.
+  const roots = [];
+  for (const r of ctx.roots || []) if (r && !roots.includes(r)) roots.push(r);
+  if (roots.length === 0) roots.push(ctx.root);
+  const root = roots[0];
+  const pooled = roots.length > 1;
   const wantJson = hasFlag(process.argv, "--json");
   const wantCoherenceScorecard = hasFlag(process.argv, "--coherence-scorecard");
   const reviewId = flag(process.argv, "--review");
@@ -2540,13 +2661,22 @@ async function run(ctx) {
       throw new Error("--days must be greater than 0 and at most 3650");
     }
   }
-  let exposeCoherence = false;
-  try {
-    exposeCoherence = require("../lib/coherence").coherenceEnabled(root);
-  } catch {}
-  const visibleEvents = (events) => exposeCoherence
-    ? events
-    : events.filter((event) => !String(event && event.name || "").startsWith("coherence."));
+  // Both of these are single-repo surfaces and must FAIL rather than silently
+  // pool. The scorecard's lifecycle joins key on (taskKey, agentKey), which are
+  // only unique WITHIN a repo — pooling would manufacture cross-repo joins and
+  // report integrity defects that do not exist. --review writes a feedback event
+  // into one repo's telemetry file, so a list has no meaning.
+  if (pooled && wantCoherenceScorecard) {
+    throw new Error(
+      "--coherence-scorecard cannot be pooled across roots: its lifecycle joins key on " +
+      "(taskKey, agentKey), which are unique only within a repo. Run it with a single --root."
+    );
+  }
+  if (pooled && reviewId) {
+    throw new Error("--review records feedback into ONE repo's telemetry; pass a single --root");
+  }
+
+  const exposeCoherence = coherenceExposed(root);
 
   const applyWindow = (events) => {
     if (days == null) return events;
@@ -2554,7 +2684,9 @@ async function run(ctx) {
     return events.filter((event) => Number.isFinite(event && event.ts) && event.ts >= cutoff);
   };
 
-  const allVisible = visibleEvents(readAllEvents(root, includeOld));
+  // Coherence visibility is applied per repo inside readPooledEvents — the gate
+  // is per-repo config, so one root's gate must never expose another's events.
+  const allVisible = readPooledEvents(roots, includeOld);
 
   if (reviewId) {
     if (!exposeCoherence) throw new Error("coherence review is unavailable while the gate is off");
@@ -2622,12 +2754,21 @@ async function run(ctx) {
     return;
   }
 
+  const contributions = pooled ? rootContributions(roots, events) : null;
+
   if (wantJson) {
-    process.stdout.write(JSON.stringify({ root, ...summary }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify(
+        { root, ...(pooled ? { roots, rootContributions: contributions } : {}), ...summary },
+        null,
+        2
+      ) + "\n"
+    );
     return;
   }
 
-  process.stdout.write(printSummary(root, summary) + "\n");
+  const label = pooled ? `${roots.length} roots (pooled)` : root;
+  process.stdout.write(printSummary(label, summary, contributions) + "\n");
 }
 
 module.exports = {
@@ -2635,6 +2776,8 @@ module.exports = {
   summarize,
   percentile,
   printSummary,
+  readPooledEvents,
+  rootContributions,
   coherenceScorecard,
   printCoherenceScorecard,
   wilsonLowerBound,
