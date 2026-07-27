@@ -176,3 +176,51 @@ describe("python_ast.py batch mode — per-item isolation (tested where it is re
     });
   });
 });
+
+describe("scan wiring — the warm-up must be a pure optimization", () => {
+  // The whole safety argument: the pre-pass only populates a content-hash
+  // cache, so ANY failure (batch subprocess dies, file changes between the
+  // pre-read and the indexer's read, python3 missing) degrades to a cache miss
+  // and the ordinary per-file path. It cannot change WHAT is extracted.
+  const fs2 = require("fs");
+  const pathMod2 = require("path");
+  const intelSrc = fs2.readFileSync(
+    pathMod2.join(__dirname, "..", "lib", "intel.js"),
+    "utf8"
+  );
+
+  it("warms in windows bounded by AST_CACHE_MAX so nothing evicts before use", () => {
+    // Eviction is insertion-ordered, so a window larger than the cache would
+    // drop its own earliest entries before the indexer reached them — the
+    // speedup would silently shrink with no other symptom.
+    assert.match(intelSrc, /warmPythonWindow/, "the warm-up must exist");
+    assert.match(
+      intelSrc,
+      /items\.length >= pythonExtractor\.AST_CACHE_MAX/,
+      "the window must be capped by the cache bound"
+    );
+    assert.equal(typeof python.AST_CACHE_MAX, "number");
+  });
+
+  it("swallows every warm-up failure", () => {
+    // If this try/catch is ever removed, a batch failure stops being a lost
+    // optimization and becomes a failed scan.
+    assert.match(
+      intelSrc,
+      /try \{\s*\n\s*pythonExtractor\.extractBatch\(items\);\s*\n\s*\} catch \{/,
+      "extractBatch must be called inside a catch-all"
+    );
+  });
+
+  it("leaves indexOneFileUnlocked and its other call sites untouched", () => {
+    // docs/035 priced this as a phase split of indexOneFileUnlocked (5 call
+    // sites, the unit that writes every graph.db). The windowed pre-pass needs
+    // no such split, and this asserts the signature stayed put.
+    assert.match(intelSrc, /async function indexOneFileUnlocked\(st, db, relPath, opts = \{\}\)/);
+  });
+
+  it("skips a single oversized file rather than letting it dominate a window", () => {
+    assert.match(intelSrc, /WARM_MAX_FILE_BYTES/);
+    assert.match(intelSrc, /WARM_MAX_BYTES/);
+  });
+});

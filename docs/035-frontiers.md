@@ -996,7 +996,14 @@ it produces 14.6× more opens.
    reads the table for its direct/heuristic confidence split. **Recommendation: keep; wire the 009
    #8 consumer or leave dormant. Do not delete.**
 
-   **⏸ Phases D–F: NOT decided here.** docs/034 explicitly ruled "code left dormant… do not delete
+   **⏸ Phases D–F: DECIDED 2026-07-27 — KEEP DORMANT.** The maintainer's call, recorded here so a
+   future session does not re-litigate it: the code stays, the flags stay off. docs/034's
+   "code left dormant… do not delete it" stands, step 0 already removed the only measured harm
+   (34 silenced workflow-subagent spawns) with a one-line flag flip, and the residual runtime cost
+   is one `fs.existsSync` per file-tool PostToolUse. Deleting would foreclose Phase G to reclaim
+   surface area alone. Revisit only if a second repo enrolls and the lanes still emit nothing.
+
+   **Original framing (superseded):** docs/034 explicitly ruled "code left dormant… do not delete
    it" and proved Phase C fires via `test/claims-hook-e2e.test.js`. Step 0 already removed the only
    measured HARM (34 silenced spawns) with a one-line flag flip, so the remaining case is
    surface-area alone — a scope judgement that belongs to the maintainer, not to an agent
@@ -1035,9 +1042,24 @@ it produces 14.6× more opens.
    scan in windows of ≤ `AST_CACHE_MAX` files (batch-extract a window, then index it against a warm
    cache) needs no phase split at all.
 
-   **Why the wiring is not shipped:** `indexOneFileUnlocked` has 5 call sites and is the unit that
-   writes every `graph.db`. It is the highest-risk path in the codebase and this is the lowest-value
-   item on the list. Everything it was gated on now exists.
+   **✅ WIRING SHIPPED 2026-07-27.** Measured end-to-end on `/root/open-interpreter-fork`, a real
+   350-file repo: **20.67s → 4.09s (5.05×)**, with the resulting graph **byte-identical across all
+   350 files** (exports + imports compared per file, batch arm vs per-file arm). Quote the 5.05×
+   end-to-end figure, not the 80× micro-benchmark.
+
+   **No phase split was needed, so effort was S rather than M.** The doc assumed `AST_CACHE_MAX =
+   100` forced splitting `indexOneFileUnlocked` into extract/persist halves. It does not: warming
+   in WINDOWS of at most `AST_CACHE_MAX` files means every entry a window caches is consumed by the
+   indexer before the next window can evict it (eviction is insertion-ordered, so the oldest —
+   already-consumed — go first). `indexOneFileUnlocked` is untouched and so are its other four call
+   sites, which is what kept this off the highest-risk path in the codebase.
+
+   **Failure is free by construction.** The pre-pass only populates a content-hash cache. If the
+   batch subprocess dies, the file changes between the pre-read and the indexer's read, or python3
+   is absent, the hash simply misses and the ordinary per-file path runs exactly as before —
+   nothing here can change WHAT is extracted, only how many processes it costs. Locked by four
+   cases in `test/python-batch-extract.test.js`; mutation-checked (widening the window past the
+   cache bound, and removing the catch-all, each fail a case).
 
    **🔴 A LATENT HARNESS DEFECT this surfaced, worth more than the perf work.** The Python eval
    dataset lived at `fixtures/python-eval/eval-dataset.json` — **inside the corpus it measures**. Its
