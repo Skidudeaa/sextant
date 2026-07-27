@@ -1,7 +1,7 @@
 # 036 — Session handoff: docs/035 frontier research, sequencing steps 0–7 complete
 
-Date: 2026-07-27. Branch `main` @ `e64b4af` — **committed AND pushed**, tree clean.
-16 commits since `8ec9f3d`.
+Date: 2026-07-27. Branch `main` @ `fcda0aa` — **committed AND pushed**, tree clean.
+19 commits since `8ec9f3d`.
 
 Canonical doc: **`docs/035-frontiers.md`**. Read it before continuing; this handoff is
 the map, that doc is the record. Every sequencing step is now struck through with its
@@ -23,8 +23,9 @@ anything**, then mutation-check the test that locks the fix.
 | 5 | NL→export-token bridge (Layer 5) |
 | 6 | MCP pull channel instrumented; **nothing deleted** — two deletion claims refuted |
 | 7 | Batch extraction wired: **20.67s → 4.09s (5.05×)**, graph byte-identical |
+| + | **zoekt disk-fill closed** — incident found still live; 22 GiB reclaimed, three gaps fixed |
 
-Final gates: unit **1345/1345**, integration green, self-eval **21/21 byte-identical**
+Final gates: unit **1355/1355**, integration green, self-eval **21/21 byte-identical**
 (MRR 0.904 / nDCG 0.909 / lift +0.015), hook eval 21/21, python fixture 8/8,
 Vapor external PASS both paths.
 
@@ -46,6 +47,59 @@ Vapor external PASS both paths.
    be null. The denominator had to come from the injection side: `surfacedBySource`.
 5. **Step 7 was S, not M.** `AST_CACHE_MAX=100` does not force a phase split of
    `indexOneFileUnlocked`; windowing at ≤ the cache bound suffices.
+
+## ⚠ READ FIRST — the zoekt disk-fill incident was STILL LIVE
+
+Found while checking global hook wiring at the very end of the session, and it is the most
+operationally urgent thing here.
+
+**`/root/.planning` held 22 GiB**, and `zoekt-webserver` **pid 235807 had been alive since
+2026-07-18** serving it on port 6079. The daemon was started **2026-07-19 — nine days AFTER**
+the 2026-07-10 guards that were supposed to make this impossible. Cleaned on this machine:
+daemon killed, directory removed, **37G → 59G free** (`graph.db`, `telemetry.jsonl`,
+`history.json` backed up first).
+
+### Why the July guards did not hold — three gaps, closed in `fcda0aa`
+
+1. **`checkIndexSizeCap` is cleanup, not prevention.** It runs AFTER `zoekt-index` writes its
+   shards, and only on a BUILD — so an index that grew under older code is served forever,
+   because nothing re-examines an index this code did not create. `ensureWebserver` now
+   re-checks the cap **before spawning**.
+2. **Nothing consulted actual free space.** The caps are per-repo, so 20 repos at the 2 GiB cap
+   is 40 GiB of fully "compliant" growth, and the corpus pre-check was **non-git only** — a
+   large git repo had no pre-check at all. New `zoekt-scope.checkDiskHeadroom` refuses when free
+   space is under a **5 GiB floor** (`zoektMinFreeBytes`, `0` opts out) or when this build's own
+   estimated corpus would breach it. Wired on **both** paths, before the indexer runs.
+3. **`mcp/server.js` adopted `process.cwd()` with no root guard — this was the door.** CLAUDE.md
+   justifies the strict marker requirement for hooks and the watcher *precisely because they
+   adopt cwd without the user naming it*; MCP does the same and was exempt. An MCP session with
+   `cwd=$HOME` reached `search()` → `ensureWebserver()`. `ensureInit` now calls
+   `checkRoot(cwd, {requireMarker:true})` before `intel.init`.
+
+Locked by `test/zoekt-disk-guard.test.js` (10 cases, mutation-checked). The wiring assertions
+check **order**, not just presence: the floor must sit after the corpus estimate and before the
+indexer, and the MCP guard before `intel.init` creates any state.
+
+### The code fix does NOT clean existing debris — check every machine
+
+```bash
+du -sh ~/.planning 2>/dev/null                  # should be absent
+ps aux | grep zoekt-webserver | grep -v grep    # any -index outside a project?
+```
+
+If either shows something: `kill` the pid, `rm -rf` the directory. Nothing legitimate has `$HOME`
+as a root.
+
+### Machine state changed outside git (redo on other machines)
+
+- `/root/.planning` removed, pid 235807 killed — **22 GiB reclaimed**
+- `~/.claude/settings.json` deduped: `sextant hook sessionstart` and `hook refresh` were each
+  registered **twice** (one matcher-less, one `*`), so both fired twice per event. Backup at
+  `scratchpad/settings.json.bak`. Global hook wiring is safe now (the root guard hard-refuses
+  `$HOME`) but per-repo `.claude/settings.json` remains the intended shape.
+- All 11 fleet watchers restarted onto current code after the SCHEMA_VERSION 3→4 bump.
+- Holdback enabled at 50% on a 6th repo (`open-interpreter-fork`); source of truth is
+  `~/.claude/sextant-fleet-roots`.
 
 ## Landmines for whoever picks this up
 
