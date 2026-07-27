@@ -285,6 +285,20 @@ function renderTurnArms(lines, r) {
         `  — the causal lift, measured per turn`
       );
     }
+  } else if (gate.status === "CONFOUNDED") {
+    const comp = r.armComposition || {};
+    const top = (o) => {
+      const e = Object.entries(o || {}).sort((a, b) => b[1] - a[1])[0];
+      const n = Object.values(o || {}).reduce((x, v) => x + v, 0);
+      return e ? `${(100 * e[1] / n).toFixed(0)}% one repo` : "none";
+    };
+    lines.push(
+      `  turn benefit delta: REFUSED — the arms are drawn from different repos ` +
+      `(armed ${top((comp.byArm || {}).armed)}, holdback ${top((comp.byArm || {}).holdback)}; ` +
+      `total-variation distance ${(comp.tvd ?? 0).toFixed(2)} >= ${comp.maxTvd}). ` +
+      `The contrast would be BETWEEN REPOS, not between arms. More data does not fix this — ` +
+      `enable SEXTANT_HOLDBACK_PCT on the same repos in both arms.`
+    );
   } else {
     lines.push(
       `  turn benefit delta: DORMANT (accruing) — holdback ${holdbackTurns} turns, ` +
@@ -348,6 +362,22 @@ function summarize(events) {
   // Keyed by the injected-set `ts` the PostToolUse hook stamps as `turn`. Events
   // predating that stamp carry no turn and are counted as turnUnscored — never
   // folded into a bucket, so the covered fraction stays visible.
+  // THE FUNNEL (docs/035 #1): one row per retrieval turn at every exit, so
+  // "where do turns go" and "what did they cost" become answerable.
+  const outcomeByStatus = new Map();
+  // The per-source rate is only computable over turns that HAVE a funnel row —
+  // surfacedBySource did not exist before docs/035 #1 shipped. Dividing all-time
+  // hits by a since-ship denominator produced "268.8% opened" on the first live
+  // read: the exact lying-instrument class this arc exists to kill. Scope both
+  // sides to the same turns.
+  const outcomeTurns = new Set();
+  const hitsBySourceScoped = new Map();
+  let blockBytesTotal = 0;
+  let blockBytesCount = 0;
+  const surfacedBySourceTotal = new Map();
+  const emptyReasons = { graphEmpty: 0, contentStale: 0, total: 0 };
+  const sidArms = new Map(); // sid -> Set(arm) — contamination detector
+
   const turns = new Map(); // turn -> { arm, opens, hits, firstHitRank }
   let turnUnscoredOpens = 0;
   const noteTurn = (e, isHit) => {
@@ -363,7 +393,7 @@ function summarize(events) {
     const key = e.__root ? `${e.__root}\u0000${turn}` : turn;
     let t = turns.get(key);
     if (!t) {
-      t = { arm: e.arm || "armed", opens: 0, hits: 0, firstHitRank: null };
+      t = { arm: e.arm || "armed", opens: 0, hits: 0, firstHitRank: null, root: e.__root || null };
       turns.set(key, t);
     }
     t.opens++;
@@ -426,6 +456,29 @@ function summarize(events) {
 
   for (const e of events) {
     const name = e.name || "(unknown)";
+    if (name === "retrieval.turn_outcome") {
+      const st = typeof e.status === "string" ? e.status : "(unknown)";
+      if (Number.isFinite(e.turn)) {
+        outcomeTurns.add(e.__root ? `${e.__root}\u0000${e.turn}` : e.turn);
+      }
+      outcomeByStatus.set(st, (outcomeByStatus.get(st) || 0) + 1);
+      if (Number.isFinite(e.blockBytes) && e.blockBytes > 0) {
+        blockBytesTotal += e.blockBytes;
+        blockBytesCount++;
+      }
+      for (const [src, n] of Object.entries(e.surfacedBySource || {})) {
+        surfacedBySourceTotal.set(src, (surfacedBySourceTotal.get(src) || 0) + (n || 0));
+      }
+      if (st === "empty") {
+        emptyReasons.total++;
+        if (e.graphEmpty === true) emptyReasons.graphEmpty++;
+        if (e.contentStale === true) emptyReasons.contentStale++;
+      }
+      if (e.sid && e.arm) {
+        if (!sidArms.has(e.sid)) sidArms.set(e.sid, new Set());
+        sidArms.get(e.sid).add(e.arm);
+      }
+    }
     byName.set(name, (byName.get(name) || 0) + 1);
 
     if (typeof e.ts === "number") {
@@ -479,6 +532,14 @@ function summarize(events) {
       pathHits++;
       const source = e.source || "(unknown)";
       pathHitsBySource.set(source, (pathHitsBySource.get(source) || 0) + 1);
+      // Scoped copy: only hits on turns that also produced a funnel row, so the
+      // numerator and the surfacedBySource denominator cover the same turns.
+      if (Number.isFinite(e.turn)) {
+        const k = e.__root ? `${e.__root}\u0000${e.turn}` : e.turn;
+        if (outcomeTurns.has(k)) {
+          hitsBySourceScoped.set(source, (hitsBySourceScoped.get(source) || 0) + 1);
+        }
+      }
       const arm = e.arm || "armed"; // legacy events w/o arm were effectively armed
       pathHitsByArm.set(arm, (pathHitsByArm.get(arm) || 0) + 1);
       noteTurn(e, true);
@@ -627,6 +688,31 @@ function summarize(events) {
       deduped: retrievalDeduped,
       emptyInjectionRate: classifiedRetrieve ? emptyFallback / classifiedRetrieve : null,
       injectedBySource: Object.fromEntries(injectedBySource),
+      // THE FUNNEL (docs/035 #1). turnOutcomes is where retrieve-classified
+      // turns actually GO; surfacedBySource is the per-source DENOMINATOR that
+      // makes path_hit.source a RATE instead of a composition-of-hits.
+      // Deliberately separate from injectedBySource above: that vocabulary is
+      // {graph_merged, text_only}, this one is {path_match, exported_symbol, …},
+      // and they collide on the token text_only — joining them would produce a
+      // silently wrong number.
+      turnOutcomes: Object.fromEntries(outcomeByStatus),
+      surfacedBySource: Object.fromEntries(surfacedBySourceTotal),
+      // Hits restricted to funnel-scored turns — the ONLY numerator that shares
+      // a denominator with surfacedBySource. pathHitsBySource above is all-time
+      // and is a composition of hits, not a rate.
+      hitsBySourceScoped: Object.fromEntries(hitsBySourceScoped),
+      surfacedTurnsScored: outcomeTurns.size,
+      emptyDiagnosis: emptyReasons,
+      blockBytes: {
+        total: blockBytesTotal,
+        injections: blockBytesCount,
+        mean: blockBytesCount ? Math.round(blockBytesTotal / blockBytesCount) : null,
+      },
+      // A session that drew BOTH arms: decideArm randomizes per turn with no
+      // persisted assignment, so carryover inside one session is real and was
+      // previously undetectable.
+      contaminatedSessions: Array.from(sidArms.values()).filter((a) => a.size > 1).length,
+      sessionsSeen: sidArms.size,
       // T1.2 freshness gate on the retrieval lane: staleHits is the count of
       // retrieve-classified turns where the gate fired; staleRate normalizes it
       // against retrieve-classified prompts (a rising rate flags churn the
@@ -658,7 +744,8 @@ function summarize(events) {
       benefitDeltaGate: openDeltaGate(
         retrievalBenefitDelta,
         retrievalArmCounts,
-        turnSummary.turnCountsByArm
+        turnSummary.turnCountsByArm,
+        turnSummary.armComposition && turnSummary.armComposition.confounded
       ),
       // Raw per-arm scored-open counts so a consumer (e.g. the holdback-benefit
       // cron) can gate on VOLUME, not just read a rate that's unstable at low n.
@@ -678,7 +765,8 @@ function summarize(events) {
       regionBenefitDeltaGate: openDeltaGate(
         regionDelta,
         regionCounts,
-        turnSummary.turnCountsByArm
+        turnSummary.turnCountsByArm,
+        turnSummary.armComposition && turnSummary.armComposition.confounded
       ),
       regionArmCounts: regionCounts,
     },
@@ -785,7 +873,62 @@ const DELTA_STATUS = {
   DORMANT: "DORMANT",
   SPANS_ZERO: "SPANS_ZERO",
   AT_VOLUME: "AT_VOLUME",
+  CONFOUNDED: "CONFOUNDED",
 };
+
+// POOLING DOMINANCE GUARD (docs/035 #1).
+//
+// Pooling shipped before this guard, and the fleet's arms are pathological: the
+// holdback arm is ~100% ONE repo while the armed arm is ~92% everything else.
+// A pooled read therefore printed `armed open-precision 5.0% (n=7474)` beside
+// `holdback 48.8% (n=41)` — inviting the reading that retrieval HURTS, when the
+// entire gap is which repositories happen to sit in which arm. Randomization is
+// within-repo and per turn, so pooling is only valid if the arms are drawn from
+// comparable repo populations; nothing checked that.
+//
+// The measure is total variation distance between the two arms' repo
+// distributions: 0 = identical mixes, 1 = completely disjoint. At >= 0.5 the
+// contrast is between repos, not between arms, and the delta is refused rather
+// than shown with a caveat nobody reads. This is NOT a volume gate — more data
+// makes it worse, not better, until the arms are enabled on the same repos.
+//
+// Keyed on the git COMMON DIR, not the root path: a linked worktree gets its own
+// .planning/intel (separate telemetry, separate arm draws) but is the same
+// repository, and counting it as a distinct repo would understate dominance.
+const DOMINANCE_MAX_TVD = 0.5;
+const repoIdentityCache = new Map();
+function repoIdentity(rootAbs) {
+  if (!rootAbs) return "(single)";
+  if (repoIdentityCache.has(rootAbs)) return repoIdentityCache.get(rootAbs);
+  let id = rootAbs;
+  try {
+    const out = require("child_process")
+      .execFileSync("git", ["rev-parse", "--git-common-dir"], {
+        cwd: rootAbs,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+      .trim();
+    if (out) id = require("path").resolve(rootAbs, out);
+  } catch {
+    // Not a git repo, or git unavailable — the root path is the best identity
+    // available and is still correct for the non-worktree case.
+  }
+  repoIdentityCache.set(rootAbs, id);
+  return id;
+}
+
+// Total variation distance between two {key: count} distributions.
+function armCompositionTvd(a, b) {
+  const at = Object.values(a).reduce((n, v) => n + v, 0);
+  const bt = Object.values(b).reduce((n, v) => n + v, 0);
+  if (!at || !bt) return null; // one arm empty — DORMANT covers it
+  let tvd = 0;
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    tvd += Math.abs((a[k] || 0) / at - (b[k] || 0) / bt);
+  }
+  return tvd / 2;
+}
 
 // Per-OPEN gate. Requires BOTH floors (docs/033 Tier 3 #4): at ~28 opens/turn an
 // opens-only floor of 30 clears after ONE randomized turn per arm.
@@ -794,7 +937,7 @@ const DELTA_STATUS = {
 // interval over opens would understate its own width — the exact analysis-unit
 // error this gate exists to prevent. The interval lives on the turn gate, where
 // the observation unit is the unit `decideArm` randomizes at.
-function openDeltaGate(delta, armCountsByArm, turnCountsByArm) {
+function openDeltaGate(delta, armCountsByArm, turnCountsByArm, confounded) {
   const a = armCountsByArm || {};
   const t = turnCountsByArm || {};
   const armedScored = (a.armed || {}).scored || 0;
@@ -807,14 +950,18 @@ function openDeltaGate(delta, armCountsByArm, turnCountsByArm) {
     holdbackScored >= HOLDBACK_MIN_SCORED &&
     armedTurns >= HOLDBACK_MIN_TURNS &&
     holdbackTurns >= HOLDBACK_MIN_TURNS;
+  // A confounded pool is NOT a volume problem — more data makes it worse until
+  // the arms are enabled on the same repos — so it overrides atVolume outright.
   return {
-    atVolume,
+    atVolume: atVolume && !confounded,
     status:
       delta == null
         ? DELTA_STATUS.NO_ARM
-        : atVolume
-          ? DELTA_STATUS.AT_VOLUME
-          : DELTA_STATUS.DORMANT,
+        : confounded
+          ? DELTA_STATUS.CONFOUNDED
+          : atVolume
+            ? DELTA_STATUS.AT_VOLUME
+            : DELTA_STATUS.DORMANT,
     armedScored,
     holdbackScored,
     armedTurns,
@@ -829,7 +976,7 @@ function openDeltaGate(delta, armCountsByArm, turnCountsByArm) {
 // Turn-level gate. The floor counts TURNS, and once it clears the Newcombe
 // interval decides whether the delta may call itself causal at all — 30/arm is
 // an ACCRUAL floor (MDE roughly +33 to +35 pts), not statistical power.
-function turnDeltaGate(delta, countsByArm) {
+function turnDeltaGate(delta, countsByArm, confounded) {
   const c = countsByArm || {};
   const armedTurns = (c.armed || {}).turns || 0;
   const holdbackTurns = (c.holdback || {}).turns || 0;
@@ -844,9 +991,10 @@ function turnDeltaGate(delta, countsByArm) {
   const spansZero = ci ? (ci.lo <= 0) !== (ci.hi <= 0) : null;
   let status = DELTA_STATUS.DORMANT;
   if (delta == null) status = DELTA_STATUS.NO_ARM;
+  else if (confounded) status = DELTA_STATUS.CONFOUNDED;
   else if (atVolume) status = spansZero ? DELTA_STATUS.SPANS_ZERO : DELTA_STATUS.AT_VOLUME;
   return {
-    atVolume,
+    atVolume: atVolume && !confounded,
     status,
     armedTurns,
     holdbackTurns,
@@ -897,6 +1045,17 @@ function summarizeTurns(turns) {
     }
   }
   ranks.sort((a, b) => a - b);
+  // Arm x repo composition — the input to the dominance guard. Built here
+  // because this is the only place that already iterates turns with their arm.
+  const compByArm = { armed: {}, holdback: {} };
+  for (const t of turns.values()) {
+    if (!compByArm[t.arm]) compByArm[t.arm] = {};
+    const id = repoIdentity(t.root);
+    compByArm[t.arm][id] = (compByArm[t.arm][id] || 0) + 1;
+  }
+  const tvd = armCompositionTvd(compByArm.armed || {}, compByArm.holdback || {});
+  const confounded = tvd != null && tvd >= DOMINANCE_MAX_TVD;
+
   const rateByArm = {};
   const countsByArm = {};
   for (const [arm, a] of byArm) {
@@ -915,7 +1074,8 @@ function summarizeTurns(turns) {
     turnHitRateByArm: rateByArm,
     turnCountsByArm: countsByArm,
     turnBenefitDelta: delta,
-    turnBenefitDeltaGate: turnDeltaGate(delta, countsByArm),
+    turnBenefitDeltaGate: turnDeltaGate(delta, countsByArm, confounded),
+    armComposition: { byArm: compByArm, tvd, confounded, maxTvd: DOMINANCE_MAX_TVD },
   };
 }
 
@@ -2591,6 +2751,52 @@ function printSummary(rootAbs, sum, contributions) {
         `  turn-unscored opens: ${r.turnUnscoredOpens}  ` +
         `(recorded before the turn stamp shipped — excluded from the turn rate, not folded in)`
       );
+    }
+    // THE FUNNEL (docs/035 #1) — printed BEFORE the outcome rates, because
+    // "where did the turns go" is the question that makes the rates readable.
+    if (r.turnOutcomes && Object.keys(r.turnOutcomes).length) {
+      const o = r.turnOutcomes;
+      const tot = Object.values(o).reduce((a, b) => a + b, 0);
+      const part = (k) => `${k} ${o[k] || 0}`;
+      lines.push(
+        `  funnel (${tot} retrieval turns): ` +
+        ["delivered", "deduped", "holdback", "empty"].map(part).join(" · ")
+      );
+      if (r.blockBytes && r.blockBytes.injections) {
+        lines.push(
+          `  injected cost: ${r.blockBytes.total} bytes over ${r.blockBytes.injections} block(s), ` +
+          `mean ${r.blockBytes.mean} B`
+        );
+      }
+      const ed = r.emptyDiagnosis || {};
+      if (ed.total) {
+        lines.push(
+          `  empty turns: ${ed.total} — ${ed.graphEmpty} with an empty graph lane, ` +
+          `${ed.contentStale} on a content-stale turn`
+        );
+      }
+      const sbs = r.surfacedBySource || {};
+      if (Object.keys(sbs).length) {
+        // The DENOMINATOR. path_hit-by-source below is a composition of hits;
+        // this is what makes it a rate.
+        lines.push(
+          `  surfaced by source (per-source open RATE, scoped to the ${r.surfacedTurnsScored} ` +
+          `turn(s) carrying a funnel row — all-time hits below are a composition, not a rate):`
+        );
+        for (const [src, n] of Object.entries(sbs).sort((a, b) => b[1] - a[1])) {
+          const hits = (r.hitsBySourceScoped || {})[src] || 0;
+          lines.push(`    - ${src.padEnd(28)} ${String(n).padStart(5)} surfaced   ${fmtPct(hits, n)} opened`);
+        }
+      }
+      if (r.sessionsSeen) {
+        const c = r.contaminatedSessions || 0;
+        if (c > 0) {
+          lines.push(
+            `  ⚠ ${c} of ${r.sessionsSeen} session(s) drew BOTH arms — per-turn randomization ` +
+            `carries over within a session; those turns confound the contrast`
+          );
+        }
+      }
     }
     lines.push(
       `  open-precision: ${fmtPct(r.pathHits, r.pathHits + r.pathMisses)}  ` +

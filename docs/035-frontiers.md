@@ -839,9 +839,28 @@ it produces 14.6× more opens.
      That is a behaviour expansion with the 101 GB home-dir incident in its history and needs to be
      routed through the root guard, corpus pre-check and circuit breaker in its own change. The
      9 dark repos stay dark; they are now *loud* about it instead.
-2. **Legibility (#1).** `source` on `path_miss`, the `empty_fallback` payload, `sid` + contamination
+2. ~~**Legibility (#1).** `source` on `path_miss`, the `empty_fallback` payload, `sid` + contamination
    flag, the dominance guard **keyed on git common-dir**, `turn_outcome` with `blockBytes`. Expect
-   the pooled surface to print nothing for a long time; that is the correct output.
+   the pooled surface to print nothing for a long time; that is the correct output.~~
+   **✅ DONE 2026-07-27.** All four exits emit `retrieval.turn_outcome`
+   (delivered / deduped / holdback / empty), verified by driving the hook. Two corrections:
+   - **`source` on `path_miss` was DROPPED as inert.** A miss is by construction an open of a file
+     that was NOT surfaced — `classifyOpen` returns `{hit:false, source:null}` — so the field could
+     only ever be null and no rate follows from it. The denominator has to come from the injection
+     side, and now does: **`surfacedBySource`** on the funnel row, a deliberately distinct field
+     (the verifier's correction was right — `injectedBySource` is `{graph_merged, text_only}` while
+     `path_hit.source` is `{path_match, exported_symbol, …}`, colliding on `text_only`).
+   - **The first live read printed `268.8% opened`** — all-time hits over a since-ship denominator.
+     Numerator and denominator now cover the same turns (`hitsBySourceScoped`, joined on turn id),
+     and the report labels the scope. A rate that can exceed 1 is the exact lying-instrument class
+     this arc exists to kill; it was caught by *rendering* it, not by reading the code.
+
+   The dominance guard measures **total variation distance** between the two arms' repo
+   distributions (≥0.5 → refuse), keyed on **git common-dir** so a linked worktree is not counted
+   as a separate repo. On the live 5-root pool it reads **tvd 0.79 → CONFOUNDED**: holdback is
+   100% sextant (2 turns), armed is spread over 4 repos with somaNotes dominant (17 of 29). Both
+   gates now report `CONFOUNDED`, and the report says the contrast would be *between repos*, not
+   between arms — **more data does not fix it**, only enabling the arm on the same repos does.
 3. **Adjudicate the allocation question** with S4 section tagging (#7 S4) — free, existing corpus,
    6,237 rows. **No eviction from the static body and no further retrieval investment ships before
    this lands.**

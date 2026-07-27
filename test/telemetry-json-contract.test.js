@@ -174,3 +174,107 @@ describe("telemetry --json contract — every benefit delta ships its gate", () 
     );
   });
 });
+
+// ─── THE FUNNEL + THE DOMINANCE GUARD (docs/035 #1) ─────────────────────────
+
+describe("retrieval funnel — turn_outcome rows", () => {
+  const outcome = (fields) => ev("retrieval.turn_outcome", fields);
+
+  it("counts every exit, so turns cannot vanish from the funnel", () => {
+    const s = summarize([
+      outcome({ turn: 1, arm: "armed", status: "delivered", blockBytes: 500, surfacedCount: 3, surfacedBySource: { path_match: 3 }, sid: "a" }),
+      outcome({ turn: 2, arm: "armed", status: "deduped", blockBytes: 0, surfacedCount: 3, surfacedBySource: { path_match: 3 }, sid: "a" }),
+      outcome({ turn: 3, arm: "holdback", status: "holdback", blockBytes: 0, surfacedCount: 2, surfacedBySource: { exported_symbol: 2 }, sid: "b" }),
+      outcome({ turn: 4, arm: null, status: "empty", blockBytes: 0, surfacedCount: 0, surfacedBySource: {}, sid: "b", graphEmpty: true }),
+    ]);
+    assert.deepEqual(s.retrieval.turnOutcomes, { delivered: 1, deduped: 1, holdback: 1, empty: 1 });
+    // The byte cost that `grep -c blockBytes` returned 0 for.
+    assert.equal(s.retrieval.blockBytes.total, 500);
+    assert.equal(s.retrieval.blockBytes.injections, 1);
+    assert.equal(s.retrieval.emptyDiagnosis.total, 1);
+    assert.equal(s.retrieval.emptyDiagnosis.graphEmpty, 1);
+  });
+
+  it("surfacedBySource is a DISTINCT field from injectedBySource", () => {
+    // The two vocabularies collide on the token `text_only`:
+    // injected.source ∈ {graph_merged, text_only}; path_hit.source ∈
+    // {path_match, exported_symbol, text_only, …}. Joining them would emit a
+    // silently wrong per-source rate.
+    const s = summarize([
+      ev("retrieval.injected", { source: "text_only", fileCount: 2 }),
+      outcome({ turn: 1, arm: "armed", status: "delivered", blockBytes: 10, surfacedCount: 2, surfacedBySource: { path_match: 2 }, sid: "a" }),
+    ]);
+    assert.deepEqual(s.retrieval.injectedBySource, { text_only: 1 });
+    assert.deepEqual(s.retrieval.surfacedBySource, { path_match: 2 });
+  });
+
+  it("scopes the per-source numerator to turns that carry a funnel row", () => {
+    // FAIL-pre observed live: all-time hits over a since-ship denominator
+    // printed "268.8% opened". Numerator and denominator must cover the same
+    // turns or the rate is not a rate.
+    const s = summarize([
+      // A historical hit on a turn with NO funnel row — must not be counted.
+      ev("retrieval.path_hit", { source: "path_match", tool: "Read", arm: "armed", turn: 999 }),
+      outcome({ turn: 1, arm: "armed", status: "delivered", blockBytes: 10, surfacedCount: 4, surfacedBySource: { path_match: 4 }, sid: "a" }),
+      ev("retrieval.path_hit", { source: "path_match", tool: "Read", arm: "armed", turn: 1 }),
+    ]);
+    assert.equal(s.retrieval.pathHitsBySource.path_match, 2, "all-time composition keeps both");
+    assert.equal(s.retrieval.hitsBySourceScoped.path_match, 1, "scoped numerator keeps only the joined one");
+    const rate = s.retrieval.hitsBySourceScoped.path_match / s.retrieval.surfacedBySource.path_match;
+    assert.ok(rate <= 1, `a rate must not exceed 1, got ${rate}`);
+  });
+
+  it("flags a session that drew BOTH arms", () => {
+    const s = summarize([
+      outcome({ turn: 1, arm: "armed", status: "delivered", blockBytes: 1, surfacedCount: 1, surfacedBySource: {}, sid: "same" }),
+      outcome({ turn: 2, arm: "holdback", status: "holdback", blockBytes: 0, surfacedCount: 1, surfacedBySource: {}, sid: "same" }),
+      outcome({ turn: 3, arm: "armed", status: "delivered", blockBytes: 1, surfacedCount: 1, surfacedBySource: {}, sid: "clean" }),
+    ]);
+    assert.equal(s.retrieval.sessionsSeen, 2);
+    assert.equal(s.retrieval.contaminatedSessions, 1);
+  });
+});
+
+describe("pooling dominance guard", () => {
+  const hit = (turn, arm, root) => {
+    const e = ev("retrieval.path_hit", { source: "path_match", tool: "Read", arm, turn });
+    if (root) e.__root = root;
+    return e;
+  };
+
+  it("refuses a delta when the arms are drawn from different repos", () => {
+    // The live fleet shape: holdback is 100% one repo, armed is ~92% others.
+    // The printed contrast would be BETWEEN REPOS, not between arms.
+    const events = [];
+    for (let i = 0; i < 40; i++) events.push(hit(1000 + i, "armed", "/root/repoA"));
+    for (let i = 0; i < 40; i++) events.push(hit(2000 + i, "holdback", "/root/repoB"));
+    const r = summarize(events).retrieval;
+    assert.equal(r.armComposition.confounded, true);
+    assert.ok(r.armComposition.tvd >= 0.5, `tvd ${r.armComposition.tvd}`);
+    assert.equal(r.turnBenefitDeltaGate.status, "CONFOUNDED");
+    assert.equal(r.turnBenefitDeltaGate.atVolume, false, "volume must not override a confound");
+    assert.equal(r.benefitDeltaGate.status, "CONFOUNDED");
+  });
+
+  it("allows a delta when both arms draw from the same repos", () => {
+    const events = [];
+    for (let i = 0; i < 40; i++) {
+      events.push(hit(1000 + i, "armed", "/root/repoA"));
+      events.push(hit(2000 + i, "holdback", "/root/repoA"));
+    }
+    const r = summarize(events).retrieval;
+    assert.equal(r.armComposition.confounded, false);
+    assert.equal(r.armComposition.tvd, 0);
+    assert.notEqual(r.turnBenefitDeltaGate.status, "CONFOUNDED");
+  });
+
+  it("a single-root read is never confounded by this measure", () => {
+    const events = [];
+    for (let i = 0; i < 5; i++) {
+      events.push(hit(1000 + i, "armed", null));
+      events.push(hit(2000 + i, "holdback", null));
+    }
+    const r = summarize(events).retrieval;
+    assert.equal(r.armComposition.confounded, false);
+  });
+});

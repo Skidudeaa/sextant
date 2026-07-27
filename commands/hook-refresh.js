@@ -102,6 +102,50 @@ function decideArm(data, contentStale, env = process.env) {
   return Math.random() * 100 < pct ? "holdback" : "armed";
 }
 
+// THE FUNNEL ROW (docs/035 #1). One event per retrieval turn, at every exit,
+// so the pipeline stops being a set of counters that cannot be joined.
+//
+// What it fixes, concretely:
+//   - `retrieval.empty_fallback` was literally `recordEvent(root, name, {})` —
+//     51.3% of retrieve-classified turns fleet-wide, with NOTHING recorded about
+//     why. There was no way to ask whether the empties are classifier over-fire,
+//     recall failure, or stale-gate suppression.
+//   - Nothing anywhere recorded the BYTE COST of an injection (`grep -c
+//     blockBytes` = 0), so "is this block worth its context" was unanswerable.
+//   - `surfacedBySource` is the missing DENOMINATOR. docs/035 #1 proposed adding
+//     `source` to `retrieval.path_miss` instead, but a miss is by construction an
+//     open of a file that was NOT surfaced — `classifyOpen` returns
+//     `{hit:false, source:null}` — so that field could only ever be null and no
+//     rate would follow from it. The rate needs surfaced-per-source, which only
+//     the injection side knows. This is a DISTINCT field, deliberately not
+//     `injectedBySource`: that one is drawn from {graph_merged, text_only} while
+//     `path_hit.source` is drawn from {path_match, exported_symbol, …}, and the
+//     two vocabularies COLLIDE on the token `text_only`, so a naive join of the
+//     existing fields would emit a silently WRONG per-source rate.
+//   - `sid` lets a session that contains BOTH arms be detected and excluded:
+//     `decideArm` is `Math.random()` per turn with no persisted assignment, so
+//     armed→holdback carryover inside one session was undetectable.
+function hashSid(sessionKey) {
+  if (!sessionKey) return null;
+  return crypto.createHash("sha1").update(String(sessionKey)).digest("hex").slice(0, 12);
+}
+
+function surfacedBySource(paths) {
+  const out = {};
+  for (const p of Array.isArray(paths) ? paths : []) {
+    const src = p && typeof p.source === "string" && p.source ? p.source : "text_only";
+    out[src] = (out[src] || 0) + 1;
+  }
+  return out;
+}
+
+// status: delivered | deduped | holdback | empty
+function recordTurnOutcome(root, fields) {
+  try {
+    recordEvent(root, "retrieval.turn_outcome", fields);
+  } catch {}
+}
+
 function persistInjectedSet(injPathsFile, payload) {
   try {
     fs.writeFileSync(injPathsFile, JSON.stringify(payload));
@@ -978,7 +1022,31 @@ async function run() {
     // so the static summary is shown instead. Pairing this count against the
     // retrieval.classified{retrieve:true} count gives the empty-injection rate
     // that surfaces NL-recall regressions (cf. the A4 gap).
-    recordEvent(root, "retrieval.empty_fallback", {});
+    recordEvent(root, "retrieval.empty_fallback", {
+      // Was `{}` — 51.3% of retrieve-classified turns fleet-wide with nothing
+      // recorded about why. These four were already in scope at this line.
+      confidence: typeof classification.confidence === "number" ? classification.confidence : 0,
+      termCount: Array.isArray(classification.terms) ? classification.terms.length : 0,
+      contentStale: contentStale === true,
+      // Which LANE came back empty — the whole point of the payload. An empty
+      // graph lane with a live text lane is a different failure from both empty.
+      graphEmpty: !((graphResults && graphResults.files) || []).length,
+    });
+    recordTurnOutcome(root, {
+      turn: Date.now(),
+      arm: null,
+      status: "empty",
+      blockBytes: 0,
+      surfacedCount: 0,
+      surfacedBySource: {},
+      // Carried on the FUNNEL row too, not just empty_fallback: the funnel row
+      // is the joinable one, and emptyDiagnosis reads from it.
+      graphEmpty: !((graphResults && graphResults.files) || []).length,
+      sid: hashSid(sessionKey),
+      confidence: typeof classification.confidence === "number" ? classification.confidence : 0,
+      termCount: Array.isArray(classification.terms) ? classification.terms.length : 0,
+      contentStale: contentStale === true,
+    });
     await injectStaticWithPrefix();
     await statusLinePromise;
     return;
@@ -1001,13 +1069,31 @@ async function run() {
     // (the arm withholds the graph-authority CONTRIBUTION, not "sextant entirely").
     // We do NOT emit <codebase-retrieval>, do NOT record retrieval.injected
     // (nothing was injected), and do NOT touch the dedupe hash (no block shown).
+    // ONE timestamp, used as both the persisted turn key and the telemetry
+    // turn id. Calling Date.now() twice would mint two ids for one turn and
+    // silently break the join — the same class of defect docs/033 Tier 3 #3
+    // fixed on the dedupe path.
+    const holdbackTurnTs = Date.now();
     persistInjectedSet(injPathsFile, {
-      ts: Date.now(),
+      ts: holdbackTurnTs,
       stale: contentStale === true,
       arm: "holdback",
       paths: injectedPaths,
     });
     recordEvent(root, "retrieval.holdback", { fileCount: injectedPaths.length });
+    recordTurnOutcome(root, {
+      turn: holdbackTurnTs,
+      arm: "holdback",
+      status: "holdback",
+      // Nothing was injected: the counterfactual arm costs the agent zero bytes.
+      blockBytes: 0,
+      surfacedCount: injectedPaths.length,
+      surfacedBySource: surfacedBySource(injectedPaths),
+      sid: hashSid(sessionKey),
+      confidence: typeof classification.confidence === "number" ? classification.confidence : 0,
+      termCount: Array.isArray(classification.terms) ? classification.terms.length : 0,
+      contentStale: contentStale === true,
+    });
     await injectStaticWithPrefix();
     await statusLinePromise;
     return;
@@ -1052,8 +1138,9 @@ async function run() {
     // Tier 1 built to fix the unit problem. The block is suppressed but the
     // agent still holds the identical one from when it was first emitted, so
     // this turn IS treated: mint a new id against the same surfaced set.
+    const dedupeTurnTs = Date.now();
     persistInjectedSet(injPathsFile, {
-      ts: Date.now(),
+      ts: dedupeTurnTs,
       stale: contentStale === true,
       arm,
       deduped: true,
@@ -1066,6 +1153,21 @@ async function run() {
     recordEvent(root, "retrieval.deduped", {
       arm,
       fileCount: injectedPaths.length,
+    });
+    recordTurnOutcome(root, {
+      turn: dedupeTurnTs,
+      arm,
+      status: "deduped",
+      // The block was suppressed, so this turn cost zero NEW bytes — but the
+      // agent still holds the identical block from when it was first emitted,
+      // which is exactly why the turn is scored rather than dropped.
+      blockBytes: 0,
+      surfacedCount: injectedPaths.length,
+      surfacedBySource: surfacedBySource(injectedPaths),
+      sid: hashSid(sessionKey),
+      confidence: typeof classification.confidence === "number" ? classification.confidence : 0,
+      termCount: Array.isArray(classification.terms) ? classification.terms.length : 0,
+      contentStale: contentStale === true,
     });
     recordCoherenceBoundaryOutcome("deduped");
     await statusLinePromise;
@@ -1102,8 +1204,9 @@ async function run() {
     "⚠ index stale: repo changed since last scan — showing live text matches only, " +
     "structural ranking suppressed; rescan triggered.\n";
   const body = contentStale ? STALE_MARKER + safe : safe;
+  const injectedBlock = `${contextPrefix}<codebase-retrieval>\n${body}\n</codebase-retrieval>`;
   try {
-    process.stdout.write(`${contextPrefix}<codebase-retrieval>\n${body}\n</codebase-retrieval>`);
+    process.stdout.write(injectedBlock);
   } catch {
     recordCoherenceBoundaryOutcome("stdout_failed");
     await statusLinePromise;
@@ -1171,8 +1274,9 @@ async function run() {
   // against the MOST RECENT surfaced set. Separate namespace from the dedupe-hash
   // file (.last_injected_hash.*) and the statusline marker (.last_retrieval).
   // Best-effort; a failed write just means that turn's opens go unscored.
+  const deliveredTurnTs = Date.now();
   persistInjectedSet(injPathsFile, {
-    ts: Date.now(),
+    ts: deliveredTurnTs,
     stale: contentStale === true,
     arm: "armed",
     paths: injectedPaths,
@@ -1195,6 +1299,21 @@ async function run() {
   recordEvent(root, "retrieval.injected", {
     source: fromGraph ? "graph_merged" : "text_only",
     fileCount: mergedFiles.length,
+  });
+  recordTurnOutcome(root, {
+    turn: deliveredTurnTs,
+    arm: "armed",
+    status: "delivered",
+    // The context cost of this turn, in bytes actually written to stdout —
+    // the number `grep -c blockBytes` returned 0 for. Without it, "is the
+    // block worth its context" has no denominator either.
+    blockBytes: Buffer.byteLength(injectedBlock, "utf8"),
+    surfacedCount: injectedPaths.length,
+    surfacedBySource: surfacedBySource(injectedPaths),
+    sid: hashSid(sessionKey),
+    confidence: typeof classification.confidence === "number" ? classification.confidence : 0,
+    termCount: Array.isArray(classification.terms) ? classification.terms.length : 0,
+    contentStale: contentStale === true,
   });
 
   if (parentSnapshotToPersist) {

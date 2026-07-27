@@ -219,6 +219,11 @@ function toRepoRel(root, filePath) {
 
 // Pure, unit-testable verdict.  Returns { hit, source } or null when not
 // scoreable (no set / no path).
+function hashSid(sessionKey) {
+  if (!sessionKey) return null;
+  return require("crypto").createHash("sha1").update(String(sessionKey)).digest("hex").slice(0, 12);
+}
+
 function classifyOpen(injectedMap, repoRel) {
   if (!injectedMap || !repoRel) return null;
   if (injectedMap.has(repoRel)) return { hit: true, source: injectedMap.get(repoRel) };
@@ -879,13 +884,22 @@ async function run() {
       const arm = readInjectedArm(parsed);
       // turn = which injection this open scores against (docs/033 Tier 1 #1).
       const turn = readInjectedTurn(parsed);
+      // sid (docs/035 #1): the hashed session this open happened in. decideArm
+      // is Math.random() per TURN with no persisted assignment, so a single
+      // session can contain both arms; without a session id that carryover is
+      // undetectable and silently contaminates the contrast. NOT added to
+      // path_miss as a `source` field — a miss is by construction an open of a
+      // file we did NOT surface (classifyOpen returns source:null), so the
+      // per-source DENOMINATOR has to come from the injection side instead. It
+      // does: retrieval.turn_outcome.surfacedBySource.
+      const sid = hashSid(sessionKey);
       const verdict = classifyOpen(injectedMap, repoRel);
       if (verdict) {
         if (verdict.hit) {
           // source = the signal that surfaced this file → per-signal open attribution.
-          recordEvent(root, "retrieval.path_hit", { source: verdict.source, tool, arm, turn });
+          recordEvent(root, "retrieval.path_hit", { source: verdict.source, tool, arm, turn, sid });
         } else {
-          recordEvent(root, "retrieval.path_miss", { tool, arm, turn });
+          recordEvent(root, "retrieval.path_miss", { tool, arm, turn, sid });
         }
       }
 
