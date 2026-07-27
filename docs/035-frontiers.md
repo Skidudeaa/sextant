@@ -612,6 +612,17 @@ gate than "six days of instability."
 `test/telemetry-json-contract.test.js` asserts every key matching `/[Bb]enefitDelta/` carries a
 sibling gate flag — the generalizable guard, covering `regionBenefitDelta`.
 
+**✅ SHIPPED 2026-07-27 (step 0 of the sequencing below).** All three deltas now carry a sibling
+`*BenefitDeltaGate` `{atVolume, status, armed/holdback counts, minScored, minTurns, ci, spansZero}`.
+The gate is computed **once** in `summarize()` (`openDeltaGate` / `turnDeltaGate`) and BOTH human
+renderers now read it instead of re-deriving — without that half the fix would merely have added a
+*fourth* re-implementation. `status` is `NO_ARM | DORMANT | SPANS_ZERO | AT_VOLUME`. The per-OPEN
+gate deliberately carries `ci: null`: within-turn opens are correlated at ~28/turn, so a binomial
+interval over opens would understate its own width — the analysis-unit error the gate exists to
+prevent — and the interval lives on the turn gate, where the observation unit is the randomization
+unit. `test/telemetry-json-contract.test.js` (5 cases) is reflective and mutation-checked: dropping
+the region gate fails 2 of 5, and relaxing the gate to opens-only — the exact cron defect — fails 1.
+
 **Kill-gate.** FAIL-pre needs no fixture: the JSON above. **Effort** XS. **Risk.** Nothing here is
 evidence that injection hurts; the honest statement is that the holdback arm has **1 scored turn
 fleet-wide**.
@@ -763,13 +774,24 @@ it produces 14.6× more opens.
   `meanMRR 0.9042 / meanNDCG 0.9092 / graphLiftNDCG 0.01518`, 21/21. The docs say
   `0.900 / 0.920 / +0.012` — a downstream agent comparing a change against 0.920 reads a **phantom
   regression of −0.011**. docs/033 and docs/034 already carry the correct values.
-- **CLAUDE.md overclaims the sync rescan's reach.** `:124` says the gate runs "At every injection
+- **CLAUDE.md overclaims the sync rescan's reach.** ~~`:124` says the gate runs "At every injection
   point (SessionStart, **UserPromptSubmit**, summary, inject)" and `:127` describes the sync arm as
   part of it — but `commands/hook-refresh.js:690` calls bare `checkFreshness` and `:738` takes only
-  the async arm; `syncRescan` exists solely at `lib/cli.js:161-167`. The same bullet then says at
+  the async arm; `syncRescan` exists solely at `lib/cli.js:161-167`.~~ The same bullet then says at
   `:149` that the dataset feeds the "**future** Option-5 decision" 22 lines after saying it shipped;
   and `:148` re-asserts `benefitDelta` "= the causal lift" nine lines after `:139` demotes it to
-  "SPANS ZERO, directional only." Three overclaims in the honesty area the project is strictest about.
+  "SPANS ZERO, directional only." ~~Three~~ **Two** overclaims in the honesty area the project is
+  strictest about.
+
+  **✅ RESOLVED IN PART, 2026-07-27 (concurrent with this research).** `9a55d8f` shipped
+  `commands/hook-refresh.js:trySyncRescue`, routing the sync arm into the retrieval lane and
+  re-running graph retrieval on a rescue (the pre-rescan graph would otherwise assert stale
+  structure under a fresh verdict), and rewrote `:127` to document both lanes. So `:124` is now
+  **true as written** and the reach overclaim is gone. The two remaining overclaims — `:149`
+  "future" and `:148` "the causal lift" — were fixed in this session's step-0 pass; `:148`'s fix is
+  the prose half of #10's JSON gate. This entry is preserved rather than deleted because the
+  *pattern* is the finding: the honesty area accumulates overclaims fastest, because a lane ships
+  and its prose does not move with it.
 - **`todos.md` is ~6 weeks stale** — it lists the shipped co-change lane as open, states a 20%
   holdback against the actual 50, and names `docs/015-handoff.md` as current (19 handoffs later).
   Either refresh it against this doc or demote it explicitly in favour of docs/034 + this one.
@@ -785,10 +807,13 @@ it produces 14.6× more opens.
 
 ## Recommended sequencing
 
-0. **Free, today.** Flip `"coherence": false` on sextant (one line, reclaims 34 workflow-subagent
+0. ~~**Free, today.** Flip `"coherence": false` on sextant (one line, reclaims 34 workflow-subagent
    spawns). Land the `benefitDeltaGate` JSON contract + the contract test covering
    `regionBenefitDelta` (#10 residual). Fix the CLAUDE.md/README eval numbers and the three
-   sync-rescan overclaims.
+   sync-rescan overclaims.~~ **✅ DONE 2026-07-27.** Coherence flipped; the gate ships next to all
+   three deltas with the renderers reading it; eval numbers corrected at **four** sites (a fourth,
+   `CLAUDE.md:352`, was missed by the research pass); two of the three sync-rescan overclaims fixed
+   and the third resolved independently by `9a55d8f`.
 1. **Honesty defects with a 30-second FAIL-pre.** Non-git root: `gitAvailable` branch + gitignore
    filter on the non-git zoekt corpus (#2). Zoekt daemon **identity** guard + doctor action (#5).
    `clampBlock` (#7 S1). None of these need accrual, a fixture, or a schema bump.

@@ -378,7 +378,7 @@ never gets quoted. See [docs/010-benefit-proof.md](docs/010-benefit-proof.md).
 
 ## Eval Results
 
-21/21 self-eval queries pass on the sextant repo itself: MRR 0.900, nDCG 0.920, graph lift +0.012. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.755, nDCG 0.741, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
+21/21 self-eval queries pass on the sextant repo itself: MRR 0.904, nDCG 0.909, graph lift +0.015. External Vapor 4.121.4 benchmark (294 Swift files, 15 queries) — CLI path: MRR 0.811, nDCG 0.800 (`fixtures/vapor-baseline.json`); hook fast path: MRR 0.755, nDCG 0.741, 13/15 pass (`fixtures/vapor-hook-baseline.json`). Cross-project validated on Express (142 files), Flask (83 files), React (4,337 files). Swift synthetic corpus (`fixtures/swift-eval/`, 13 cases): MRR 0.917, nDCG 0.935.
 
 ### Running the eval suite
 
@@ -386,7 +386,7 @@ These all run from a clean clone in under a minute (Vapor benchmark excluded —
 
 ```bash
 npm run test:unit                                                                                         # full node:test unit suite
-npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.900, nDCG 0.920
+npm run test:eval                                                                                         # 21/21 self-eval, MRR 0.904, nDCG 0.909
 node scripts/eval-retrieve.js --dataset fixtures/mixed-eval/eval-dataset.json --root fixtures/mixed-eval  # 7/7 mixed-language fixture
 node scripts/eval-retrieve.js --dataset fixtures/swift-eval/eval-dataset.json --root fixtures/swift-eval  # 13/13 synthetic Swift fixture
 sextant eval-trajectory                                                                                   # real-behavior benefit lift (reads ~/.claude/projects)

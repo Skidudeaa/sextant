@@ -262,19 +262,15 @@ function renderTurnArms(lines, r) {
     const rate = rates[arm] == null ? "n/a" : `${(rates[arm] * 100).toFixed(1)}%`;
     lines.push(`    - ${arm.padEnd(10)} turn hit-rate ${rate}  (${c.hitTurns}/${c.turns} turns)`);
   }
-  const atVolume =
-    r.turnBenefitDelta != null &&
-    armedTurns >= HOLDBACK_MIN_TURNS &&
-    holdbackTurns >= HOLDBACK_MIN_TURNS;
+  // Read the gate, never re-derive it (docs/035 #10). This block and the
+  // per-OPEN block below used to compute the floors independently, which is how
+  // the cron drifted; the gate is now computed once in summarize().
+  const gate = r.turnBenefitDeltaGate || turnDeltaGate(r.turnBenefitDelta, counts);
+  const atVolume = gate.atVolume;
   if (atVolume) {
-    const ci = newcombeDiff95(
-      (counts.armed || {}).hitTurns || 0,
-      armedTurns,
-      (counts.holdback || {}).hitTurns || 0,
-      holdbackTurns
-    );
+    const ci = gate.ci;
     const pts = (r.turnBenefitDelta * 100).toFixed(1);
-    if (ci && (ci.lo <= 0) !== (ci.hi <= 0)) {
+    if (ci && gate.spansZero) {
       // Interval spans zero: the point estimate is not distinguishable from
       // "no effect", and may include harm. Say so instead of calling it causal.
       lines.push(
@@ -581,6 +577,15 @@ function summarize(events) {
     };
   };
 
+  // Hoisted so the per-OPEN gates can read the turn counts: the opens floor is
+  // NOT sufficient on its own (docs/033 Tier 3 #4), so both deltas below need
+  // the randomization-unit counts that only this summary carries.
+  const turnSummary = summarizeTurns(turns);
+  const retrievalBenefitDelta = benefitDelta(pathHitsByArm, pathMissesByArm);
+  const retrievalArmCounts = armCounts(pathHitsByArm, pathMissesByArm);
+  const regionDelta = benefitDelta(regionHitsByArm, regionMissesByArm);
+  const regionCounts = armCounts(regionHitsByArm, regionMissesByArm);
+
   return {
     eventCount: events.length,
     firstTs,
@@ -641,16 +646,23 @@ function summarize(events) {
       // TURN-LEVEL (docs/033 Tier 1): the session-shape-independent read of the
       // same substrate. Lead with this; openPrecision above is the secondary,
       // session-shape-SENSITIVE view kept for continuity with prior reports.
-      ...summarizeTurns(turns),
+      ...turnSummary,
       turnUnscoredOpens,
       // HOLDBACK ARM split. benefitDelta = armed openPrecision − holdback
       // openPrecision: the causal lift the injection buys. null until BOTH arms
       // have data (a holdback-disabled install only ever has the armed arm).
       openPrecisionByArm: armPrecision(pathHitsByArm, pathMissesByArm),
-      benefitDelta: benefitDelta(pathHitsByArm, pathMissesByArm),
+      benefitDelta: retrievalBenefitDelta,
+      // The gate travels WITH the number (docs/035 #10) so a --json consumer
+      // cannot read one without the other.
+      benefitDeltaGate: openDeltaGate(
+        retrievalBenefitDelta,
+        retrievalArmCounts,
+        turnSummary.turnCountsByArm
+      ),
       // Raw per-arm scored-open counts so a consumer (e.g. the holdback-benefit
       // cron) can gate on VOLUME, not just read a rate that's unstable at low n.
-      armCounts: armCounts(pathHitsByArm, pathMissesByArm),
+      armCounts: retrievalArmCounts,
       // REGION LANE (docs/025 Phase A): region-level open attribution. regionMiss
       // = right file, wrong region — the reclaimable-navigation headroom the
       // Phase-A kill criterion reads. regionPrecision null until an edit of a
@@ -660,8 +672,15 @@ function summarize(events) {
       regionPrecision: regionHits + regionMisses ? regionHits / (regionHits + regionMisses) : null,
       regionHitsBySource: Object.fromEntries(regionHitsBySource),
       regionPrecisionByArm: armPrecision(regionHitsByArm, regionMissesByArm),
-      regionBenefitDelta: benefitDelta(regionHitsByArm, regionMissesByArm),
-      regionArmCounts: armCounts(regionHitsByArm, regionMissesByArm),
+      regionBenefitDelta: regionDelta,
+      // The lane docs/035 found ungated and unmentioned: regionBenefitDelta had
+      // the identical defect as benefitDelta and no reviewer had named it.
+      regionBenefitDeltaGate: openDeltaGate(
+        regionDelta,
+        regionCounts,
+        turnSummary.turnCountsByArm
+      ),
+      regionArmCounts: regionCounts,
     },
     // Blast-radius lane (docs/016 Sprint 1): post-edit additionalContext
     // injections.  dependentsSurfaced/cochangeSurfaced are path VOLUMES (how
@@ -744,6 +763,101 @@ function benefitDelta(hitsByArm, missesByArm) {
   return null;
 }
 
+// THE GATE, COMPUTED ONCE (docs/035 #10).
+//
+// Every `*BenefitDelta` in --json now carries a sibling `*BenefitDeltaGate`.
+// Before this the gate lived in THREE independent re-implementations — the
+// human open-precision render, the human turn render, and
+// scripts/check-holdback-benefit.sh — and had already diverged once: the cron
+// gated on scored OPENS only and would have published
+// "BENEFIT READY … benefitDelta = -41.5pts" off ONE randomized holdback turn.
+// A --json consumer could read the bare number with nothing binding it to the
+// floors except prose in CLAUDE.md. Shipping the flag NEXT TO the number is the
+// structural fix; prose is not a contract. test/telemetry-json-contract.test.js
+// asserts by reflection that no delta can be added without one.
+//
+// status: NO_ARM     — the holdback arm never ran, there is no contrast at all
+//         DORMANT    — a contrast exists but at least one floor is unmet
+//         SPANS_ZERO — at volume, but the 95% interval includes no-effect
+//         AT_VOLUME  — at volume and the interval excludes zero
+const DELTA_STATUS = {
+  NO_ARM: "NO_ARM",
+  DORMANT: "DORMANT",
+  SPANS_ZERO: "SPANS_ZERO",
+  AT_VOLUME: "AT_VOLUME",
+};
+
+// Per-OPEN gate. Requires BOTH floors (docs/033 Tier 3 #4): at ~28 opens/turn an
+// opens-only floor of 30 clears after ONE randomized turn per arm.
+//
+// ci is deliberately null here. Within-turn opens are CORRELATED, so a binomial
+// interval over opens would understate its own width — the exact analysis-unit
+// error this gate exists to prevent. The interval lives on the turn gate, where
+// the observation unit is the unit `decideArm` randomizes at.
+function openDeltaGate(delta, armCountsByArm, turnCountsByArm) {
+  const a = armCountsByArm || {};
+  const t = turnCountsByArm || {};
+  const armedScored = (a.armed || {}).scored || 0;
+  const holdbackScored = (a.holdback || {}).scored || 0;
+  const armedTurns = (t.armed || {}).turns || 0;
+  const holdbackTurns = (t.holdback || {}).turns || 0;
+  const atVolume =
+    delta != null &&
+    armedScored >= HOLDBACK_MIN_SCORED &&
+    holdbackScored >= HOLDBACK_MIN_SCORED &&
+    armedTurns >= HOLDBACK_MIN_TURNS &&
+    holdbackTurns >= HOLDBACK_MIN_TURNS;
+  return {
+    atVolume,
+    status:
+      delta == null
+        ? DELTA_STATUS.NO_ARM
+        : atVolume
+          ? DELTA_STATUS.AT_VOLUME
+          : DELTA_STATUS.DORMANT,
+    armedScored,
+    holdbackScored,
+    armedTurns,
+    holdbackTurns,
+    minScored: HOLDBACK_MIN_SCORED,
+    minTurns: HOLDBACK_MIN_TURNS,
+    ci: null,
+    spansZero: null,
+  };
+}
+
+// Turn-level gate. The floor counts TURNS, and once it clears the Newcombe
+// interval decides whether the delta may call itself causal at all — 30/arm is
+// an ACCRUAL floor (MDE roughly +33 to +35 pts), not statistical power.
+function turnDeltaGate(delta, countsByArm) {
+  const c = countsByArm || {};
+  const armedTurns = (c.armed || {}).turns || 0;
+  const holdbackTurns = (c.holdback || {}).turns || 0;
+  const armedHitTurns = (c.armed || {}).hitTurns || 0;
+  const holdbackHitTurns = (c.holdback || {}).hitTurns || 0;
+  const atVolume =
+    delta != null && armedTurns >= HOLDBACK_MIN_TURNS && holdbackTurns >= HOLDBACK_MIN_TURNS;
+  const ci = atVolume
+    ? newcombeDiff95(armedHitTurns, armedTurns, holdbackHitTurns, holdbackTurns)
+    : null;
+  // Same test the human render uses: lo and hi on opposite sides of zero.
+  const spansZero = ci ? (ci.lo <= 0) !== (ci.hi <= 0) : null;
+  let status = DELTA_STATUS.DORMANT;
+  if (delta == null) status = DELTA_STATUS.NO_ARM;
+  else if (atVolume) status = spansZero ? DELTA_STATUS.SPANS_ZERO : DELTA_STATUS.AT_VOLUME;
+  return {
+    atVolume,
+    status,
+    armedTurns,
+    holdbackTurns,
+    armedHitTurns,
+    holdbackHitTurns,
+    minTurns: HOLDBACK_MIN_TURNS,
+    ci: ci ? { lo: ci.lo, hi: ci.hi } : null,
+    spansZero,
+  };
+}
+
 // TURN-LEVEL OUTCOME SUMMARY (docs/033 Tier 1 #1 and #3).
 //
 // turnHitRate = turns with >=1 surfaced-file open / turns scored. Bounded in
@@ -801,6 +915,7 @@ function summarizeTurns(turns) {
     turnHitRateByArm: rateByArm,
     turnCountsByArm: countsByArm,
     turnBenefitDelta: delta,
+    turnBenefitDeltaGate: turnDeltaGate(delta, countsByArm),
   };
 }
 
@@ -2503,15 +2618,12 @@ function printSummary(rootAbs, sum, contributions) {
     // per-open figure stays (it is a real descriptive number) but it may not
     // call itself causal until the unit the arm was actually randomized at
     // clears its own floor.
-    const turnCounts = r.turnCountsByArm || {};
-    const armedTurnsForDelta = (turnCounts.armed || {}).turns || 0;
-    const holdbackTurnsForDelta = (turnCounts.holdback || {}).turns || 0;
-    const deltaAtVolume =
-      r.benefitDelta != null &&
-      armedScored >= HOLDBACK_MIN_SCORED &&
-      holdbackScored >= HOLDBACK_MIN_SCORED &&
-      armedTurnsForDelta >= HOLDBACK_MIN_TURNS &&
-      holdbackTurnsForDelta >= HOLDBACK_MIN_TURNS;
+    // Read the gate, never re-derive it (docs/035 #10) — see openDeltaGate.
+    const openGate =
+      r.benefitDeltaGate || openDeltaGate(r.benefitDelta, counts, r.turnCountsByArm);
+    const armedTurnsForDelta = openGate.armedTurns;
+    const holdbackTurnsForDelta = openGate.holdbackTurns;
+    const deltaAtVolume = openGate.atVolume;
     if (!deltaAtVolume) {
       lines.push(
         `  caveat: baseline pending (no injection-OFF arm yet) AND precision-flavored — ` +
