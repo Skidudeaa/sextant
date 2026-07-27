@@ -2,6 +2,16 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-07-27 — The sync rescue reaches the retrieval lane (docs/033 "Still open")
+
+The Option-5 adaptive sync rescan shipped inside the static-summary path only. `hook refresh` called bare `checkFreshness` and took the async arm unconditionally, so a content-stale *code* prompt still lost its orientation on a repo whose own recorded history proves a rescan costs about two seconds — the blackout the adaptive arm exists to prevent, arriving on exactly the turns that need orientation most.
+
+It now runs the same decision the static path does — same gate, same version-only bypass, same clamped timeout, same post-scan re-verify, same telemetry event, tagged with the lane that attempted it. What differs is what a rescue must then undo: the graph was already queried, against the pre-rescan graph, concurrently with zoekt. Keeping those results would serve pre-rescan structure with post-rescan confidence, strictly worse than the blackout it replaced, so a rescue re-runs graph retrieval. Zoekt is left alone; it searches the working tree, not the graph, so staleness never invalidated it.
+
+Building the fixture showed the defect was worse than filed. With the lane off, a code prompt naming a real symbol does not degrade to a stale retrieval block — the stale graph has never seen the new file, the merged set comes back empty, the hook falls back to the static summary, and the static gate serves the minimal body. The turn blacks out completely. Both states are now locked, and the rescue's load-bearing assertion is the new file's `exported_symbol` provenance: text search finds the file too, so only a graph signal proves the exports table was rebuilt and re-read.
+
+The lane deliberately does not emit the static path's read denominators. It never emits a matching `fresh_hit`, so a one-sided `stale_hit` would bias the reported freshness stale rate upward by exactly the turns the rescue handled; its own `retrieval.stale_hit` carries the sync marker instead, recorded before the flags clear so a rescued turn never vanishes from the denominator it belonged to. A rescued turn does become holdback-eligible — it is genuinely fresh — but this remains a blackout fix and not an accrual lever: on the churny repos where staleness actually suppresses eligibility, the gate refuses outright.
+
 ## 2026-07-27 — The fleet A/B tells you when it lands
 
 The daily holdback cron read one root, gated on the per-open floor that the metrics review had just demoted, and wrote to a log file nobody opens — three ways of being correct at nobody. It now pools the repos listed in `~/.claude/sextant-fleet-roots`, gates on **both** floors (≥30 scored turns *and* ≥30 scored opens per arm — turns are the unit assignment randomizes at, and at ~28 opens per turn an opens-only floor clears after a single turn per arm), and reports through the statusline, the one channel the user actually sees. A green `ready` banner announces the crossing once and is dismissed by deleting it; a yellow `stall` banner fires when the holdback arm is still empty after two weeks, which is not a patience state — content-stale turns are forced armed by design, so on a churny repo most turns never reach the coin flip and waiting cannot fix it.

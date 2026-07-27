@@ -153,7 +153,11 @@ Do not chase it with more dogfooding.
    Both samples are far too thin to conclude anything, but if the armed turn hit-rate
    really is near zero, no delta is detectable at any n. Re-read past ~150 surfaced
    rows before scaling the experiment.
-4. **Sync rescan does not reach the retrieval lane** — `hook-refresh.js:690` calls
+4. ~~**Sync rescan does not reach the retrieval lane**~~ — **DONE 2026-07-27.** Shipped as
+   the product fix, not an eligibility lever, exactly as scoped below. Building the fixture
+   showed the defect was worse than filed: with the lane off the turn does not degrade to a
+   stale block, it blacks out COMPLETELY (empty merged set → `empty_fallback` → static
+   minimal body). See docs/033 "Still open". Original note: (`hook-refresh.js:690` calls
    bare `checkFreshness` and only ever takes the async arm (`:738`); the Option-5 sync
    arm lives in `lib/cli.js:applyFreshnessGate`. So a content-stale *code* prompt with
    results still gets the degraded text-only block. Ship it as a **product** fix

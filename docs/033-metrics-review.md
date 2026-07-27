@@ -383,13 +383,36 @@ verified to fail pre-change; see that commit message for the mechanisms.
   at or below chance — on 38 surfaced rows (vs somaNotes 2.61× on 1446). Both samples are
   far too thin to conclude anything, but if the armed turn hit-rate really is near zero, no
   delta is detectable at any n. Re-read past ~150 surfaced rows before scaling the A/B.
-- **Sync rescan does not reach the retrieval lane.** `hook-refresh.js` calls bare
-  `checkFreshness` and only ever takes the async arm; the Option-5 sync arm lives in
-  `lib/cli.js:applyFreshnessGate`, so a content-stale *code* prompt that has results still
-  gets the degraded text-only block. Real, and worth shipping as a **product** fix
-  (blackouts on code turns) — but explicitly **not** a holdback-eligibility lever: on
-  `/root/somaNotes`, where 97% of turns are content-stale, `shouldSyncRescan` returns
-  `{sync:false, p95:99452}` and would never fire.
+- ~~**Sync rescan does not reach the retrieval lane.**~~ — **SHIPPED 2026-07-27.**
+  `hook-refresh.js` now runs the same Option-5 decision the static path does: same
+  `shouldSyncRescan`, same version-only bypass, same clamped timeout, same post-scan
+  re-verify, same `freshness.sync_rescan` event (tagged `lane:"retrieval"`). A rescue
+  additionally **re-runs graph retrieval** — the graph was queried before the rescan
+  rebuilt it, and serving those results under a fresh verdict would assert pre-rescan
+  structure with post-rescan confidence, strictly worse than the blackout it replaced.
+  Zoekt is deliberately not re-run (it searches the working tree, not the graph).
+
+  **The fixture showed the bug was worse than filed.** With the lane off, a content-stale
+  code prompt naming a real symbol does not merely degrade to a stale retrieval block: the
+  stale graph has never seen the new file, so the merged set is EMPTY, the hook takes
+  `empty_fallback` to the static summary, and the static gate serves the minimal body. The
+  turn blacks out completely. Both states are locked by `test/sync-rescan.test.js`, and the
+  rescue's load-bearing assertion is the new file's `exported_symbol` provenance — text
+  search finds the file too, so only a graph signal proves the exports table was rebuilt
+  and re-read. Mutation-checked.
+
+  Telemetry deliberately does **not** emit `freshness.stale_hit`/`fresh_hit` from this
+  lane: those are the static path's read denominators, this lane never emits a matching
+  `fresh_hit`, and a one-sided `stale_hit` would bias the reported freshness stale rate
+  upward by exactly the rescued turns. The lane's own `retrieval.stale_hit` carries
+  `rescanState:"sync"` instead — recorded BEFORE the flags clear, so rescuing a turn never
+  shrinks the denominator it was counted in.
+
+  **Still not an eligibility lever.** A rescued turn is genuinely fresh and therefore does
+  become holdback-eligible — correct, not a side effect to suppress. But it will not move
+  the A/B: on the churny repos where content-staleness actually suppresses eligibility,
+  `shouldSyncRescan` returns `{sync:false}` (somaNotes p95 99452ms). Ship counted as
+  blackout reduction; do not count it as accrual.
 
 ### Explicitly not planned
 

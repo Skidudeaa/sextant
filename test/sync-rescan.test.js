@@ -18,7 +18,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { execSync } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 
 const freshness = require("../lib/freshness");
 const graph = require("../lib/graph");
@@ -441,5 +441,136 @@ describe("applyFreshnessGate — sync rescue end-to-end", () => {
       .split("\n").filter(Boolean).map((l) => JSON.parse(l));
     assert.equal(events.filter((e) => e.name === "freshness.sync_rescan").length, 0);
     assert.equal(events.filter((e) => e.name === "freshness.blackout_turn").length, 1);
+  });
+});
+
+// ─── Retrieval lane (docs/033 "Still open" #4) ─────────────────────────────
+//
+// The Option-5 sync arm shipped inside lib/cli.js:applyFreshnessGate — the
+// STATIC summary path only. `hook refresh` called bare checkFreshness and took
+// the async arm unconditionally, so a content-stale CODE prompt with real
+// results still got the degraded text-only block on a repo whose own history
+// proves a rescan takes ~1.6s.
+//
+// The load-bearing assertion is NOT "the warning disappeared" — a rescue that
+// merely relabelled the pre-rescan graph would pass that while serving
+// pre-rescan structure with post-rescan confidence, which is strictly worse
+// than the blackout it replaced. So the fixture makes the NEW file's graph
+// signal the evidence: `exported_symbol` can only come from the exports table
+// of a graph rebuilt AFTER the file was committed.
+describe("hook refresh — sync rescue on the retrieval lane", () => {
+  const SESSION = "sync-lane-test";
+
+  // Returns { stdout, injected, events } for a content-stale code prompt.
+  function stageStaleRepoAndRun(syncEnv) {
+    const root = mkRoot();
+    fs.writeFileSync(path.join(root, "a.js"), "const x = require('./b');\n");
+    fs.writeFileSync(path.join(root, "b.js"), "module.exports = 1;\n");
+    execSync("git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm init", { cwd: root });
+    execSync(`node ${BIN} scan --root ${root} --force`, { stdio: "ignore" });
+
+    // A file the PRE-rescan graph has never seen. Committing it moves HEAD, so
+    // the turn is content-stale — and the graph's exports table cannot know
+    // `zebrafishHandler` until it is rebuilt.
+    fs.writeFileSync(
+      path.join(root, "zebrafish.js"),
+      "function zebrafishHandler() { return 42; }\nmodule.exports = { zebrafishHandler };\n"
+    );
+    execSync("git add -A && git -c user.email=t@t -c user.name=t commit -qm add-zebrafish", { cwd: root });
+
+    // Fast recorded history so the stats gate would independently choose sync.
+    seedScanDurations(root, [2000, 2000, 2000, 2000, 2000]);
+
+    const res = spawnSync(process.execPath, [BIN, "hook", "refresh"], {
+      cwd: root,
+      input: JSON.stringify({ prompt: "where is zebrafishHandler defined", session_id: SESSION }),
+      encoding: "utf8",
+      timeout: 40000,
+      env: {
+        ...process.env,
+        // Deterministic 8s kill window: this spawns a REAL rescan and the full
+        // parallel suite stretches even a 3-file scan (same reasoning as the
+        // applyFreshnessGate subtest above). "0" exercises the fall-through.
+        SEXTANT_SYNC_RESCAN: syncEnv,
+        SEXTANT_BIN: BIN,
+        // Pin the arm: a holdback turn withholds the block entirely, which
+        // would make this assert on the wrong thing on ~half of runs.
+        SEXTANT_HOLDBACK_PCT: "0",
+        SEXTANT_HOLDBACK_FORCE: "armed",
+      },
+    });
+
+    const injPath = path.join(root, ".planning", "intel", `.last_injected_paths.retrieval.${SESSION}`);
+    let injected = null;
+    try { injected = JSON.parse(fs.readFileSync(injPath, "utf8")); } catch {}
+    let events = [];
+    try {
+      events = fs.readFileSync(path.join(root, ".planning", "intel", "telemetry.jsonl"), "utf8")
+        .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    } catch {}
+    return { root, stdout: res.stdout || "", injected, events };
+  }
+
+  it("rescues a content-stale code turn and re-queries the REBUILT graph", () => {
+    const { stdout, injected, events } = stageStaleRepoAndRun("1");
+
+    assert.doesNotMatch(stdout, /index stale/, "a rescued turn must not carry the stale warning");
+    assert.ok(injected, "the rescued turn must persist an injected set");
+    assert.equal(injected.stale, false, "post-rescue the turn is not content-stale");
+
+    // THE load-bearing assertion: a graph signal for a file the pre-rescan
+    // graph could not have known. Text search would have found the file too —
+    // only `exported_symbol` proves the exports table was rebuilt and re-read.
+    const zebra = (injected.paths || []).find((p) => /zebrafish\.js$/.test(p.path));
+    assert.ok(zebra, `zebrafish.js must be surfaced; got ${JSON.stringify(injected.paths)}`);
+    assert.equal(zebra.source, "exported_symbol",
+      "the rescue must re-run graph retrieval, not relabel the pre-rescan result");
+
+    const sync = events.filter((e) => e.name === "freshness.sync_rescan");
+    assert.equal(sync.length, 1, "exactly one sync attempt");
+    assert.equal(sync[0].ok, true);
+    assert.equal(sync[0].lane, "retrieval", "the attempt must be attributable to this lane");
+
+    // The read WAS stale: dropping the event because we rescued it would shrink
+    // the lane's stale denominator by exactly the turns the rescue handled.
+    const staleHits = events.filter((e) => e.name === "retrieval.stale_hit");
+    assert.equal(staleHits.length, 1);
+    assert.equal(staleHits[0].rescanState, "sync");
+
+    // This lane must NOT emit the static path's read denominators — it never
+    // emits a matching fresh_hit, so a stale_hit here would bias the reported
+    // freshness stale rate upward by exactly the rescued turns.
+    assert.equal(events.filter((e) => e.name === "freshness.stale_hit").length, 0);
+    assert.equal(events.filter((e) => e.name === "freshness.blackout_turn").length, 0);
+  });
+
+  // THE CONTROL, and the sharper statement of the bug. With the lane off this
+  // turn does not merely degrade to a stale retrieval block — it blacks out
+  // COMPLETELY. The stale graph has never seen zebrafish.js, a temp repo has no
+  // zoekt index, so the merged set is empty, the hook takes empty_fallback to
+  // the static summary, and the static gate serves the minimal body. A code
+  // prompt naming a real symbol gets zero orientation on a repo whose own
+  // history says the rebuild costs ~2s. That is what the fix buys.
+  it("FALL-THROUGH: with the lane disabled, the same turn blacks out entirely", () => {
+    const { root, stdout, injected, events } = stageStaleRepoAndRun("0");
+
+    assert.match(stdout, /Structural claims unavailable/, "the un-rescued turn blacks out");
+    assert.doesNotMatch(stdout, /<codebase-retrieval>/, "no retrieval block survives");
+    assert.equal(injected, null, "nothing was surfaced, so nothing is persisted");
+
+    assert.equal(events.filter((e) => e.name === "freshness.sync_rescan").length, 0,
+      "a disabled lane must not attempt a sync rescan");
+    const staleHits = events.filter((e) => e.name === "retrieval.stale_hit");
+    assert.equal(staleHits.length, 1);
+    assert.equal(staleHits[0].rescanState, undefined,
+      "the async arm's stale_hit carries no sync marker");
+    assert.ok(events.some((e) => e.name === "freshness.blackout_turn"),
+      "the static fallback records the blackout the rescue prevents");
+    // The async arm still fires: the index must still get refreshed eventually.
+    assert.ok(
+      fs.existsSync(path.join(root, ".planning", "intel", ".rescan_pending")) ||
+      events.some((e) => e.name === "scan.completed" && e.trigger === "freshness_gate"),
+      "the async rescan arm must still run when the sync lane is off"
+    );
   });
 });

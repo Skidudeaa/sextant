@@ -152,6 +152,72 @@ function sameValidatedRepo(validated, current) {
 }
 
 /**
+ * Option-5 sync rescue for the RETRIEVAL lane (docs/033 "Still open" #4).
+ *
+ * Mirrors lib/cli.js:applyFreshnessGateDetailed's adaptive arm exactly — same
+ * shouldSyncRescan decision, same versionOnly bypass, same clamped timeout,
+ * same post-scan re-verify, same `freshness.sync_rescan` event shape — and then
+ * does the one thing the static path does not need: re-queries the graph, which
+ * was read before the rescan rebuilt it.
+ *
+ * Returns null on every non-rescue path (no decision, scan failed/timed out,
+ * tree moved again mid-scan, graph re-query threw). Null means the caller keeps
+ * its existing stale handling byte-identical — the async arm still runs, the
+ * blackout still renders. Never throws: the hook must survive any failure here.
+ *
+ * DELIBERATELY DOES NOT EMIT `freshness.stale_hit` / `fresh_hit`. Those are the
+ * STATIC path's read denominators; this lane has its own (`retrieval.stale_hit`
+ * over classifiedRetrieve). Emitting a stale_hit here without a matching
+ * fresh_hit — this lane never emits one — would bias the reported freshness
+ * stale rate upward by exactly the rescued turns. `freshness.sync_rescan` IS
+ * emitted: it is an attempt counter, not a read denominator, so pooling
+ * attempts from both lanes is accurate.
+ */
+async function trySyncRescue(root, freshnessResult, runGraphRetrieval) {
+  try {
+    const freshnessLib = require("../lib/freshness");
+    // Version-only staleness: the scanner/schema stamp moved but HEAD and the
+    // status fingerprint did not — WE invalidated the graph by shipping. Not
+    // read off `reason` (single-valued; version mismatches win the ordering),
+    // so a version bump coinciding with a checkout is correctly excluded.
+    const versionOnly =
+      (freshnessResult.reason === "scanner_version_changed" ||
+        freshnessResult.reason === "schema_version_changed") &&
+      freshnessResult.contentChanged === false;
+    const decision = freshnessLib.shouldSyncRescan(root, { versionOnly });
+    if (!decision || !decision.sync) return null;
+
+    const syncResult = freshnessLib.syncRescan(root, decision.timeoutMs);
+    try {
+      recordEvent(root, "freshness.sync_rescan", {
+        ok: syncResult.state === "completed",
+        state: syncResult.state,
+        durationMs: syncResult.durationMs ?? null,
+        gate: decision.reason || "stats",
+        // Which lane attempted it. The static path's attempts carry no `lane`,
+        // so an absent field reads as "summary" without rewriting history.
+        lane: "retrieval",
+        ...(syncResult.timedOut ? { timedOut: true } : {}),
+      });
+    } catch {}
+    if (syncResult.state !== "completed") return null;
+
+    // Re-verify rather than assume. If the tree moved again while the scan ran,
+    // the recheck stays stale and the turn falls through to its normal handling.
+    const recheck = await freshnessLib.checkFreshness(root);
+    if (!recheck || recheck.fresh !== true) return null;
+
+    // The graph read at the top of the pipeline is now the PRE-rescan graph.
+    // Serving it under a fresh verdict would assert pre-rescan structure with
+    // post-rescan confidence — worse than the blackout this replaces.
+    const graphResults = await runGraphRetrieval();
+    return { freshness: recheck, graphResults };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Inject the static summary.md if it has changed since last injection.
  * Routed through applyFreshnessGate so stale-state graph.db data never
  * reaches Claude as structural claims; on stale, the function returns a
@@ -639,19 +705,25 @@ async function run() {
   // loadDb() just reads the SQLite file — 51ms cold, 0ms warm. This saves
   // ~90ms compared to going through intel.init() on cold start.
   // Zoekt just reads daemon.json and does an HTTP request.
+  // Factored so the sync-rescue path below can re-run it against the REBUILT
+  // graph with byte-identical options — a rescue that re-queried with different
+  // options would silently change ranking on exactly the turns it rescued.
+  const runGraphRetrieval = async () => {
+    const db = await require("../lib/graph").loadDb(root);
+    if (!db) return { files: [], warnings: [] };
+    return require("../lib/graph-retrieve").graphRetrieve(
+      db,
+      classification.terms,
+      // docs/013 move 1: on a borderline turn (classifier barely fired)
+      // a mid-word path guess is 1.4% noise — drop it.  Confident turns
+      // keep loose matches: that's where the typo rescues live.
+      { borderline: classification.confidence <= 0.4 }
+    );
+  };
+
   const graphPromise = (async () => {
     try {
-      const db = await require("../lib/graph").loadDb(root);
-      if (db) {
-        graphResults = require("../lib/graph-retrieve").graphRetrieve(
-          db,
-          classification.terms,
-          // docs/013 move 1: on a borderline turn (classifier barely fired)
-          // a mid-word path guess is 1.4% noise — drop it.  Confident turns
-          // keep loose matches: that's where the typo rescues live.
-          { borderline: classification.confidence <= 0.4 }
-        );
-      }
+      graphResults = await runGraphRetrieval();
     } catch {
       // Graph failed — graphResults stays empty
     }
@@ -716,8 +788,58 @@ async function run() {
   // HEAD/status delta INDEPENDENT of which reason fired, so a coincident
   // version+content turn is correctly content-stale. A PURE version bump still has
   // contentChanged=false → no suppression (the cried-wolf guard is preserved).
-  const stale = freshness.fresh === false;
-  const contentStale = stale && freshness.contentChanged === true;
+  let stale = freshness.fresh === false;
+  let contentStale = stale && freshness.contentChanged === true;
+
+  // SYNC RESCUE ON THE RETRIEVAL LANE (docs/033 "Still open" #4). The Option-5
+  // adaptive sync arm shipped inside lib/cli.js:applyFreshnessGate — the STATIC
+  // summary path. This lane called bare checkFreshness and only ever took the
+  // async arm, so a content-stale *code* prompt that had real results still got
+  // the degraded text-only block with structural authority stripped, on a repo
+  // whose own history proves a rescan takes ~1.6s. That is the blackout the
+  // adaptive arm exists to prevent, arriving on the turns that need orientation
+  // most.
+  //
+  // Same decision, same telemetry event, same clamped timeout as the static
+  // path — this is a routing fix, not a second policy. Everything that makes
+  // the static arm safe applies unchanged: per-repo evidence, the version-only
+  // bypass, the env kill switch, the failure cooldown, the post-scan re-verify.
+  //
+  // WHAT IS DIFFERENT HERE: the graph was already queried, against the STALE
+  // graph, concurrently with zoekt. A rescue that kept those results would
+  // serve pre-rescan structure with post-rescan confidence — strictly worse
+  // than the blackout it replaced. So a rescue re-runs graph retrieval. Zoekt
+  // is deliberately NOT re-run: it searches the working tree, not the graph, so
+  // staleness never invalidated it, and a second round trip would add latency
+  // for identical hits.
+  //
+  // NOT AN ELIGIBILITY LEVER (docs/034): a rescued turn is genuinely fresh, so
+  // it does become holdback-eligible — that is correct, not a side effect to
+  // suppress. But it will not move the A/B: shouldSyncRescan reads per-repo scan
+  // history, and on the churny repos where content-staleness actually suppresses
+  // eligibility it returns {sync:false} (somaNotes p95 99452ms). Ship this for
+  // the blackouts; do not count it as accrual.
+  if (stale) {
+    const rescue = await trySyncRescue(root, freshness, runGraphRetrieval);
+    if (rescue) {
+      // Record the stale READ before clearing the flags. The turn genuinely
+      // found stale state — dropping the event because we rescued it would
+      // shrink the retrieval lane's stale denominator by exactly the turns the
+      // rescue handled, making the lane look healthier the more often it fires.
+      // rescanState mirrors the static path's marker so a rescue is one grep.
+      try {
+        recordEvent(root, "retrieval.stale_hit", {
+          reason: freshness.reason,
+          contentChanged: freshness.contentChanged === true,
+          rescanState: "sync",
+        });
+      } catch {}
+      freshness = rescue.freshness;
+      stale = false;
+      contentStale = false;
+      graphResults = rescue.graphResults;
+    }
+  }
 
   if (stale) {
     // Mirror the static-summary path: record the stale read and trigger the
