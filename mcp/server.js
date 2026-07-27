@@ -13,6 +13,7 @@ const graph = require("../lib/graph");
 const { retrieve } = require("../lib/retrieve");
 const { normalizeRelPath } = require("../lib/utils");
 const { loadRepoConfig } = require("../lib/config");
+const { recordEvent } = require("../lib/telemetry");
 
 // --- Tool definitions ---------------------------------------------------
 
@@ -164,6 +165,24 @@ const TOOLS = [
 
 let _root = null;
 let _initialized = false;
+
+// MCP INVOCATION TELEMETRY (docs/035 #3).
+//
+// Root resolution is the trap here. This server resolves the repo from
+// process.cwd(), and `_root` is set inside ensureInit() — which runs INSIDE each
+// handler, so at dispatch time it can still be null. Recording against the wrong
+// root writes another repo's jsonl; recording against a directory that is not a
+// sextant install would CREATE state there, which is the self-bootstrap failure
+// the 101 GB home-dir incident taught. So: prefer the initialized root, fall
+// back to cwd, and write only when `.planning/intel` ALREADY exists. Never
+// throws — telemetry must not be able to break a tool call.
+function recordMcp(tool, fields) {
+  try {
+    const root = _root || process.cwd();
+    if (!require("fs").existsSync(path.join(root, ".planning", "intel"))) return;
+    recordEvent(root, "mcp.invoked", Object.assign({ tool }, fields || {}));
+  } catch {}
+}
 
 async function ensureInit() {
   const cwd = process.cwd();
@@ -646,6 +665,14 @@ async function dispatch(method, params) {
   }
 
   if (method === "tools/list") {
+    // The DENOMINATOR (docs/035 #3). This surface was completely unmeasured —
+    // `grep -c recordEvent mcp/server.js` was 0, which is why nobody noticed
+    // that a transcript census finds ~1 sextant tool invocation against
+    // hundreds of definition loads. Counting loads separately from calls is the
+    // whole point: 9 tool definitions are paid for on EVERY session that wires
+    // this server, and the question "is that rent worth it" cannot be answered
+    // from call counts alone.
+    recordMcp("(tools/list)", { count: TOOLS.length });
     return { tools: TOOLS };
   }
 
@@ -654,6 +681,7 @@ async function dispatch(method, params) {
     const toolArgs = params.arguments || {};
     const handler = toolHandlers[toolName];
     if (!handler) {
+      recordMcp(String(toolName || "(unknown)"), { ok: false, reason: "unknown_tool" });
       return {
         content: [{ type: "text", text: `Unknown tool: ${toolName}` }],
         isError: true,
@@ -662,9 +690,13 @@ async function dispatch(method, params) {
     // WHY: MCP protocol requires tool-level failures to be returned as isError
     // in the response body, NOT as JSON-RPC error responses. JSON-RPC errors
     // signal protocol failures (malformed request, server crash), not tool failures.
+    const startedAt = Date.now();
     try {
-      return await handler(toolArgs);
+      const result = await handler(toolArgs);
+      recordMcp(toolName, { ok: true, durationMs: Date.now() - startedAt });
+      return result;
     } catch (err) {
+      recordMcp(toolName, { ok: false, durationMs: Date.now() - startedAt, reason: "handler_error" });
       return {
         content: [{ type: "text", text: err.message || String(err) }],
         isError: true,
@@ -735,7 +767,12 @@ function startServer() {
 }
 
 // Export internals for testing
-module.exports = { dispatch, TOOLS, toolHandlers, startServer };
+// TOOL_NAMES is consumed by lib/orient.js so the injected "MCP server exposes"
+// line is DERIVED from what this server actually registers rather than being a
+// hardcoded string that silently rots when the tool set changes.
+const TOOL_NAMES = TOOLS.map((t) => t.name);
+
+module.exports = { dispatch, TOOLS, TOOL_NAMES, toolHandlers, startServer };
 
 // Auto-start when run directly or via `sextant mcp`
 if (require.main === module) {

@@ -942,11 +942,53 @@ it produces 14.6× more opens.
    the same way: the leak assertion was vacuous until the fixture used a case-distinctive name that
    actually clears Layer 1's docs/012 gate, and a filename that cannot be reached by Layer 4
    path-match.
-6. **Subtraction.** MCP `recordEvent` → 30 days → `defer_loading` → cut (#3). D–F disposition on
+6. **Subtraction.** ~~MCP `recordEvent` → 30 days → `defer_loading` → cut (#3). D–F disposition on
    surface-area grounds (#8). `swift_relations` (92 rows fleet-wide, zero production row-level
    readers — keep `swift_declarations` and the health counter, drop ~350 lines of the most
    parser-fragile code). Measure `reexports` (19 rows, one repo) on the next three onboarded repos
-   before cutting it.
+   before cutting it.~~ **PARTIALLY DONE 2026-07-27. Two claims REFUTED by fleet measurement;
+   nothing was deleted.**
+
+   **✅ MCP instrumented.** `mcp.invoked {tool, ok, durationMs}` on every handler via the single
+   `tools/call` dispatch, plus `tool: "(tools/list)"` with the tool count — the definition-LOAD
+   denominator, which is the number the cut/defer decision actually turns on and which call counts
+   alone cannot supply. Verified by driving the server. **Root-resolution trap avoided:** the server
+   resolves its repo from `process.cwd()` and `_root` is set *inside* each handler, so it is null at
+   dispatch time; recording blind would write another repo's jsonl, or CREATE `.planning/intel` in
+   an arbitrary directory — the 101 GB self-bootstrap failure. It writes only when the state dir
+   already exists. **Do not cut before the 30 days of data this now collects.**
+
+   **✅ A latent honesty defect found while checking the cut's blast radius.** `lib/orient.js:139`
+   *hardcoded* `"This repo's MCP server exposes: sextant_search, sextant_explain, sextant_related,
+   sextant_health."` as a string literal — naming **4 of the 9** registered tools, so the injected
+   "fact" was already incomplete, and deferring or removing any tool would have made it false. Now
+   derived from `mcp/server.js:TOOL_NAMES` and filtered against what is really registered, so a
+   rename cannot leave a phantom behind. This is the exact confidently-stale assertion the project
+   exists to prevent, sitting inside the orientation block itself.
+
+   **❌ REFUTED — `reexports` is not "19 rows, one repo".** Measured fleet-wide: **348 rows across
+   4 repos** (`.claude` 261, DwoodAmo 67, somaNotes 19, dark-roast-theme 1). The doc's figure was
+   somaNotes alone. The "measure before cutting" item is therefore **answered: KEEP.** It is
+   populated, and it backs Layer 3 plus the def-over-barrel guards.
+
+   **❌ REFUTED as framed — `swift_relations` is 128 rows across 3 repos**, not 92, alongside 887
+   `swift_declarations` (dictum 74/495, dark-roast-theme 36/248, somaNotes 18/144). Confirmed:
+   `findRelationsByTarget` has **zero production callers** (only `test/graph-swift.test.js`), and
+   extraction IS separable (`extractDeclarations` and `extractRelations` are distinct functions
+   called separately in `intel.js`), so the proposed split is architecturally clean. **But deleting
+   it is not the best available subtraction.** `docs/ideas/009 #8` rates *consuming* it composite 42
+   as the cheap pathfinder that validates the relation-altitude pattern BEFORE the expensive
+   symbol-level blast radius — and its failure would be the kill signal for that whole trilogy.
+   Deleting ~350 working lines forecloses that, to save a carrying cost that is a dormant table
+   rather than hot-path work, on a fleet that does contain Swift. Also note the Swift health counter
+   reads the table for its direct/heuristic confidence split. **Recommendation: keep; wire the 009
+   #8 consumer or leave dormant. Do not delete.**
+
+   **⏸ Phases D–F: NOT decided here.** docs/034 explicitly ruled "code left dormant… do not delete
+   it" and proved Phase C fires via `test/claims-hook-e2e.test.js`. Step 0 already removed the only
+   measured HARM (34 silenced spawns) with a one-line flag flip, so the remaining case is
+   surface-area alone — a scope judgement that belongs to the maintainer, not to an agent
+   overriding a prior explicit decision.
 7. **Cost, unhurried.** `extractBatch` (#9) as a CPU move, after a committed perf fixture exists and
    after the first-ever test of its failure fallback.
 

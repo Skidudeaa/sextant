@@ -379,3 +379,51 @@ describe("subagent orientation — the coherence gate must not silence the only 
     assert.match(src, /new Set\(\["workflow-subagent"\]\)/, "workflow-subagent is the observed case");
   });
 });
+
+// ─── 6. subtraction groundwork (docs/035 step 6) ────────────────────────────
+
+describe("MCP surface — measured, and its injected claim derived", () => {
+  it("records an event for every tool call AND for the definition load", async () => {
+    // FAIL-pre: `grep -c recordEvent mcp/server.js` was 0. The pull channel was
+    // completely unmeasured, which is why nobody noticed a transcript census
+    // finds ~1 sextant tool invocation against hundreds of definition loads.
+    // Counting LOADS separately from CALLS is the point: 9 tool definitions are
+    // paid for on every session that wires this server.
+    const src = fs.readFileSync(path.join(__dirname, "..", "mcp", "server.js"), "utf8");
+    assert.ok(/recordMcp\(/.test(src), "dispatch must record");
+    assert.match(src, /recordMcp\("\(tools\/list\)"/, "definition loads are the denominator");
+    assert.match(src, /mcp\.invoked/, "event name");
+  });
+
+  it("never bootstraps state in a directory that is not a sextant install", () => {
+    // This server resolves its repo from process.cwd(). Recording against an
+    // arbitrary cwd would CREATE .planning/intel there — the self-bootstrap
+    // failure the 101 GB home-dir incident taught.
+    const src = fs.readFileSync(path.join(__dirname, "..", "mcp", "server.js"), "utf8");
+    assert.match(
+      src,
+      /existsSync\(path\.join\(root, "\.planning", "intel"\)\)\) return;/,
+      "must write only when the state dir already exists"
+    );
+  });
+
+  it("the injected MCP line is DERIVED from the registered tools, not hardcoded", () => {
+    // It used to be a string literal naming four tools while the server exposed
+    // nine — already incomplete, and outright false the moment any tool is
+    // renamed or removed. A claim about a changeable surface must be read from
+    // that surface.
+    const server = require("../mcp/server");
+    const orient = fs.readFileSync(path.join(__dirname, "..", "lib", "orient.js"), "utf8");
+    assert.ok(Array.isArray(server.TOOL_NAMES) && server.TOOL_NAMES.length > 0);
+    assert.match(orient, /TOOL_NAMES/, "orient must read the real tool list");
+    assert.doesNotMatch(
+      orient,
+      /"This repo's MCP server exposes: sextant_search, sextant_explain, sextant_related, sextant_health\."/,
+      "the hardcoded literal must be gone"
+    );
+    // Every tool the line can name must actually be registered.
+    for (const t of ["sextant_search", "sextant_explain", "sextant_related", "sextant_health"]) {
+      assert.ok(server.TOOL_NAMES.includes(t), `${t} must really exist to be claimed`);
+    }
+  });
+});
