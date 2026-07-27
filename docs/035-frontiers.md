@@ -855,6 +855,18 @@ it produces 14.6× more opens.
      and the report labels the scope. A rate that can exceed 1 is the exact lying-instrument class
      this arc exists to kill; it was caught by *rendering* it, not by reading the code.
 
+   **Enrollment, 2026-07-27:** the holdback arm is on at 50% on **6 repos** — sextant, jan25,
+   somaNotes, glasshud, defGen2 (enabled earlier the same day) and open-interpreter-fork (added
+   after the step-4 fix un-darkened it; 1,143 events, 6th by volume). dictum/sinter were
+   deliberately NOT added: pooling is UNSTRATIFIED, so heterogeneous low-volume repos add confound
+   without materially raising the accrual rate. Source of truth is
+   `~/.claude/sextant-fleet-roots`. **The confound is a TIME problem, not a config problem** — the
+   armed turns in the pool are historical while holdback turns only exist where the flag has had
+   time to fire, so TVD falls as the other five accrue (measured 0.79 -> 0.625 within the hour, as
+   jan25 produced its first holdback turns). Do not read the delta until it clears 0.5, and note
+   that clearing the guard is necessary, not sufficient: at the observed fleet turn hit-rate,
+   detecting a 2x lift still needs ~712 turns/arm.
+
    The dominance guard measures **total variation distance** between the two arms' repo
    distributions (≥0.5 → refuse), keyed on **git common-dir** so a linked worktree is not counted
    as a separate repo. On the live 5-root pool it reads **tvd 0.79 → CONFOUNDED**: holdback is
