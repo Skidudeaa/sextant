@@ -186,6 +186,24 @@ function recordMcp(tool, fields) {
 
 async function ensureInit() {
   const cwd = process.cwd();
+  // ROOT GUARD (docs/036). CLAUDE.md justifies the strict marker requirement
+  // for hooks and the watcher because they adopt process.cwd() WITHOUT the
+  // user naming it. This server does exactly the same thing — and it was not
+  // guarded, which is how a zoekt webserver came to be started against a
+  // 22 GiB home-directory index on 2026-07-19, nine days after the root guard
+  // shipped: an MCP session with cwd=$HOME reached search() -> ensureWebserver().
+  // Refusing here costs nothing (the tools return an explicit error instead of
+  // silently indexing) and closes the last unguarded adopter of cwd.
+  {
+    const { checkRoot } = require("../lib/root-guard");
+    const verdict = checkRoot(cwd, { requireMarker: true });
+    if (!verdict.ok) {
+      throw new Error(
+        "sextant refuses this directory as a repo root (" + verdict.reason + "): " +
+        (verdict.message || "") + " — run sextant from inside a project."
+      );
+    }
+  }
   // Re-initialize if the working directory changed (new project context)
   if (_initialized && _root === cwd) return;
   _root = cwd;
