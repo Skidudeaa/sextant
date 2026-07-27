@@ -1031,6 +1031,24 @@ files the agent is already working on, so it predicts opens it did not cause. Th
 resolution of "the two metrics rank the lanes oppositely" — **they are measuring different things,
 and both are right**: static covers more opens, retrieval causes more of the ones it covers.
 
+**⚠ CORRECTED 2026-07-27 — the aggregate was hiding two opposite signals.** Splitting
+`entry_points` by the tag each row already carries (`— declared` vs `(heuristic)`), same corpus:
+
+| bucket | coverage | n |
+|---|---|---|
+| `entry_points_declared` | **21.1%** | 16/76 |
+| `entry_points_heuristic` | **0.1%** | 1/749 |
+
+The declared rows are the **highest-earning section in the entire summary** — above `recent` at
+16.6%. The 2.0% aggregate was a blend of the best and the worst signal sextant produces, so
+**evicting the section wholesale, as recommended immediately below, would have deleted its
+strongest rows.** Shipped instead: the filename-heuristic tier is no longer rendered; manifest
+`— declared` and Swift `— @main` rows (both things the AUTHOR wrote down) stay. `isEntryPoint()`
+is untouched elsewhere — it keeps its +10% scoring signal and its test-path gating; only the CLAIM
+is withdrawn. Effect: somaNotes 2197 → 2148 chars (now under the clamp, so nothing truncates and
+the freed bytes go to `recent`); somaNotes/jan25/defGen2 render no entry-points section at all,
+which is correct under silent absence — they have neither a manifest entry nor `@main`.
+
 **Consequences for the plan:**
 1. **`entry_points` is the eviction candidate**, not `recent` and not `public_api`. It is the only
    section that is decision-grade (n=846), well below the null, and its byte cost buys nothing.

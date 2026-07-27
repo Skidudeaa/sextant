@@ -113,7 +113,11 @@ describe("parseStaticBlock", () => {
     for (const f of traj.parseStaticBlock(block)) bySection[f.path] = f.source;
     assert.equal(bySection["lib/graph.js"], "static:hotspots");
     assert.equal(bySection["lib/api.js"], "static:public_api");
-    assert.equal(bySection["bin/cli.js"], "static:entry_points");
+    // Split by tag (docs/035 step 3 follow-up): a "— declared" row is a
+    // manifest FACT (21.1% coverage, the best section) while "(heuristic)" is a
+    // filename guess (0.1% on n=749). Scoring them as one bucket produced the
+    // 2.0% aggregate that nearly got the whole section evicted.
+    assert.equal(bySection["bin/cli.js"], "static:entry_points_declared");
     assert.equal(bySection["docs/handoff.md"], "static:recent");
     // Rows ABOVE the first heading are the header block, not the first section —
     // `Misses` carries paths and must not be attributed to hotspots.

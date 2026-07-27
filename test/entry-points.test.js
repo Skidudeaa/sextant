@@ -88,7 +88,7 @@ describe("summary entry points: package.json bin authoritative (T1.1 delta 2)", 
     if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("surfaces bin target ahead of heuristics; demotes barrel + substring false positives; source-tags rows", () => {
+  it("surfaces the bin target INSTEAD of heuristics; demotes barrel + substring false positives; source-tags rows", () => {
     // Mirror the real sextant repo: a `bin` dispatcher the heuristic misses,
     // a barrel `index.js` the heuristic falsely promotes, and a substring
     // false positive (`zoekt-reindex.js`).
@@ -138,18 +138,32 @@ describe("summary entry points: package.json bin authoritative (T1.1 delta 2)", 
       `barrel lib/extractors/index.js must be demoted/excluded; got:\n${block}`
     );
 
-    // (d) A heuristic-only entry that is NOT a manifest target keeps the
-    //     "(heuristic)" source tag.
+    // (d) A heuristic-only entry is NO LONGER SURFACED AT ALL (docs/035 step 3
+    //     follow-up). This assertion previously required `src/main.js` to
+    //     appear carrying the "(heuristic)" tag. Splitting the section by that
+    //     very tag over 152 sessions / 11 repos measured:
+    //         entry_points_declared   21.1%  (16/76)   <- best section shipped
+    //         entry_points_heuristic   0.1%  (1/749)   <- ~113x below the null
+    //     One open in 749 surfacings is not a weak fact, it is an anti-signal
+    //     holding bytes on the highest-volume injection surface. The tag itself
+    //     survives in the renderer for @main/declared rows; what changed is that
+    //     a filename GUESS is no longer rendered as an orientation claim.
     assert.ok(
-      elines.some((l) => l.includes("src/main.js") && l.includes("(heuristic)")),
-      `src/main.js must be tagged "(heuristic)"; got:\n${block}`
+      !elines.some((l) => l.includes("src/main.js")),
+      `heuristic-only src/main.js must NOT be surfaced; got:\n${block}`
+    );
+    assert.ok(
+      !block.includes("(heuristic)"),
+      `no heuristic rows may be rendered at all; got:\n${block}`
     );
 
-    // (e) Manifest entry sorts AHEAD of heuristic entries.
-    const binIdx = elines.findIndex((l) => l.includes("bin/intel.js"));
-    const mainIdx = elines.findIndex((l) => l.includes("src/main.js"));
-    assert.ok(binIdx !== -1 && mainIdx !== -1 && binIdx < mainIdx,
-      `manifest entry must precede heuristic entry; got:\n${block}`);
+    // (e) The manifest entry is what remains — the ordering invariant this
+    //     originally asserted (declared ahead of heuristic) is now structural:
+    //     heuristics cannot appear, so declared rows cannot be preceded by one.
+    assert.ok(
+      elines.length > 0 && elines[0].includes("bin/intel.js"),
+      `the declared manifest entry must lead the block; got:\n${block}`
+    );
   });
 
   it("parses bin as a plain string (single-binary package)", () => {
