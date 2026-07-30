@@ -153,8 +153,17 @@ describe("freshness.captureCurrentState", () => {
     fs.writeFileSync(file, "module.exports = 1;\n");
   });
 
+  // SKIPPED ON DARWIN: this test's premise is a filename that is not valid
+  // UTF-8 (a lone 0xff byte). APFS/HFS+ validate filename encoding at the
+  // syscall boundary, so the fixture write fails with EILSEQ before the
+  // invariant is ever exercised — the assertion never runs, and the failure
+  // says nothing about lib/freshness.js. The invariant itself (raw pathname
+  // BYTES address and hash the file, never a lossy utf8 decode) is real and
+  // still enforced on any filesystem that can hold such a name, which is
+  // where it matters: Linux ext4/xfs checkouts, where Git happily reports
+  // undecodable paths in `status -z`.
   it("hashes invalid-UTF8 Git paths without lossy string decoding", {
-    skip: process.platform === "win32",
+    skip: process.platform === "win32" || process.platform === "darwin",
   }, () => {
     const rawPath = Buffer.concat([
       Buffer.from(dir + path.sep),
