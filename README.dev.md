@@ -69,7 +69,7 @@ Two hooks wired into project `.claude/settings.json` by `sextant init`:
 
 **SessionStart** (`hook-sessionstart.js`): emits `summary.md` as `<codebase-intelligence>`. Auto-starts watcher if heartbeat missing/stale (>90s).
 
-**UserPromptSubmit** (`hook-refresh.js`): classifies prompt (<1ms) then either runs graph+Zoekt retrieval in parallel (35-70ms, 180ms shared deadline) and emits `<codebase-retrieval>`, or falls back to static summary. Results deduped via SHA-256.
+**UserPromptSubmit** (`hook-refresh.js`): classifies prompt (<1ms) then either runs graph+Zoekt retrieval in parallel (35-70ms, 180ms shared deadline) and emits `<codebase-retrieval>`, or falls back to static summary. Results deduped via SHA-256. Classifier threshold: score >= 3 retrieves; the borderline band starts at score >= 2 in the default strict mode (a lone surviving non-stopword is not code intent — SEXTANT-USAGE-REPORT-2026-07-28); `.codebase-intel.json` `retrieval: { "borderline": "permissive" }` restores the old score >= 1 band. The static summary dedupes over the CANONICAL body (`lib/cli.js:canonicalizeSummaryForDedupe` normalizes the read-time `index age` rewrite + the regen-time `Generated` line; without that, the dedupe never fired and the block re-injected every prompt). Static deliveries record `summary.delivered {blockBytes}` / `summary.deduped` telemetry.
 
 ## Watcher Lifecycle
 
@@ -116,7 +116,7 @@ Merge layer: graph hits get 1.4x authority boost, files in both graph+zoekt get 
 | `history.json` | history.js | summary.js | Health trend snapshots for sparklines |
 | `.watcher_heartbeat` | watch.js (every 30s) | statusline, hook-sessionstart.js | Watcher alive signal (mtime-based) |
 | `.watcher_last_file` | watch.js (on flush) | statusline | Last file the watcher processed |
-| `.last_injected_hash.summary.*` | hook-sessionstart.js, hook-refresh.js | same | Per-session SHA-256 dedupe for static summary |
+| `.last_injected_hash.summary.*` | hook-sessionstart.js, hook-refresh.js | same | Per-session SHA-256 dedupe for static summary (over the canonical body — see `canonicalizeSummaryForDedupe`) |
 | `.last_injected_hash.retrieval.*` | hook-refresh.js | same | Per-session SHA-256 dedupe for retrieval results |
 
 All state lives in `.planning/intel/` per repo (never committed).

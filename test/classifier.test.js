@@ -448,12 +448,14 @@ describe("shouldRetrieve — edge cases", () => {
     assert.equal(r.retrieve, true);
   });
 
-  it("long prompt without paths gets penalty but may still retrieve if has identifiers", () => {
-    // 200+ words of filler plus an identifier
+  it("long prompt without paths: identifier buried in filler → strict skip, permissive borderline", () => {
+    // 200+ words of filler plus an identifier: identifier (+3) with the
+    // >200-words-no-paths penalty (-2) nets +1 (no moderate bonus — >80 words).
+    // Strict mode: +1 is not enough evidence — a paste-dump mentioning one
+    // symbol is not a lookup. Permissive keeps the old borderline fire.
     const filler = "word ".repeat(201);
-    const r = shouldRetrieve(filler + "rerankFiles");
-    // Has identifier (+3) and moderate length (+1) but >200 words no paths (-2) → net +2
-    // With identifier shape, should at least be borderline
+    assert.equal(shouldRetrieve(filler + "rerankFiles").retrieve, false);
+    const r = shouldRetrieve(filler + "rerankFiles", { borderline: "permissive" });
     assert.equal(r.retrieve, true);
   });
 
@@ -525,15 +527,17 @@ describe("shouldRetrieve — confidence levels", () => {
     assert.ok(r.confidence >= 0.8, `expected confidence >= 0.8, got ${r.confidence}`);
   });
 
-  it("borderline prompt gets confidence 0.4", () => {
-    // Need score 1-2: moderate length with surviving terms but no strong signals
-    // "please explain the overall architecture and design" — moderate length (+1), terms survive
-    // No identifiers, no paths, no tech question prefix, no action+target
-    const r = shouldRetrieve("explain the overall architecture and design philosophy");
-    // If it's borderline (score 1-2), confidence should be 0.4
-    if (r.retrieve && r.confidence < 0.5) {
-      assert.equal(r.confidence, 0.4);
-    }
+  it("borderline prompt: skipped in strict, 0.4 in permissive", () => {
+    // Score 1: moderate length (+1), terms survive, no strong signals.
+    // Strict mode (default) treats a lone surviving word as no evidence of
+    // code intent (SEXTANT-USAGE-REPORT-2026-07-28); permissive keeps the
+    // pre-2026-07 recall-first behavior.
+    const p = "explain the overall architecture and design philosophy";
+    const strict = shouldRetrieve(p);
+    assert.equal(strict.retrieve, false, "strict: +1-only prompt must not retrieve");
+    const permissive = shouldRetrieve(p, { borderline: "permissive" });
+    assert.equal(permissive.retrieve, true, "permissive: borderline still retrieves");
+    assert.equal(permissive.confidence, 0.4);
   });
 
   it("early exit gets confidence >= 0.7", () => {
@@ -562,10 +566,20 @@ describe("shouldRetrieve — confidence levels", () => {
 // ─── shouldRetrieve — single-word and short code queries ────────────
 //
 // WHY: These lock in the fix for the false-negative class where plain
-// lowercase module-name queries (e.g. "retrieval", "scoring") and 2-3
-// word concept questions (e.g. "how retrieval works") used to silently
-// skip retrieval because the -3 short-prompt penalty fired even when a
-// plausible code term had survived noise filtering.
+// lowercase module-name queries (e.g. "retrieval", "scoring") used to
+// silently skip retrieval because the -3 short-prompt penalty fired even
+// when a plausible code term had survived noise filtering.
+//
+// 2026-07 REVERSAL for multi-word concept questions ("how retrieval works",
+// "scoring logic"): the 2026-07-28 usage report showed the same lexical
+// shape firing on pure prose ("static payload", "take ownership pls") —
+// word-survival cannot separate module queries from process talk, and
+// somaNotes telemetry put 61% of delivered blocks in the 0.4 band. Strict
+// mode (default) now requires score >= 2, so these prompts skip; the
+// single-word soft-retrieve below stays (a lone module name is a stronger
+// intent signal than a bare noun pair, and the skip list drains its known
+// prose collisions). Permissive mode preserves the old behavior and is
+// asserted alongside each flipped case.
 
 describe("shouldRetrieve — single-word code tokens", () => {
   it("single plausible module name → retrieve", () => {
@@ -590,21 +604,25 @@ describe("shouldRetrieve — single-word code tokens", () => {
 });
 
 describe("shouldRetrieve — short concept questions", () => {
-  it("'how retrieval works' → retrieve with 'retrieval'", () => {
-    const r = shouldRetrieve("how retrieval works");
+  it("'how retrieval works' → skip strict / retrieve permissive", () => {
+    const strict = shouldRetrieve("how retrieval works");
+    assert.equal(strict.retrieve, false, "strict: bare concept question must not fire");
+    const r = shouldRetrieve("how retrieval works", { borderline: "permissive" });
     assert.equal(r.retrieve, true);
     assert.ok(r.terms.includes("retrieval"));
   });
 
-  it("'query classification' → retrieve with both nouns", () => {
-    const r = shouldRetrieve("query classification");
+  it("'query classification' → skip strict / retrieve permissive with both nouns", () => {
+    assert.equal(shouldRetrieve("query classification").retrieve, false);
+    const r = shouldRetrieve("query classification", { borderline: "permissive" });
     assert.equal(r.retrieve, true);
     assert.ok(r.terms.includes("query"));
     assert.ok(r.terms.includes("classification"));
   });
 
-  it("'scoring logic' → retrieve with both nouns", () => {
-    const r = shouldRetrieve("scoring logic");
+  it("'scoring logic' → skip strict / retrieve permissive with both nouns", () => {
+    assert.equal(shouldRetrieve("scoring logic").retrieve, false);
+    const r = shouldRetrieve("scoring logic", { borderline: "permissive" });
     assert.equal(r.retrieve, true);
     assert.ok(r.terms.includes("scoring"));
     assert.ok(r.terms.includes("logic"));
@@ -615,6 +633,34 @@ describe("shouldRetrieve — short concept questions", () => {
       const r = shouldRetrieve(q);
       assert.equal(r.retrieve, false, `expected "${q}" to skip`);
     }
+  });
+});
+
+// WHY: Exact-string regressions from SEXTANT-USAGE-REPORT-2026-07-28 — each
+// of these fired retrieval while the user was writing prose, not looking
+// for code (retrieval matched the WORD, not the intent). Locked in so the
+// strict default can't silently slip back.
+describe("shouldRetrieve — 2026-07-28 usage-report prose", () => {
+  it("'handoff' → skip both modes (collaboration prose skip term)", () => {
+    assert.equal(shouldRetrieve("handoff").retrieve, false);
+    assert.equal(shouldRetrieve("handoff", { borderline: "permissive" }).retrieve, false);
+  });
+
+  it("'take ownership pls' → skip both modes", () => {
+    assert.equal(shouldRetrieve("take ownership pls").retrieve, false);
+    assert.equal(shouldRetrieve("take ownership pls", { borderline: "permissive" }).retrieve, false);
+  });
+
+  it("'static payload' → skip strict (word-survival is not intent)", () => {
+    assert.equal(shouldRetrieve("static payload").retrieve, false);
+    // Documented tradeoff: permissive mode cannot separate this from
+    // "scoring logic" and still fires — the price of recall-first.
+    assert.equal(shouldRetrieve("static payload", { borderline: "permissive" }).retrieve, true);
+  });
+
+  it("compound code identifiers still survive the prose skip list", () => {
+    assert.equal(shouldRetrieve("handoffService").retrieve, true);
+    assert.equal(shouldRetrieve("check the ownership_guard test").retrieve, true);
   });
 });
 

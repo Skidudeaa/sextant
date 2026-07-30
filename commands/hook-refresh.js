@@ -9,6 +9,7 @@ const {
   readStdinJson,
   applyBoundFreshnessGateDetailed,
   boundSummaryStillValid,
+  canonicalizeSummaryForDedupe,
 } = require("../lib/cli");
 const { shouldRetrieve, hasIdentifierShape } = require("../lib/classifier");
 const { mergeResults } = require("../lib/merge-results");
@@ -300,16 +301,28 @@ async function injectStaticSummary(root, data, contextPrefix = "", onResult = nu
     `.last_injected_hash.summary.${sessionKey}`
   );
 
+  // Hash the CANONICAL body (lib/cli.js:canonicalizeSummaryForDedupe): the
+  // rendered body's `index age Xs` is rewritten with current elapsed seconds
+  // on every read, and `Generated` churns on every regeneration — hashing
+  // either makes the dedupe unreachable and re-ships ~40 byte-identical
+  // lines every prompt (SEXTANT-USAGE-REPORT-2026-07-28). Real changes
+  // (HEAD, recent files, hotspots, health) remain in the hash and still
+  // re-inject. One-time cost on upgrade: the first turn's canonical hash
+  // never matches a legacy uncanonicalized marker, so one extra delivery.
+  const canonical = canonicalizeSummaryForDedupe(summary);
   const h = crypto
     .createHash("sha256")
-    // Preserve the legacy/default-off hash exactly when there is no delta.
-    // Existing sessions should not receive a one-time duplicate summary merely
-    // because Phase F code was installed but remains disabled.
-    .update(contextPrefix ? contextPrefix + "\0" + summary : summary)
+    .update(contextPrefix ? contextPrefix + "\0" + canonical : canonical)
     .digest("hex");
   const last = tryReadFile(cachePath);
 
-  if (last === h) return finish("deduped", false);
+  if (last === h) {
+    // Static-lane twin of retrieval.turn_outcome's blockBytes: without a
+    // delivered/deduped pair the byte savings of this dedupe are invisible
+    // (the retrieval lane had the same gap before docs/035).
+    try { recordEvent(root, "summary.deduped", {}); } catch {}
+    return finish("deduped", false);
+  }
 
   const summaryBlock = summary
     ? `<codebase-intelligence>\n(refreshed: ${new Date().toISOString()})\n${stripUnsafeXmlTags(summary)}\n</codebase-intelligence>`
@@ -326,6 +339,11 @@ async function injectStaticSummary(root, data, contextPrefix = "", onResult = nu
   } catch {
     return finish("stdout_failed", false);
   }
+  try {
+    recordEvent(root, "summary.delivered", {
+      blockBytes: Buffer.byteLength(contextPrefix + summaryBlock, "utf8"),
+    });
+  } catch {}
   try {
     fs.writeFileSync(cachePath, h);
   } catch {}
@@ -706,10 +724,16 @@ async function run() {
     return delivered;
   };
 
-  // 1. Classify
+  // 1. Classify. The borderline knob comes from `.codebase-intel.json`
+  // (retrieval.borderline) — the same per-prompt loadRepoConfig read the
+  // capsule gate (capsuleEnabled above) already pays; failure → strict.
+  let borderline = "strict";
+  try {
+    borderline = require("../lib/config").loadRepoConfig(root).retrievalBorderline;
+  } catch {}
   let classification;
   try {
-    classification = shouldRetrieve(prompt);
+    classification = shouldRetrieve(prompt, { borderline });
   } catch {
     // Classifier failed — fall back to static summary.  No telemetry here:
     // the classifier threw, so there's no classification decision to record;

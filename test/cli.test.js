@@ -11,6 +11,7 @@ const {
   getWatcherStatus,
   rootsFromArgs,
   refreshSummaryAge,
+  canonicalizeSummaryForDedupe,
 } = require("../lib/cli");
 
 // ---------------------------------------------------------------------------
@@ -273,5 +274,79 @@ describe("refreshSummaryAge", () => {
     const out = refreshSummaryAge(input);
     assert.doesNotMatch(out, /ALERT: INDEX STALE/);
     assert.match(out, /CODEBASE INTEL HEALTH FAIL/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canonicalizeSummaryForDedupe
+//
+// WHY: the static-summary dedupe hash is computed over this canonical form
+// (commands/hook-refresh.js injectStaticSummary). The two normalized lines
+// are the ones that change WITHOUT a real content change — `index age` is
+// rewritten to now on every read (refreshSummaryAge) and `Generated` churns
+// on every regeneration — and hashing them made the dedupe unreachable, so
+// the full static block re-injected every prompt (SEXTANT-USAGE-REPORT-
+// 2026-07-28). Everything else must stay in the hash so real change busts.
+// ---------------------------------------------------------------------------
+
+describe("canonicalizeSummaryForDedupe", () => {
+  function summary({ generated, age, git = "main @ abc123", hotspots = "- `lib/a.js`: 12" }) {
+    return [
+      "## Codebase intelligence",
+      "",
+      "- **Root**: `/tmp/x`",
+      "- **Indexed files**: 69",
+      `- **Generated**: ${generated}`,
+      `- **Git**: ${git}`,
+      `- **Health**: local import resolution 97% (123/127), index age ${age}`,
+      "",
+      "### Dependency hotspots (fan-in)",
+      hotspots,
+    ].join("\n");
+  }
+
+  it("returns empty input unchanged", () => {
+    assert.equal(canonicalizeSummaryForDedupe(""), "");
+    assert.equal(canonicalizeSummaryForDedupe(null), null);
+    assert.equal(canonicalizeSummaryForDedupe(undefined), undefined);
+  });
+
+  it("equalizes bodies that differ only in the read-time age rewrite", () => {
+    const generated = new Date(Date.now() - 60_000).toISOString();
+    const a = summary({ generated, age: "59s" });
+    const b = summary({ generated, age: "61s" });
+    assert.notEqual(a, b, "fixtures must actually differ pre-canonicalization");
+    assert.equal(canonicalizeSummaryForDedupe(a), canonicalizeSummaryForDedupe(b));
+  });
+
+  it("equalizes bodies that differ only in the Generated timestamp (regen churn)", () => {
+    const a = summary({ generated: "2026-07-28T10:00:00.000Z", age: "5s" });
+    const b = summary({ generated: "2026-07-28T11:31:07.123Z", age: "5s" });
+    assert.equal(canonicalizeSummaryForDedupe(a), canonicalizeSummaryForDedupe(b));
+  });
+
+  it("keeps real changes in the hash input: git HEAD move still busts", () => {
+    const generated = new Date().toISOString();
+    const a = summary({ generated, age: "5s", git: "main @ abc123" });
+    const b = summary({ generated, age: "5s", git: "main @ def456" });
+    assert.notEqual(canonicalizeSummaryForDedupe(a), canonicalizeSummaryForDedupe(b));
+  });
+
+  it("keeps real changes in the hash input: hotspot shift still busts", () => {
+    const generated = new Date().toISOString();
+    const a = summary({ generated, age: "5s", hotspots: "- `lib/a.js`: 12" });
+    const b = summary({ generated, age: "5s", hotspots: "- `lib/a.js`: 13" });
+    assert.notEqual(canonicalizeSummaryForDedupe(a), canonicalizeSummaryForDedupe(b));
+  });
+
+  it("is a no-op on the stale minimal body (neither volatile line present)", () => {
+    const staleBody = [
+      "## Codebase intelligence",
+      "",
+      "- **Root**: `/tmp/x`",
+      "- **Git**: main @ abc123",
+      "- **Structural claims unavailable this turn** — rescan requested (reason: head_changed)",
+    ].join("\n");
+    assert.equal(canonicalizeSummaryForDedupe(staleBody), staleBody);
   });
 });

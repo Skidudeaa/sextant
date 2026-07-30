@@ -9,6 +9,7 @@ const { execFileSync, spawnSync } = require("child_process");
 
 const binding = require("../lib/summary-binding");
 const graph = require("../lib/graph");
+const telemetry = require("../lib/telemetry");
 
 const BIN = path.resolve(__dirname, "..", "bin", "intel.js");
 
@@ -70,6 +71,57 @@ describe("static summary graph-generation binding", () => {
       const second = runHook(root, {}, "stable-session");
       assert.equal(second.status, 0, second.stderr);
       assert.equal(second.stdout, "", "unchanged legacy body hash must dedupe");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("dedupes across turns despite the read-time index-age rewrite (usage-report regression)", async () => {
+    // SEXTANT-USAGE-REPORT-2026-07-28: the static block re-injected every
+    // prompt because the dedupe hash covered `index age Xs`, which
+    // refreshSummaryAge rewrites to NOW on every read. This fixture has a
+    // local import (a.js → b.js) so the summary carries the volatile Health
+    // line; the 1.1s sleep guarantees the age ticks between runs. FAIL-pre:
+    // the second hook run re-emits the whole block. PASS-post: deduped.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-static-binding-agededupe-"));
+    try {
+      git(root, ["init", "-q"]);
+      git(root, ["config", "user.email", "test@example.com"]);
+      git(root, ["config", "user.name", "Test"]);
+      fs.writeFileSync(path.join(root, "b.js"), "module.exports = 2;\n");
+      fs.writeFileSync(path.join(root, "a.js"), "const b = require(\"./b\");\nmodule.exports = b;\n");
+      git(root, ["add", "."]);
+      git(root, ["commit", "-qm", "initial"]);
+      execFileSync(process.execPath, [BIN, "scan", "--root", root, "--force"], {
+        cwd: root,
+        env: baseEnv(),
+        stdio: "ignore",
+      });
+      const bound = binding.readBoundSummary(root);
+      assert.ok(bound, "scan must publish a bound static summary");
+      assert.match(bound.rawSummary, /index age \d+s/,
+        "fixture summary must carry the volatile age line the bug lives in");
+
+      const first = runHook(root, {}, "agededupe-session");
+      assert.equal(first.status, 0, first.stderr);
+      assert.match(first.stdout, /<codebase-intelligence>/, "first turn delivers the block");
+
+      await new Promise((r) => setTimeout(r, 1100)); // let `index age` tick
+
+      const second = runHook(root, {}, "agededupe-session");
+      assert.equal(second.status, 0, second.stderr);
+      assert.equal(second.stdout, "",
+        "age-only churn must not re-inject the static block (dedupe over canonical body)");
+
+      const summaryEvents = telemetry.readEvents(root)
+        .filter((e) => e.name === "summary.delivered" || e.name === "summary.deduped");
+      assert.equal(summaryEvents.filter((e) => e.name === "summary.delivered").length, 1,
+        "exactly one static delivery for the session");
+      assert.ok(summaryEvents.some((e) => e.name === "summary.deduped"),
+        "the second turn must record summary.deduped");
+      const delivered = summaryEvents.find((e) => e.name === "summary.delivered");
+      assert.ok(typeof delivered.blockBytes === "number" && delivered.blockBytes > 0,
+        "summary.delivered carries blockBytes so the static lane's byte cost is measurable");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
