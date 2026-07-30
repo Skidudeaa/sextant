@@ -266,7 +266,7 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |
 | `sextant inject` | Print the current `<codebase-intelligence>` body to stdout (freshness-gated, same contract as the hooks) |
 | `sextant update --file <relPath>` | Re-extract a single file and update the graph (used by the watcher; useful for ad-hoc reindex) |
-| `sextant telemetry [--json \| --tail N] [--include-old] [--days N]` | Audit the dataset: stale rate, scan percentiles, open-precision + per-arm holdback `benefitDelta` |
+| `sextant telemetry [--json \| --tail N] [--include-old] [--days N]` | Audit the dataset: stale rate, scan percentiles, open-precision + per-arm holdback `benefitDelta`, MCP tool-surface reach (per-tool calls vs `tools/list` loads) |
 | `sextant telemetry --coherence-scorecard [--days N] [--json]` | Decision-grade Phase-F lifecycle, delivery, factual-safety, and overlap-experiment scorecard |
 | `sextant telemetry --review <incidentId> --verdict <verdict> --reviewed-findings N` | Record a manual factual review (`accurate_useful`, `accurate_noise`, `false_fact`, or `unclear`) for a known coherence incident |
 | `sextant eval-trajectory [--json] [--repo <name>] [--size-matched]` | Replay real session history → retrieval open-rate lift vs a permutation null (the benefit proof) |

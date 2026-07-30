@@ -24,6 +24,23 @@ handoff; instrument committed at `scripts/analyze-surfacings.js`). Current hando
 `docs/015-handoff.md` (Codex integration shipped+verified + #6 public-API outline this session;
 the classifier conf-0.4 mission in `docs/014` is unchanged and still the next dev lever).
 
+## Active — follow-ups with dates
+
+- [ ] **MCP tool-surface reach verdict — due ~2026-08-20** (added 2026-07-30, usage-report
+  follow-up). The "MCP tool surface" section in `sextant telemetry` (commit `2625548`) now makes
+  per-tool reach measurable against the `tools/list` rent. First read on this repo: 5 loads,
+  2 calls (both `sextant_health`), 0.40/load — matching the report's "never called one in ~438
+  calls". The question: is near-zero reach universal across the fleet, or specific to
+  verification-heavy work? Run:
+  `node bin/intel.js telemetry --roots-file ~/.claude/sextant-fleet-roots`
+  and read the pooled MCP section + per-root contribution rows. Decision rule: if pooled
+  callsPerList stays under ~0.5 across repos with healthy session volume, the 9-tool definition
+  list is rent without return — candidates are trimming `tools/list` to the tools that earn
+  opens (search/related/explain), or accepting the surface as exploration-only and shrinking it.
+  Note the confound before concluding: the injected hooks may be doing the orienting work the
+  tools were for, in which case zero calls is success, not waste — check `subagentstart.injected`
+  and retrieval delivery volumes on the same read.
+
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 
 > Each item's load-bearing correction was re-verified against live code (file:line in 009).
