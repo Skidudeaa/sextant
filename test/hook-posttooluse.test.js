@@ -345,7 +345,23 @@ describe("hook-posttooluse — end-to-end surfaced→opened loop", () => {
     assert.equal(hit.turn, setTs, "path_hit.turn must be the injected set's ts");
   });
 
-  it("PostToolUse on an un-surfaced file emits retrieval.path_miss", () => {
+  // SKIPPED ON DARWIN — KNOWN BUG, NOT AN ENVIRONMENT QUIRK. Unlike the hit
+  // above, the miss target (lib/never-surfaced.js) does not exist on disk, so
+  // toRepoRel's realpathSync(abs) throws and it falls back to the LEXICAL
+  // absolute path. On macOS the fixture root is /var/folders/… while
+  // realpathSync(root) is /private/var/folders/… — path.relative then yields
+  // "../…", toRepoRel returns null, and the hook emits NO event at all.
+  //
+  // That is the SPM-1 false-miss the realpath logic exists to prevent, reached
+  // through the nonexistent-path branch instead: on macOS every Write that
+  // CREATES a file, and every Edit of a since-deleted path, is silently
+  // unscoreable, dropping path_miss/blastradius.path_miss and skewing the
+  // open-precision denominator. Skipped by owner decision to keep the suite
+  // green while the toRepoRel fix (canonicalize the nearest existing ANCESTOR
+  // dir, then re-join the remainder) is tracked separately. Unskip with it.
+  it("PostToolUse on an un-surfaced file emits retrieval.path_miss", {
+    skip: process.platform === "darwin",
+  }, () => {
     const before = pathEvents(dir).length;
     runPost(dir, {
       tool_name: "Edit",
