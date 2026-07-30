@@ -454,6 +454,18 @@ function summarize(events) {
   let brRollupNotes = 0;
   const brHitsBySource = new Map();
 
+  // MCP TOOL SURFACE (SEXTANT-USAGE-REPORT-2026-07-28 headline: "I never called
+  // a single sextant MCP tool" in ~438 tool calls). mcp/server.js has RECORDED
+  // mcp.invoked per dispatch since docs/035 #3, but nothing aggregated it — the
+  // event was visible only as one line in byName, so the reach question stayed
+  // unanswerable from the audit surface. byTool is the per-tool reach count;
+  // the "(tools/list)" pseudo-tool is the DENOMINATOR — every session that wires
+  // the server pays for the full tool-definition list whether or not it ever
+  // calls one — so callsPerList is the "is the rent worth it" ratio.
+  const mcpByTool = new Map(); // tool -> { calls, ok, errors }
+  let mcpToolsList = 0;
+  let mcpToolDefs = null; // last tools/list payload count (definitions served)
+
   for (const e of events) {
     const name = e.name || "(unknown)";
     if (name === "retrieval.turn_outcome") {
@@ -606,6 +618,23 @@ function summarize(events) {
 
     if (name === "blastradius.path_miss") {
       brPathMisses++;
+    }
+
+    if (name === "mcp.invoked") {
+      const tool = typeof e.tool === "string" && e.tool ? e.tool : "(unknown)";
+      if (tool === "(tools/list)") {
+        mcpToolsList++;
+        if (Number.isFinite(e.count)) mcpToolDefs = e.count;
+      } else {
+        let t = mcpByTool.get(tool);
+        if (!t) {
+          t = { calls: 0, ok: 0, errors: 0 };
+          mcpByTool.set(tool, t);
+        }
+        t.calls++;
+        if (e.ok === true) t.ok++;
+        else if (e.ok === false) t.errors++;
+      }
     }
   }
 
@@ -809,6 +838,22 @@ function summarize(events) {
       skipped: coherenceSkipped,
       skippedByReason: Object.fromEntries(coherenceSkippedByReason),
       scorecard: coherenceScorecard(events),
+    },
+    // MCP TOOL SURFACE (usage-report 2026-07-28 follow-up): per-tool reach
+    // counts against the tools/list denominator. totalCalls excludes the
+    // "(tools/list)" pseudo-tool; callsPerList is 0 (not null) when loads
+    // exist but no tool was ever called — that zero IS the report's headline
+    // made measurable. byTool keeps {calls, ok, errors} per tool name.
+    mcp: {
+      toolsList: mcpToolsList,
+      toolDefs: mcpToolDefs,
+      totalCalls: Array.from(mcpByTool.values()).reduce((n, t) => n + t.calls, 0),
+      callsPerList: mcpToolsList
+        ? Array.from(mcpByTool.values()).reduce((n, t) => n + t.calls, 0) / mcpToolsList
+        : null,
+      byTool: Object.fromEntries(
+        Array.from(mcpByTool.entries()).sort((a, b) => b[1].calls - a[1].calls)
+      ),
     },
   };
 }
@@ -2947,6 +2992,29 @@ function printSummary(rootAbs, sum, contributions) {
       `  cross-agent claim changes delivered: ${ma.claimsChangedDelivered} changed, ` +
       `${ma.claimsInvalidatedDelivered} invalidated; skipped: ${ma.skipped}`
     );
+  }
+
+  // MCP TOOL SURFACE (usage-report 2026-07-28 headline made measurable).
+  // Rendered whenever the server recorded anything — including the
+  // loads-but-zero-calls case, which is the finding this section exists for.
+  const mcp = sum.mcp;
+  if (mcp && (mcp.toolsList > 0 || mcp.totalCalls > 0)) {
+    lines.push("");
+    lines.push("MCP tool surface");
+    lines.push(
+      `  tools/list loads: ${mcp.toolsList}` +
+      (mcp.toolDefs != null ? `  (${mcp.toolDefs} tool definitions paid per load)` : "")
+    );
+    lines.push(
+      `  tool calls: ${mcp.totalCalls}  (` +
+      (mcp.callsPerList == null ? "n/a" : `${mcp.callsPerList.toFixed(2)} per load`) +
+      `)`
+    );
+    for (const [tool, t] of Object.entries(mcp.byTool)) {
+      lines.push(
+        `    - ${tool.padEnd(24)} ${t.calls}` + (t.errors ? `  (${t.errors} errors)` : "")
+      );
+    }
   }
 
   lines.push("");
