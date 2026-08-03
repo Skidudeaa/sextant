@@ -3099,6 +3099,25 @@ async function run(ctx) {
       throw new Error("--days must be greater than 0 and at most 3650");
     }
   }
+  // Absolute era boundaries (--days is relative-only). Motivation: the
+  // 2026-07-30 classifier prose gate changed the retrieval treatment's
+  // COMPOSITION (fleet fire-rate 78.5% -> 28.4%, only high-confidence turns
+  // fire now), so armed-vs-holdback contrasts spanning that date mix two
+  // different treatments. An in-summarize era split was rejected — it halves
+  // each era's n straight to DORMANT and needs per-era TVD; two windowed reads
+  // keep the gate contract intact.
+  const parseIsoFlag = (name) => {
+    const raw = flag(process.argv, name);
+    if (raw == null) return null;
+    const t = Date.parse(raw);
+    if (!Number.isFinite(t)) throw new Error(`${name} must be an ISO date/time (got: ${raw})`);
+    return t;
+  };
+  const sinceTs = parseIsoFlag("--since");
+  const untilTs = parseIsoFlag("--until");
+  if (sinceTs != null && untilTs != null && sinceTs >= untilTs) {
+    throw new Error("--since must be earlier than --until");
+  }
   // Both of these are single-repo surfaces and must FAIL rather than silently
   // pool. The scorecard's lifecycle joins key on (taskKey, agentKey), which are
   // only unique WITHIN a repo — pooling would manufacture cross-repo joins and
@@ -3117,9 +3136,36 @@ async function run(ctx) {
   const exposeCoherence = coherenceExposed(root);
 
   const applyWindow = (events) => {
-    if (days == null) return events;
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    return events.filter((event) => Number.isFinite(event && event.ts) && event.ts >= cutoff);
+    if (days == null && sinceTs == null && untilTs == null) return events;
+    const relCutoff = days == null ? null : Date.now() - days * 24 * 60 * 60 * 1000;
+    const filtered = events.filter((event) => {
+      if (!Number.isFinite(event && event.ts)) return false;
+      if (relCutoff != null && event.ts < relCutoff) return false;
+      if (sinceTs != null && event.ts < sinceTs) return false;
+      if (untilTs != null && event.ts >= untilTs) return false;
+      return true;
+    });
+    // Rotation at 8 MiB strands older events in telemetry.jsonl.old — a
+    // --since predating the CURRENT file's first event silently reads a
+    // truncated era unless --include-old is passed. Warn only when a rotated
+    // generation actually exists somewhere in the read set.
+    if (sinceTs != null && !includeOld && events.length) {
+      const firstTs = events.reduce(
+        (min, e) => (Number.isFinite(e && e.ts) && e.ts < min ? e.ts : min),
+        Infinity
+      );
+      const hasRotated = roots.some((r) => {
+        try { return fs.existsSync(telemetry.telemetryOldPath(r)); } catch { return false; }
+      });
+      if (firstTs > sinceTs && hasRotated) {
+        process.stderr.write(
+          `[sextant] warning: --since ${new Date(sinceTs).toISOString()} predates the earliest ` +
+          `loaded event (${new Date(firstTs).toISOString()}) and a rotated telemetry.jsonl.old ` +
+          `exists — re-run with --include-old for the full era.\n`
+        );
+      }
+    }
+    return filtered;
   };
 
   // Coherence visibility is applied per repo inside readPooledEvents — the gate

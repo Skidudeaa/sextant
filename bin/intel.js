@@ -19,7 +19,7 @@ Usage:
   sextant explain <file|dir/> [--root <path>] [--json]
   sextant closure [--root <path>]
   sextant sprawl [--root <path>] [--within <N>] [--json]
-  sextant telemetry [--root <path> | --roots <a,b> | --roots-file <f>] [--json | --tail <N>] [--include-old] [--days <N>]
+  sextant telemetry [--root <path> | --roots <a,b> | --roots-file <f>] [--json | --tail <N>] [--include-old] [--days <N>] [--since <iso>] [--until <iso>]
   sextant telemetry --coherence-scorecard [--root <path>] [--days <N>] [--json]
   sextant telemetry --review <incidentId> --verdict <verdict> --reviewed-findings <N>
   sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]

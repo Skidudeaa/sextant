@@ -69,6 +69,17 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
   Grep-vs-sextant ratio from baseline 994:2); (c) keep the 9-tool surface unless BOTH Codex
   sustains-zero AND Kimi stays dark.
 
+- [ ] **Benefit-delta era boundary: clean causal accrual starts 2026-07-30** (added 2026-08-02).
+  The classifier prose gate (6d1cf70, shipped 07-30) moved fleet fire-rate 78.5% → 28.4% —
+  post-gate "armed" turns are a different (high-confidence-only) treatment than pre-gate ones,
+  so the armed-vs-holdback delta must not be quoted across that boundary. Era read:
+  `node bin/intel.js telemetry --roots-file ~/.claude/sextant-fleet-roots --include-old --since 2026-07-30T12:00:00Z`
+  The cron banner (`scripts/check-holdback-benefit.sh`) still reads the all-time delta — when
+  post-era n clears the 30/30 floors, quote the WINDOWED delta, not the banner's. Baseline for
+  context: the all-time first read (2026-08-02) was turn-level −5.7 pts, CI [−20.9, +4.8],
+  SPANS ZERO — directional only, and possibly caused by the very junk injections the gate
+  removed. 22 of 67 sessions drew both arms (carryover) — noted in the report output.
+
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 
 > Each item's load-bearing correction was re-verified against live code (file:line in 009).

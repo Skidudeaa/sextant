@@ -897,6 +897,102 @@ describe("Phase F decision-grade scorecard", () => {
   });
 });
 
+describe("telemetry CLI: --since/--until absolute window", () => {
+  // Era hygiene (2026-07-30 classifier prose gate changed the retrieval
+  // treatment's composition): absolute boundaries let two windowed reads
+  // contrast pre/post eras without an in-summarize split.
+  const JAN = Date.parse("2026-01-01T00:00:00Z");
+  const JUN = Date.parse("2026-06-01T00:00:00Z");
+
+  function seedRoot() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-telemetry-window-"));
+    fs.mkdirSync(path.join(root, ".planning", "intel"), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, ".planning", "intel", "telemetry.jsonl"),
+      JSON.stringify({ ts: JAN, name: "freshness.fresh_hit" }) + "\n" +
+      JSON.stringify({ ts: JUN, name: "freshness.stale_hit", reason: "head_changed" }) + "\n"
+    );
+    return root;
+  }
+
+  function run(root, ...args) {
+    const bin = path.resolve(__dirname, "..", "bin", "intel.js");
+    const env = { ...process.env };
+    delete env.SEXTANT_CLIENT; // hermetic: ambient attribution must not leak in
+    return spawnSync(process.execPath, [bin, "telemetry", "--root", root, ...args], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30000,
+      env,
+    });
+  }
+
+  it("--since keeps only events at/after the boundary; --until excludes at/after", () => {
+    const root = seedRoot();
+    try {
+      const since = run(root, "--json", "--since", "2026-03-01T00:00:00Z");
+      assert.equal(since.status, 0, since.stderr);
+      const s1 = JSON.parse(since.stdout);
+      assert.equal(s1.eventCount, 1);
+      assert.equal(s1.byName["freshness.stale_hit"], 1);
+      assert.equal(s1.byName["freshness.fresh_hit"], undefined);
+
+      const until = run(root, "--json", "--until", "2026-03-01T00:00:00Z");
+      assert.equal(until.status, 0, until.stderr);
+      const s2 = JSON.parse(until.stdout);
+      assert.equal(s2.eventCount, 1);
+      assert.equal(s2.byName["freshness.fresh_hit"], 1);
+
+      const both = run(root, "--json", "--since", "2025-12-01T00:00:00Z", "--until", "2026-03-01T00:00:00Z");
+      assert.equal(both.status, 0, both.stderr);
+      assert.equal(JSON.parse(both.stdout).eventCount, 1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unparseable --since and an inverted range", () => {
+    const root = seedRoot();
+    try {
+      const bad = run(root, "--since", "notadate");
+      assert.notEqual(bad.status, 0);
+      assert.match(bad.stderr, /--since must be an ISO date/);
+      const inverted = run(root, "--since", "2026-06-01", "--until", "2026-01-01");
+      assert.notEqual(inverted.status, 0);
+      assert.match(inverted.stderr, /--since must be earlier than --until/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("warns when --since predates the loaded events AND a rotated .old exists, without --include-old", () => {
+    const root = seedRoot();
+    try {
+      // No .old file -> no warning (nothing is actually missing).
+      const clean = run(root, "--json", "--since", "2020-01-01T00:00:00Z");
+      assert.equal(clean.status, 0, clean.stderr);
+      assert.doesNotMatch(clean.stderr, /telemetry\.jsonl\.old/);
+
+      // Rotated generation present -> the era may be truncated: warn.
+      fs.writeFileSync(
+        path.join(root, ".planning", "intel", "telemetry.jsonl.old"),
+        JSON.stringify({ ts: Date.parse("2020-06-01T00:00:00Z"), name: "freshness.fresh_hit" }) + "\n"
+      );
+      const warned = run(root, "--json", "--since", "2020-01-01T00:00:00Z");
+      assert.equal(warned.status, 0, warned.stderr);
+      assert.match(warned.stderr, /--include-old for the full era/);
+
+      // With --include-old the older generation is loaded and the warning goes away.
+      const included = run(root, "--json", "--include-old", "--since", "2020-01-01T00:00:00Z");
+      assert.equal(included.status, 0, included.stderr);
+      assert.doesNotMatch(included.stderr, /--include-old for the full era/);
+      assert.equal(JSON.parse(included.stdout).eventCount, 3);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("telemetry CLI: Phase F gate-off retention boundary", () => {
   it("omits retained coherence events from text, JSON, and raw tail when disabled", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "sx-telemetry-gate-"));

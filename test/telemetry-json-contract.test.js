@@ -75,8 +75,11 @@ describe("telemetry --json contract — every benefit delta ships its gate", () 
       const gate = d.parent[gateKey];
       assert.equal(typeof gate, "object", `${gateKey} must be an object`);
       assert.equal(typeof gate.atVolume, "boolean", `${gateKey}.atVolume must be a boolean`);
+      // CONFOUNDED is a legitimate verdict (pooling dominance guard, asserted
+      // explicitly in its own describe below) — its omission here was an
+      // oversight that would fail a CORRECT implementation on a pooled read.
       assert.ok(
-        ["NO_ARM", "DORMANT", "SPANS_ZERO", "AT_VOLUME"].includes(gate.status),
+        ["NO_ARM", "DORMANT", "SPANS_ZERO", "AT_VOLUME", "CONFOUNDED"].includes(gate.status),
         `${gateKey}.status was ${JSON.stringify(gate.status)}`
       );
     }
