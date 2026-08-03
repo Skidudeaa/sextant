@@ -11,6 +11,7 @@ const {
   ensureCodexHooks,
   ensureCodexMcp,
   ensureAgentsMd,
+  ensureKimiHooks,
 } = require("../commands/init");
 const intel = require("../lib/intel");
 const fs = require("fs");
@@ -885,6 +886,135 @@ describe("init --codex — AGENTS.md", () => {
       assert.equal(fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf8"), original);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("created AGENTS.md carries the v2 section: all 9 tools, no codex-specific hook claim", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-agents-"));
+    try {
+      ensureAgentsMd(tmp);
+      const content = fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf8");
+      for (const tool of [
+        "sextant_search", "sextant_related", "sextant_explain", "sextant_health",
+        "sextant_scope", "sextant_orient", "sextant_focus", "sextant_task_status",
+        "sextant_closure",
+      ]) {
+        assert.ok(content.includes(tool), `v2 section must list ${tool}`);
+      }
+      assert.ok(content.includes("sextant-managed:v2"), "version marker present");
+      // The v1 defect: a hardcoded `.codex/hooks.json` sentence that is wrong
+      // under every other client.
+      assert.ok(!content.includes(".codex"), "no client-specific hook claim");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces a v1 managed section in place, preserving user content around it", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-agents-"));
+    try {
+      const v1 =
+        "# AGENTS.md\n\nUser intro.\n\n" +
+        "## Orientation: use sextant before grepping\n\n" +
+        "- A `.codex/hooks.json` hook injects a fresh codebase map at session start.\n" +
+        "- `sextant_search` — ranked code search.\n\n" +
+        "## User section\n\nKeep me.\n";
+      fs.writeFileSync(path.join(tmp, "AGENTS.md"), v1);
+      const r = ensureAgentsMd(tmp);
+      assert.equal(r.action, "updated");
+      const content = fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf8");
+      assert.ok(content.includes("User intro."), "content before the section preserved");
+      assert.ok(content.includes("## User section\n\nKeep me."), "content after the section preserved");
+      assert.ok(content.includes("sextant-managed:v2"), "section upgraded to v2");
+      assert.ok(!content.includes(".codex/hooks.json"), "stale v1 sentence gone");
+      assert.ok(content.includes("sextant_closure"), "v2 tool list present");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("is a byte-identical no-op when the v2 section is already present", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-agents-"));
+    try {
+      ensureAgentsMd(tmp);
+      const original = fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf8");
+      const r = ensureAgentsMd(tmp);
+      assert.equal(r.action, "already-current");
+      assert.equal(fs.readFileSync(path.join(tmp, "AGENTS.md"), "utf8"), original);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("init --kimi — global [[hooks]] in ~/.kimi-code/config.toml", () => {
+  const KIMI_CMD = 'command = "SEXTANT_CLIENT=kimi SEXTANT_REQUIRE_STATE=1 sextant hook refresh"';
+
+  it("reports exists:false and creates nothing when config.toml is missing", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-kimi-home-"));
+    try {
+      const r = ensureKimiHooks(home);
+      assert.equal(r.exists, false);
+      assert.equal(r.alreadyConfigured, false);
+      assert.ok(!fs.existsSync(path.join(home, ".kimi-code", "config.toml")), "must not synthesize global config");
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("appends the hook block preserving existing config verbatim, with exactly two keys", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-kimi-home-"));
+    try {
+      fs.mkdirSync(path.join(home, ".kimi-code"));
+      const original = 'default_model = "kimi-code/k3"\n\n[providers.kimi-code]\napi_key = "x"\n';
+      fs.writeFileSync(path.join(home, ".kimi-code", "config.toml"), original);
+      const r = ensureKimiHooks(home);
+      assert.equal(r.exists, true);
+      assert.equal(r.alreadyConfigured, false);
+      const content = fs.readFileSync(path.join(home, ".kimi-code", "config.toml"), "utf8");
+      assert.ok(content.startsWith(original), "existing config preserved verbatim");
+      assert.match(content, /\[\[hooks\]\]\nevent = "UserPromptSubmit"\ncommand = "SEXTANT_CLIENT=kimi SEXTANT_REQUIRE_STATE=1 sextant hook refresh"\n/);
+      // Kimi's hook schema is .strict() — the appended block must carry ONLY
+      // event and command (no matcher, no timeout).
+      const block = content.slice(content.indexOf("[[hooks]]"));
+      const keys = block.match(/^[a-z_]+\s*=/gm) || [];
+      assert.deepEqual(keys.map((k) => k.replace(/\s*=$/, "")), ["event", "command"]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("is idempotent — a second run appends nothing", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-kimi-home-"));
+    try {
+      fs.mkdirSync(path.join(home, ".kimi-code"));
+      fs.writeFileSync(path.join(home, ".kimi-code", "config.toml"), 'default_model = "kimi-code/k3"\n');
+      ensureKimiHooks(home);
+      const after = fs.readFileSync(path.join(home, ".kimi-code", "config.toml"), "utf8");
+      const r2 = ensureKimiHooks(home);
+      assert.equal(r2.alreadyConfigured, true);
+      assert.equal(fs.readFileSync(path.join(home, ".kimi-code", "config.toml"), "utf8"), after);
+      const count = (after.match(/sextant hook refresh/g) || []).length;
+      assert.equal(count, 1);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("a commented-out sextant command does NOT count as wired", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-kimi-home-"));
+    try {
+      fs.mkdirSync(path.join(home, ".kimi-code"));
+      fs.writeFileSync(
+        path.join(home, ".kimi-code", "config.toml"),
+        '# [[hooks]]\n# event = "UserPromptSubmit"\n# ' + KIMI_CMD + "\n"
+      );
+      const r = ensureKimiHooks(home);
+      assert.equal(r.alreadyConfigured, false, "commented block must not satisfy the probe");
+      const content = fs.readFileSync(path.join(home, ".kimi-code", "config.toml"), "utf8");
+      assert.match(content, /^command = "SEXTANT_CLIENT=kimi/m, "live block appended");
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });

@@ -104,6 +104,31 @@ describe("root-guard — checkRoot semantics", () => {
     }
   });
 
+  // SEXTANT_REQUIRE_STATE: the globally-wired-hook opt-in gate (Kimi wiring).
+  // A project marker means "looks like a project"; existing .planning/intel
+  // means "the user opted THIS repo in" — a global hook needs the latter.
+  it("SEXTANT_REQUIRE_STATE=1: refuses a markered repo WITHOUT .planning/intel", () => {
+    const d = path.join(dir, "req-state-marked");
+    fs.mkdirSync(path.join(d, ".git"), { recursive: true });
+    const res = checkRoot(d, { requireMarker: true, env: { SEXTANT_REQUIRE_STATE: "1" } });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, "no-sextant-state");
+    assert.match(res.message, /sextant init/);
+  });
+
+  it("SEXTANT_REQUIRE_STATE=1: accepts a repo with existing .planning/intel", () => {
+    const d = path.join(dir, "req-state-opted");
+    fs.mkdirSync(path.join(d, ".planning", "intel"), { recursive: true });
+    const res = checkRoot(d, { requireMarker: true, env: { SEXTANT_REQUIRE_STATE: "1" } });
+    assert.equal(res.ok, true);
+  });
+
+  it("SEXTANT_REQUIRE_STATE unset: markered repo without state passes (old behavior)", () => {
+    const d = path.join(dir, "req-state-unset");
+    fs.mkdirSync(path.join(d, ".git"), { recursive: true });
+    assert.equal(checkRoot(d, { requireMarker: true, env: {} }).ok, true);
+  });
+
   it("SEXTANT_ALLOW_UNSAFE_ROOT=1 overrides every refusal", () => {
     const res = checkRoot(dir, {
       requireMarker: true,

@@ -182,6 +182,26 @@ a viable `spawn_agent` lifecycle seam, but the Phase-F overlap experiment remain
 Claude Code-only because Codex does not yet provide equivalent decision-grade
 parent file-outcome observation.
 
+### Kimi Code (optional)
+
+Kimi Code reads this repo's `.mcp.json` (so plain `init` already registers the
+MCP tools there), but its models rarely call them unprompted, and its hooks are
+**global-only** — `[[hooks]]` in `~/.kimi-code/config.toml`, no per-repo hook
+config. One flag wires it:
+
+```bash
+sextant init --kimi    # appends a global [[hooks]] UserPromptSubmit entry + refreshes the AGENTS.md section
+```
+
+Because the hook is global it would otherwise fire in every repo Kimi visits;
+the wired command carries `SEXTANT_REQUIRE_STATE=1`, so it activates **only in
+repos where `sextant init`/`sextant scan` has been run** and is a silent no-op
+(zero writes) everywhere else. It also carries `SEXTANT_CLIENT=kimi`, so every
+telemetry row it produces is client-attributed. Only `UserPromptSubmit` is
+wired: Kimi injects that hook's stdout into model context verbatim but discards
+`SessionStart` output, so the codebase map arrives with the first prompt of
+each session. Restart Kimi Code after wiring to reload the global config.
+
 ## What You'll See
 
 The status line at the bottom of Claude Code is your only visual indicator:
@@ -250,7 +270,7 @@ There is no channel that both the user and Claude see simultaneously.
 
 | Command | Description |
 |---------|-------------|
-| `sextant init [--codex]` | Create `.planning/intel/`, safely add the base Sextant Claude hooks plus the gated coherence-experiment hook when enabled, and register the MCP server; safe to rerun for existing repos. `--codex` additionally wires Codex CLI (`.codex/hooks.json`, `AGENTS.md`, global `~/.codex/config.toml` MCP entry) |
+| `sextant init [--codex] [--kimi]` | Create `.planning/intel/`, safely add the base Sextant Claude hooks plus the gated coherence-experiment hook when enabled, and register the MCP server; safe to rerun for existing repos. `--codex` additionally wires Codex CLI (`.codex/hooks.json`, `AGENTS.md`, global `~/.codex/config.toml` MCP entry). `--kimi` wires Kimi Code (global `~/.kimi-code/config.toml` `[[hooks]]` entry gated by `SEXTANT_REQUIRE_STATE`, `AGENTS.md` section) |
 | `sextant scan [--force]` | Index imports/exports, build dependency graph |
 | `sextant rescan [--force]` | Scan + prune deleted files |
 | `sextant watch` | Live file watching with terminal dashboard |

@@ -40,6 +40,34 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
   Note the confound before concluding: the injected hooks may be doing the orienting work the
   tools were for, in which case zero calls is success, not waste — check `subagentstart.injected`
   and retrieval delivery volumes on the same read.
+  **INTERIM READ 2026-08-02 (pooled, 6 roots): the answer is BIMODAL, and the pooled number is a
+  trap.** Pooled callsPerList = 8.20 (303 loads, 2,484 calls) — but somaNotes alone is 2,480 of
+  the 2,484 calls (1,911 `sextant_search`, 0 errors, sustained 255–793 calls/day over the 6 days
+  since instrumentation shipped). Excluding somaNotes: 4 calls / 63 loads ≈ **0.06/load** — under
+  the 0.5 trim threshold on every other repo (defGen2 paid 53 loads for ZERO calls). So near-zero
+  reach is NOT universal, and trimming `tools/list` would break the one repo where the surface
+  earns heavily. Leaning: keep the 9-tool surface as-is; the rent is real but one heavy user
+  redeems it, and the decision rule's "pooled" framing is exactly the unstratified-pooling class
+  the dominance guard exists for. Final verdict still due ~2026-08-20 — check whether the
+  somaNotes usage sustains or was one work-arc.
+  **AMENDMENT same day: the split is by CLIENT, not by repo.** Cross-referencing session logs:
+  Claude Code transcripts on somaNotes show **2** sextant MCP calls since 07-27 (hooks orient it,
+  so zero calls = the confound note above, confirmed); **Codex** rollouts show **934 actual
+  `function_call` invocations** since 07-27 (80% `sextant_search` — search-first orientation;
+  rollout logs rotate, so this undercounts vs the 2,480 in telemetry, but the direction is
+  unambiguous); **Kimi Code** discovered the 9 tools in ~282 requests (`mcp.tools_discovered` —
+  definition rent paid per request) and made **ZERO** actual `tool.call`s. [CORRECTED 2026-08-02:
+  "Kimi has no hook support" was wrong — Kimi v0.31.1 has a 16-event hook system, global-config
+  only, with UserPromptSubmit stdout injected into model context. `sextant init --kimi` now wires
+  it (gated by SEXTANT_REQUIRE_STATE so the global hook no-ops outside opted-in repos).]
+  Decision implications: trimming `tools/list` would hit Codex, the one heavy earner — don't.
+  BOTH instrument gaps are now closed: every telemetry row carries `client` (SEXTANT_CLIENT env
+  for hook lanes, MCP `initialize` clientInfo for tool calls, shipped 2026-08-02), and
+  `sextant telemetry` renders a per-client MCP split — the verdict is a one-command read.
+  At verdict time (~08-20): (a) did somaNotes' Codex usage sustain; (b) did Kimi's behavior move
+  post-wiring (`<hook_result>` blocks in its wire logs, `client:"kimi"` hook-lane rows,
+  Grep-vs-sextant ratio from baseline 994:2); (c) keep the 9-tool surface unless BOTH Codex
+  sustains-zero AND Kimi stays dark.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 

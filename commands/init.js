@@ -318,19 +318,75 @@ function ensureCodexMcp(home = os.homedir()) {
   return { path: p, exists: true, alreadyRegistered: false };
 }
 
-const AGENTS_SEXTANT_SECTION = `## Orientation: use sextant before grepping
+// ---------------------------------------------------------------------------
+// Kimi Code wiring (`sextant init --kimi`)
+//
+// Kimi Code (v0.31.1, verified 2026-08-02) reads: (1) global-only hooks —
+// `[[hooks]]` array-of-tables in ~/.kimi-code/config.toml, strict schema, no
+// per-repo hook config; (2) AGENTS.md, merged into its system prompt but
+// explicitly de-privileged ("not a privileged instruction channel"); (3) the
+// repo's .mcp.json (its layer-2 MCP config) — so plain `sextant init` already
+// registers the MCP tools. Observed before wiring: Kimi discovered the 9 tools
+// on every request and called them 2 times against 994 Grep calls — the hook
+// channel delivers RESULTS instead of instructions, sidestepping that.
+//
+// Only UserPromptSubmit is wired: Kimi injects that event's stdout into model
+// context verbatim (<hook_result> tag) but DISCARDS SessionStart output — and
+// hook-sessionstart's watcher auto-start must not run globally anyway. The
+// wired command sets SEXTANT_REQUIRE_STATE=1 (lib/root-guard.js: adopt only
+// repos with existing .planning/intel — a GLOBAL hook fires everywhere, and
+// opt-in must be per-repo) and SEXTANT_CLIENT=kimi (telemetry attribution).
+// Exactly two keys in the block: the schema is .strict(), and the 30s default
+// timeout covers the ~12s worst case (stdin stall + bounded sync rescan).
+// ---------------------------------------------------------------------------
+const KIMI_HOOK_BLOCK = `[[hooks]]
+event = "UserPromptSubmit"
+command = "SEXTANT_CLIENT=kimi SEXTANT_REQUIRE_STATE=1 sextant hook refresh"
+`;
+
+function ensureKimiHooks(home = os.homedir()) {
+  const p = path.join(home, ".kimi-code", "config.toml");
+  // No auto-create: absent global config means Kimi Code isn't set up here —
+  // synthesizing one is overreach (same rationale as ensureCodexMcp).
+  if (!fs.existsSync(p)) return { path: p, exists: false, alreadyConfigured: false };
+  const content = fs.readFileSync(p, "utf8");
+  // Anchored on an UNCOMMENTED command= line so a commented-out block does not
+  // count as wired.
+  if (/^[ \t]*command\s*=\s*".*\bsextant hook refresh\b/m.test(content)) {
+    return { path: p, exists: true, alreadyConfigured: true };
+  }
+  const sep = content.endsWith("\n") ? "" : "\n";
+  const tmp = p + ".tmp";
+  fs.writeFileSync(tmp, content + `${sep}\n` + KIMI_HOOK_BLOCK);
+  fs.renameSync(tmp, p);
+  return { path: p, exists: true, alreadyConfigured: false };
+}
+
+// v2 (client-neutral + all 9 tools). The version marker makes re-running any
+// `init --codex`/`--kimi` the refresh path for MANAGED sections: v1 hardcoded
+// a `.codex/hooks.json` sentence that is wrong under Kimi and, because the
+// /sextant/i short-circuit suppressed every later write, could never be
+// corrected. User-authored sextant mentions are still left entirely alone.
+const AGENTS_MANAGED_HEADER = "## Orientation: use sextant before grepping";
+const AGENTS_MANAGED_MARKER = "sextant-managed:v2";
+const AGENTS_SEXTANT_SECTION = `${AGENTS_MANAGED_HEADER} <!-- ${AGENTS_MANAGED_MARKER} -->
 
 This repo is indexed by **sextant** (dependency-graph + full-text code intelligence).
 
-- A \`.codex/hooks.json\` hook injects a fresh codebase map at session start and
-  query-aware file hits on each prompt. Trust those over guessing file paths; an
-  "index stale" note means structural ranking is suppressed (live text matches only).
+- A sextant hook injects a fresh codebase map and query-aware file hits into
+  context (at session start and/or on each prompt, depending on the agent CLI).
+  Trust those over guessing file paths; an "index stale" note means structural
+  ranking is suppressed (live text matches only).
 - Prefer the sextant MCP tools over raw \`grep\`/\`rg\`:
   - \`sextant_search\` — ranked code search (use INSTEAD of grep to find defs/symbols).
   - \`sextant_related\` — imports + dependents of a file (blast radius before editing).
   - \`sextant_explain\` — a file's fan-in/fan-out, exports, role; or a directory's aggregate shape (trailing \`/\`).
   - \`sextant_health\` — index resolution % + freshness (check before trusting ranks).
   - \`sextant_scope\` — what's excluded from the index (vendored subtrees).
+  - \`sextant_orient\` — compact orientation block (root, health, hotspots, task-relevant files).
+  - \`sextant_focus\` — role-structured task capsule for a stated task (primary/support/witnesses/hazards).
+  - \`sextant_task_status\` — the latest persisted task capsule and its workset state.
+  - \`sextant_closure\` — factual evidence-closure report for the session's structural changes.
 `;
 
 const AGENTS_HEADER = `# AGENTS.md
@@ -340,12 +396,25 @@ Guidance for coding agents working in this repo.
 `;
 
 // WHY merge, don't clobber: AGENTS.md is user-authored project content. Create it
-// only when absent; if it exists but never mentions sextant, append our section;
-// if it already mentions sextant, leave it entirely alone.
+// only when absent; refresh only the section WE manage (identified by our exact
+// heading, versioned by the v2 marker); if the user wrote their own sextant
+// mention, leave the file entirely alone.
 function ensureAgentsMd(root) {
   const p = path.join(root, "AGENTS.md");
   if (fs.existsSync(p)) {
     const content = fs.readFileSync(p, "utf8");
+    if (content.includes(AGENTS_MANAGED_MARKER)) return { path: p, action: "already-current" };
+    const idx = content.indexOf(AGENTS_MANAGED_HEADER);
+    if (idx !== -1) {
+      // A managed section without the current marker (v1): replace from its
+      // heading up to the next `## ` heading (exclusive) or EOF.
+      const next = content.indexOf("\n## ", idx + AGENTS_MANAGED_HEADER.length);
+      const end = next === -1 ? content.length : next;
+      const tmp = p + ".tmp";
+      fs.writeFileSync(tmp, content.slice(0, idx) + AGENTS_SEXTANT_SECTION + content.slice(end));
+      fs.renameSync(tmp, p);
+      return { path: p, action: "updated" };
+    }
     if (/sextant/i.test(content)) return { path: p, action: "already-mentions" };
     const sep = content.endsWith("\n") ? "\n" : "\n\n";
     const tmp = p + ".tmp";
@@ -357,18 +426,23 @@ function ensureAgentsMd(root) {
   return { path: p, action: "created" };
 }
 
+// Shared by printCodexStatus and printKimiStatus — ensureAgentsMd now has five
+// outcomes and both printers must know all of them.
+const AGENTS_ACTION_MSG = {
+  created: `  ✓ Created AGENTS.md with sextant orientation`,
+  appended: `  ✓ Appended sextant section to existing AGENTS.md`,
+  updated: `  ✓ Updated the managed AGENTS.md sextant section to v2`,
+  "already-current": `  ✓ AGENTS.md sextant section already current (v2)`,
+  "already-mentions": `  ✓ AGENTS.md already references sextant (left untouched)`,
+};
+
 function printCodexStatus(root, hooks, agents, mcp) {
   const rel = (p) => path.relative(root, p) || p;
   const lines = ["", "Codex wiring:"];
   lines.push(hooks.alreadyConfigured
     ? `  ✓ Codex hooks already configured in ${rel(hooks.path)}`
     : `  ✓ Wired Codex hooks (SessionStart + UserPromptSubmit) in ${rel(hooks.path)}`);
-  const agentMsg = {
-    created: `  ✓ Created AGENTS.md with sextant orientation`,
-    appended: `  ✓ Appended sextant section to existing AGENTS.md`,
-    "already-mentions": `  ✓ AGENTS.md already references sextant`,
-  };
-  lines.push(agentMsg[agents.action]);
+  lines.push(AGENTS_ACTION_MSG[agents.action]);
   if (!mcp.exists) {
     lines.push(`  ⚠ ~/.codex/config.toml not found — Codex MCP NOT registered`);
     lines.push(`     Add this block to ~/.codex/config.toml once Codex is set up:`);
@@ -385,9 +459,32 @@ function printCodexStatus(root, hooks, agents, mcp) {
   process.stdout.write(lines.join("\n") + "\n");
 }
 
+function printKimiStatus(root, hooks, agents) {
+  const lines = ["", "Kimi Code wiring:"];
+  if (!hooks.exists) {
+    lines.push(`  ⚠ ~/.kimi-code/config.toml not found — Kimi hook NOT wired`);
+    lines.push(`     Add this block to ~/.kimi-code/config.toml once Kimi Code is set up:`);
+    for (const l of KIMI_HOOK_BLOCK.trimEnd().split("\n")) lines.push(`       ${l}`);
+  } else if (hooks.alreadyConfigured) {
+    lines.push(`  ✓ Kimi hook already configured in ${hooks.path}`);
+  } else {
+    lines.push(`  ✓ Wired Kimi UserPromptSubmit hook in ${hooks.path} (global)`);
+  }
+  lines.push(AGENTS_ACTION_MSG[agents.action]);
+  lines.push(`  ✓ MCP: Kimi reads this repo's .mcp.json (registered by base init)`);
+  lines.push("");
+  lines.push("  Restart Kimi Code to reload the global config. The hook activates only in");
+  lines.push("  repos where `sextant init` has been run (SEXTANT_REQUIRE_STATE gate) and is");
+  lines.push("  a silent no-op everywhere else. Kimi discards SessionStart output, so the");
+  lines.push("  codebase map arrives on the first prompt of each session instead.");
+  process.stdout.write(lines.join("\n") + "\n");
+}
+
 async function run(ctx) {
   const codex = hasFlag(process.argv, "--codex");
+  const kimi = hasFlag(process.argv, "--kimi");
   let codexMcp = null;
+  let kimiHooks = null;
   for (const r of ctx.roots) {
     // WHY guard init hard: `sextant init` in $HOME writes hooks into
     // ~/.claude/settings.json — which Claude Code treats as GLOBAL settings,
@@ -412,6 +509,14 @@ async function run(ctx) {
       codexMcp = codexMcp || ensureCodexMcp();
       printCodexStatus(r, codexHooks, agents, codexMcp);
     }
+    if (kimi) {
+      // ensureAgentsMd is idempotent, so --codex --kimi together is safe (the
+      // second call reports already-current).
+      const agents = ensureAgentsMd(r);
+      // Global wiring is idempotent — run once, reuse the result per root.
+      kimiHooks = kimiHooks || ensureKimiHooks();
+      printKimiStatus(r, kimiHooks, agents);
+    }
   }
 }
 
@@ -426,4 +531,5 @@ module.exports = {
   ensureCodexHooks,
   ensureCodexMcp,
   ensureAgentsMd,
+  ensureKimiHooks,
 };
