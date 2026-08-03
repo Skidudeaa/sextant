@@ -165,6 +165,12 @@ const TOOLS = [
 
 let _root = null;
 let _initialized = false;
+// Client attribution (todos.md MCP-reach verdict): the MCP `initialize`
+// handshake carries the client's spec-mandated self-identification
+// (params.clientInfo.name) — captured once here, stamped on every mcp.invoked
+// row. Higher-fidelity than env sniffing; SEXTANT_CLIENT env is the fallback
+// (recordEvent applies it only when the payload carries no client).
+let _client = null;
 
 // MCP INVOCATION TELEMETRY (docs/035 #3).
 //
@@ -180,7 +186,11 @@ function recordMcp(tool, fields) {
   try {
     const root = _root || process.cwd();
     if (!require("fs").existsSync(path.join(root, ".planning", "intel"))) return;
-    recordEvent(root, "mcp.invoked", Object.assign({ tool }, fields || {}));
+    recordEvent(
+      root,
+      "mcp.invoked",
+      Object.assign({ tool }, _client ? { client: _client } : null, fields || {})
+    );
   } catch {}
 }
 
@@ -674,6 +684,13 @@ function jsonRpcError(id, code, message) {
 async function dispatch(method, params) {
   // MCP lifecycle
   if (method === "initialize") {
+    // Bounded string only — the raw clientInfo object is client-controlled.
+    try {
+      const name = params && params.clientInfo && params.clientInfo.name;
+      if (typeof name === "string" && name.trim()) {
+        _client = name.trim().toLowerCase().slice(0, 64);
+      }
+    } catch {}
     await ensureInit();
     return {
       protocolVersion: "2024-11-05",

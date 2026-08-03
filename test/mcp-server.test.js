@@ -157,6 +157,24 @@ describe("MCP server — initialize", () => {
       process.cwd = origCwd;
     }
   });
+
+  it("captures clientInfo.name at initialize and stamps it on mcp.invoked rows", async () => {
+    const telemetry = require("../lib/telemetry");
+    const origCwd = process.cwd;
+    process.cwd = () => root;
+    try {
+      await dispatch("initialize", { clientInfo: { name: "  Kimi-Code  ", version: "0.31.1" } });
+      await dispatch("tools/list", {});
+      const rows = telemetry
+        .readEvents(root)
+        .filter((e) => e.name === "mcp.invoked" && e.tool === "(tools/list)");
+      assert.ok(rows.length >= 1, "expected a recorded tools/list row");
+      // Normalized: trimmed + lowercased, bounded.
+      assert.equal(rows[rows.length - 1].client, "kimi-code");
+    } finally {
+      process.cwd = origCwd;
+    }
+  });
 });
 
 describe("MCP server — tools/list", () => {

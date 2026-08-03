@@ -42,6 +42,30 @@ describe("telemetry.recordEvent + readEvents", () => {
     assert.equal(fs.statSync(telemetry.telemetryPath(dir)).mode & 0o777, 0o600);
   });
 
+  it("stamps client from SEXTANT_CLIENT env; explicit payload client wins", () => {
+    const repo = makeRepo("client");
+    const prev = process.env.SEXTANT_CLIENT;
+    try {
+      // No env, no payload -> no client field at all.
+      delete process.env.SEXTANT_CLIENT;
+      telemetry.recordEvent(repo, "test.unstamped", {});
+      // Env set -> stamped.
+      process.env.SEXTANT_CLIENT = "kimi";
+      telemetry.recordEvent(repo, "test.env_stamped", {});
+      // Payload client (MCP clientInfo handshake) beats the ambient env.
+      telemetry.recordEvent(repo, "test.payload_wins", { client: "codex" });
+
+      const events = telemetry.readEvents(repo);
+      assert.equal(events[0].client, undefined);
+      assert.equal(events[1].client, "kimi");
+      assert.equal(events[2].client, "codex");
+    } finally {
+      if (prev === undefined) delete process.env.SEXTANT_CLIENT;
+      else process.env.SEXTANT_CLIENT = prev;
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it("readEvents returns [] when file missing", () => {
     const empty = makeRepo("empty");
     try {

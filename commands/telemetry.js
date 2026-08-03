@@ -465,6 +465,11 @@ function summarize(events) {
   const mcpByTool = new Map(); // tool -> { calls, ok, errors }
   let mcpToolsList = 0;
   let mcpToolDefs = null; // last tools/list payload count (definitions served)
+  // Per-CLIENT split (client-bimodal finding, 2026-08-02: Codex 934 calls /
+  // Claude Code 2 / Kimi 0-of-282-loads — invisible in the aggregate). Rows
+  // predate the client stamp render as "(unattributed)"; the rent (toolsList)
+  // must split per client too, or a rent-only client stays invisible.
+  const mcpByClient = new Map(); // client -> { toolsList, calls, byTool: Map }
 
   for (const e of events) {
     const name = e.name || "(unknown)";
@@ -622,8 +627,16 @@ function summarize(events) {
 
     if (name === "mcp.invoked") {
       const tool = typeof e.tool === "string" && e.tool ? e.tool : "(unknown)";
+      const client =
+        typeof e.client === "string" && e.client ? e.client : "(unattributed)";
+      let c = mcpByClient.get(client);
+      if (!c) {
+        c = { toolsList: 0, calls: 0, byTool: new Map() };
+        mcpByClient.set(client, c);
+      }
       if (tool === "(tools/list)") {
         mcpToolsList++;
+        c.toolsList++;
         if (Number.isFinite(e.count)) mcpToolDefs = e.count;
       } else {
         let t = mcpByTool.get(tool);
@@ -634,6 +647,8 @@ function summarize(events) {
         t.calls++;
         if (e.ok === true) t.ok++;
         else if (e.ok === false) t.errors++;
+        c.calls++;
+        c.byTool.set(tool, (c.byTool.get(tool) || 0) + 1);
       }
     }
   }
@@ -853,6 +868,23 @@ function summarize(events) {
         : null,
       byTool: Object.fromEntries(
         Array.from(mcpByTool.entries()).sort((a, b) => b[1].calls - a[1].calls)
+      ),
+      // Per-client reach vs rent. "(unattributed)" = rows predating the client
+      // stamp (or a client that sent no clientInfo) — never a specific client.
+      byClient: Object.fromEntries(
+        Array.from(mcpByClient.entries())
+          .sort((a, b) => b[1].calls - a[1].calls)
+          .map(([client, c]) => [
+            client,
+            {
+              toolsList: c.toolsList,
+              calls: c.calls,
+              callsPerList: c.toolsList ? c.calls / c.toolsList : null,
+              byTool: Object.fromEntries(
+                Array.from(c.byTool.entries()).sort((a, b) => b[1] - a[1])
+              ),
+            },
+          ])
       ),
     },
   };
@@ -3014,6 +3046,26 @@ function printSummary(rootAbs, sum, contributions) {
       lines.push(
         `    - ${tool.padEnd(24)} ${t.calls}` + (t.errors ? `  (${t.errors} errors)` : "")
       );
+    }
+    // Per-client split — rendered only once at least one ATTRIBUTED client
+    // exists, so reads over pre-stamp history stay byte-identical. The
+    // client-bimodal finding (Codex heavy / Claude Code hook-oriented /
+    // Kimi rent-only) is exactly what this block makes one-command readable.
+    const clients = Object.entries(mcp.byClient || {});
+    if (clients.some(([name]) => name !== "(unattributed)")) {
+      lines.push("  by client:");
+      for (const [name, c] of clients) {
+        const ratio =
+          c.callsPerList == null ? "n/a" : `${c.callsPerList.toFixed(2)}/load`;
+        const top = Object.entries(c.byTool)
+          .slice(0, 3)
+          .map(([tool, n]) => `${tool} ${n}`)
+          .join(", ");
+        lines.push(
+          `    - ${name.padEnd(18)} loads ${c.toolsList} · calls ${c.calls} (${ratio})` +
+          (top ? `  top: ${top}` : "")
+        );
+      }
     }
   }
 
