@@ -21,8 +21,10 @@ promotion; aggressive gating rejected with data (lane is intrinsically fuzzy, ce
 Retrieval-precision arc now mined out; next lever is upstream (classifier conf-0.4 firing on
 conversational prompts feeds every lane — evidence, landmines, and candidate fixes in the
 handoff; instrument committed at `scripts/analyze-surfacings.js`). Current handoff:
-`docs/015-handoff.md` (Codex integration shipped+verified + #6 public-API outline this session;
-the classifier conf-0.4 mission in `docs/014` is unchanged and still the next dev lever).
+`docs/038-handoff.md` (research sweep + three features shipped: loud staleness [009 #5],
+schema anchors [009 #2], rejected-approaches memory [docs/003]; classifier conf-0.4 mission
+verified already fixed by the 07-30 prose gate; interim fleet reads recorded — Kimi wiring
+confirmed live, benefit delta DORMANT at 16/44, MCP verdict leaning keep).
 
 ## Active — follow-ups with dates
 

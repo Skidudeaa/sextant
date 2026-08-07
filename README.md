@@ -264,6 +264,9 @@ There is no channel that both the user and Claude see simultaneously.
 - **Definition over hub** -- definition-site scoring beats high fan-in hub files
 - **Source-first search** -- source files searched before docs/config to prevent changelog saturation
 - **Re-export chain tracing** -- follows barrel-file re-exports up to 5 hops to find original definitions
+- **Loud staleness** -- a `.content_stale` sentinel flips the statusline dot red when the injected body is a content-stale blackout; gated on `contentChanged` (never version bumps), so version-only blackouts stay green
+- **Schema anchors** -- `### Schema` block surfaces `*.prisma`/`*.graphql`/`*.proto`/`openapi.*`/`schema.sql` files the indexer doesn't touch, via a one-shot fast-glob pass; degrade-quietly when absent
+- **Rejected-approaches memory** -- `sextant reject "don't use X" --files Y --why "Z"` records an abandoned approach; surfaces in `<codebase-retrieval>` when the agent touches a matching file; auto-staled when referenced files disappear from the index
 - **Cross-project validated** -- Express (142 files), Flask (83 files), React (4,337 files), Vapor 4.121.4 (294 files; manual-trigger via `scripts/eval-swift-external.sh`)
 
 ## Commands
@@ -281,6 +284,9 @@ There is no channel that both the user and Claude see simultaneously.
 | `sextant summary` | Print what Claude sees |
 | `sextant explain <file\|dir/>` | File mode: fan-in/fan-out/exports/imports. Dir mode (trailing `/`): aggregate shape — file/type counts, internal hotspots, import edges by sibling dir, co-change coupling. `--json` available |
 | `sextant closure` | Factual closure report: net structural changes, served-claim consistency, observed/unobserved witnesses and surfaces, plus recorded multi-agent overlap when present |
+| `sextant reject "<desc>" --files <a,b> --why "<reason>"` | Record a rejected approach ("don't try X on file Y because Z"); surfaces in retrieval when the agent touches a matching file |
+| `sextant reject --list` | List all recorded rejections (id, status, files, reason, age) |
+| `sextant reject --delete <id>` | Delete a rejection record |
 | `sextant sprawl [--within N]` | Mine recent git history for source files created then abandoned; reporting-only baseline for the anti-sprawl lane |
 | `sextant retrieve <query>` | Ranked search with graph context |
 | `sextant query <imports\|dependents\|exports> --file <path>` | Query the dependency graph directly |

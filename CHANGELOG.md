@@ -2,6 +2,16 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-08-07 — Three on-thesis features: loud staleness, schema anchors, rejected-approaches memory
+
+Three additive features, all self-deploying with no config change needed. Each ships with unit tests and passes the 21/21 self-eval byte-identical. The SCHEMA_VERSION bump (4→5) triggers a one-time version-only rescan on existing repos, handled by the sync-rescue path (versionOnly bypass, p95 gate).
+
+**Loud statusline staleness [009 #5].** The statusline health dot used to stay green during a content-stale blackout — a lie about the health of the injected claims. A `.content_stale` sentinel file is now written at both injection sites (the static-summary `applyFreshnessGateDetailed` stale path and the retrieval hook's content-stale lane), and cleared on the fresh path and sync-rescue success. `scripts/statusline-command.sh` reads it and flips the dot red. Gated strictly on `freshness.contentChanged` (never version bumps) — version-only and check-failed blackouts stay green, because "we invalidated our own graph" is not the same as "the repo moved under you."
+
+**Schema/contract anchors [009 #2].** A `### Schema` block in the injected summary, sourced from a new `schemaFilesFromGlob` fast-glob pass for `*.prisma`, `*.graphql`, `*.gql`, `*.proto`, `openapi.{json,yaml,yml}`, `schema.sql` — file types the indexer doesn't touch (not in `isIndexable`, not added to the graph). Captured in `captureSummaryInputs` (frozen snapshot, bound-verified). Placed above Recent-changes so the END-truncating clamp drops Recent first. N-cap 8, degrade-quietly when absent.
+
+**Rejected-approaches memory [docs/003].** A `rejections` table in `graph.db` that captures "don't try X on file Y because Z" — the single biggest time sink in agent-assisted development is the agent re-proposing an abandoned approach. `sextant reject "description" --files X --why "reason"` creates a rejection; `--list` and `--delete <id>` manage them. During `sextant scan`, active rejections whose referenced files are missing from the index are auto-staled. In the retrieval lane, when the agent touches a matching file, a `### Rejected approaches` section is appended to the `<codebase-retrieval>` block (gated on `!contentStale`, byte-capped 200 chars). MCP tools (`sextant_reject`, `sextant_rejections`) are deferred to the post-08-20 MCP verdict to avoid confounding the 9-tool surface measurement. SCHEMA_VERSION bumped 4→5.
+
 ## 2026-08-02 — Client-aware orientation: attribution, Kimi wiring, era windows
 
 The first pooled read of the MCP tool surface flipped its premise: reach is **client**-bimodal, not repo-bimodal. Cross-referencing three session-log formats showed Codex made 934 confirmed tool calls since 07-27 (80% `sextant_search` — search-first orientation), Claude Code made 2 in 86 sessions (its hooks orient it before the model wants a tool — zero calls is success there), and Kimi Code loaded the 9 tool definitions in ~282 requests while calling **zero** tools (994 Grep calls in the same logs; its system prompt steers to Grep and it ingests AGENTS.md as explicitly de-privileged reference data). Three ships follow from that one read:
