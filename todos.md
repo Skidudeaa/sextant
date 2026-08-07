@@ -68,6 +68,14 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
   post-wiring (`<hook_result>` blocks in its wire logs, `client:"kimi"` hook-lane rows,
   Grep-vs-sextant ratio from baseline 994:2); (c) keep the 9-tool surface unless BOTH Codex
   sustains-zero AND Kimi stays dark.
+  **UPDATE 2026-08-07: Kimi wiring CONFIRMED live** — 398 `client:"kimi"` hook-lane rows in
+  somaNotes telemetry, 63 in defGen2 (hook fires; `summary.delivered` present). Kimi tool-call
+  ratio moved 994:2 → **917:8** (Grep vs `mcp__sextant__*`, 73 wire.jsonl post-08-03) — ~4×
+  better, still hook-dominated; wire-log count cross-validates exactly with MCP telemetry
+  (`kimi-code`: 21 loads, 8 calls, 0.38/load). All-time pooled: 7.98/load, but per-client is the
+  real read — codex-mcp-client 13.82/load (608 calls, sustained), claude-code 0.11, kimi 0.38,
+  unattributed 8.36. Codex clearly sustains; Kimi is no longer dark but well under 0.5 — verdict
+  still on track for ~08-20, leaning keep (Codex alone redeems the rent).
 
 - [ ] **Benefit-delta era boundary: clean causal accrual starts 2026-07-30** (added 2026-08-02).
   The classifier prose gate (6d1cf70, shipped 07-30) moved fleet fire-rate 78.5% → 28.4% —
@@ -79,6 +87,9 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
   context: the all-time first read (2026-08-02) was turn-level −5.7 pts, CI [−20.9, +4.8],
   SPANS ZERO — directional only, and possibly caused by the very junk injections the gate
   removed. 22 of 67 sessions drew both arms (carryover) — noted in the report output.
+  **STATUS 2026-08-07 (era-windowed read):** still DORMANT — 16 holdback / 44 armed turns (need
+  ≥30/arm); holdback turn hit-rate 12.5% vs armed 6.8% at n too small to mean anything. Funnel:
+  156 retrieval turns → 96 delivered, 23 holdback, 36 empty. Keep accruing; re-read in ~2 weeks.
 
 ## Active — 009 yield synthesis (re-ranked, benefit-proof first)
 
