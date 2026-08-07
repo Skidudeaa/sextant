@@ -1237,6 +1237,39 @@ async function run() {
     }
   }
 
+  // Rejected approaches (docs/003): if any active rejection matches a file
+  // in the retrieval results, prepend a section so the agent doesn't re-propose
+  // an abandoned approach.  Gated on !contentStale — rejections are structural
+  // context and must not appear on a content-stale turn (structural claims
+  // suppressed, text-only body).  Byte-capped at 200 chars.
+  if (!contentStale && output && output.trim()) {
+    try {
+      const rejectionPaths = (merged || []).slice(0, 10).map((r) => r.path).filter(Boolean);
+      if (rejectionPaths.length) {
+        const graphMod = require("../lib/graph");
+        const rejDb = await graphMod.loadDb(root);
+        if (rejDb) {
+          const rejections = graphMod.findRejectionsForFiles(rejDb, rejectionPaths);
+          if (rejections.length) {
+            const rejLines = ["", "### Rejected approaches"];
+            let rejBytes = 0;
+            for (const r of rejections) {
+              let rejFiles = [];
+              try { rejFiles = JSON.parse(r.files || "[]"); } catch {}
+              const fileStr = rejFiles.length ? ` (${rejFiles.slice(0, 2).join(", ")})` : "";
+              const date = r.created_at ? r.created_at.split("T")[0] : "";
+              const line = `- **${r.description}** — ${r.reason}${fileStr}${date ? ", " + date : ""}`;
+              if (rejBytes + line.length > 180) { rejLines.push("- …"); break; }
+              rejLines.push(line);
+              rejBytes += line.length;
+            }
+            output = output + rejLines.join("\n") + "\n";
+          }
+        }
+      }
+    } catch { /* best-effort: never break the hook over rejections */ }
+  }
+
   // Cross the actual output boundary before minting any parent "served" state
   // or dedupe marker. If stdout throws, staged capsule/claim/snapshot state is
   // discarded and a later prompt remains eligible to retry the same payload.

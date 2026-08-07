@@ -18,6 +18,9 @@ Usage:
   sextant query <imports|dependents|exports> --file <relPath> [--root <path>]
   sextant explain <file|dir/> [--root <path>] [--json]
   sextant closure [--root <path>]
+  sextant reject "<description>" --files <a,b> --why "<reason>" [--root <path>]
+  sextant reject --list [--root <path>]
+  sextant reject --delete <id> [--root <path>]
   sextant sprawl [--root <path>] [--within <N>] [--json]
   sextant telemetry [--root <path> | --roots <a,b> | --roots-file <f>] [--json | --tail <N>] [--include-old] [--days <N>] [--since <iso>] [--until <iso>]
   sextant telemetry --coherence-scorecard [--root <path>] [--days <N>] [--json]
@@ -50,6 +53,7 @@ const commandMap = {
   explain: "../commands/explain",
   closure: "../commands/closure",
   sprawl: "../commands/sprawl",
+  reject: "../commands/reject",
   telemetry: "../commands/telemetry",
   "eval-trajectory": "../commands/eval-trajectory",
   tune: "../commands/tune",

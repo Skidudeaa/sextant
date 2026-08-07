@@ -279,6 +279,12 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
 
 ## Completed
 
+- [x] [docs/003] **Rejected-approaches memory** — SHIPPED 2026-08-07. `rejections` table in graph.db
+  (SCHEMA_VERSION 4→5), `sextant reject` CLI (create/list/delete), staleness auto-detection in scan
+  path (missing-file → stale), retrieval-lane injection (`### Rejected approaches` section in
+  `<codebase-retrieval>`, gated on !contentStale, byte-capped 200). MCP tools deferred to post-08-20
+  verdict. Unit 1399/1399, self-eval 21/21. | Done: 08/07/2026
+
 - [x] [flaky test] `test/hook-refresh-freshness.test.js` rotating-case flake — root cause was NOT
   timing: the dogfooding `SEXTANT_HOLDBACK_PCT=20` (.claude/settings.json env) leaked into spawned
   hooks, giving each un-pinned spawn a 20% chance of a holdback turn that withholds the block the
