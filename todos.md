@@ -129,11 +129,12 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
   (`computeResolutionStats` returns no per-kind data today). NOT lockable on any existing fixture
   (all are single-kind/100%) — needs a NEW fixture with an unhonored tsconfig-paths import. Kind set
   `relative|local|tsconfig|workspace|root|unresolved` (drop asset/external — `is_external=1`). ~S
-- [ ] [009 #5 · composite 43 — needs policy] **Loud statusline staleness** — gate STRICTLY on
-  `freshness.contentChanged` (never version bumps). Kills only the content-stale SLICE (version/
-  check_failed blackouts stay green — that's honest). Write the sentinel at BOTH injection sites
-  (retrieval hook AND static-summary `applyFreshnessGate`), or SessionStart blackout never flips the
-  glyph. (Refines the old "[Tier 3 / Review #13]" item below.) ~S
+- [x] [009 #5 · composite 43] **Loud statusline staleness** — SHIPPED 2026-08-07.
+  `.content_stale` sentinel written at both injection sites (static-summary
+  `applyFreshnessGateDetailed` + retrieval hook content-stale lane), cleared on fresh
+  and sync-rescue. Statusline reads it → red dot on content-stale blackouts.
+  Gated strictly on `contentChanged` (never version bumps). Unit 1388/1388,
+  self-eval 21/21. ~S
 - [x] [009 #6 · composite 42] **Public-API outline** — SHIPPED 2026-06-22. `### Public API (hotspots)`
   block in `writeSummaryMarkdown` (`summary.js`), sourced from `graph.queryExports`; anchored on the
   hotspot set (entry point `bin/intel.js` has zero exports), capped 4 files × 6 syms, `default`

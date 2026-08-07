@@ -115,6 +115,13 @@ describe("applyFreshnessGate: fresh path passes through rawSummary", () => {
     const names = events.map((e) => e.name);
     assert.ok(names.includes("freshness.fresh_hit"), `expected freshness.fresh_hit in events: ${names.join(",")}`);
   });
+
+  it("clears the .content_stale sentinel on the fresh path (009 #5)", async () => {
+    // Re-run the gate on the fresh repo; the sentinel must not exist.
+    await cli.applyFreshnessGate(FAKE_RAW_SUMMARY, dir);
+    const sentinelPath = path.join(dir, ".planning", "intel", ".content_stale");
+    assert.ok(!fs.existsSync(sentinelPath), "content_stale sentinel must be absent on fresh path");
+  });
 });
 
 describe("applyFreshnessGate: stale path strips structural fields", () => {
@@ -168,6 +175,14 @@ describe("applyFreshnessGate: stale path strips structural fields", () => {
     const staleHit = events.find((e) => e.name === "freshness.stale_hit");
     assert.equal(staleHit.reason, "head_changed");
     assert.ok(["requested", "pending", "skipped"].includes(staleHit.rescanState));
+  });
+
+  it("writes the .content_stale sentinel on a content-stale turn (009 #5)", async () => {
+    // The previous test triggered the gate on a repo where HEAD moved
+    // (gitCommitFile added a new commit) — that's a content change, so
+    // the sentinel must be on disk.
+    const sentinelPath = path.join(dir, ".planning", "intel", ".content_stale");
+    assert.ok(fs.existsSync(sentinelPath), "content_stale sentinel must exist after a content-stale turn");
   });
 });
 

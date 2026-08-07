@@ -859,6 +859,20 @@ async function run() {
   let stale = freshness.fresh === false;
   let contentStale = stale && freshness.contentChanged === true;
 
+  // Content-stale sentinel (009 #5): mirror the static-summary path so the
+  // statusline flips red on a content-stale retrieval turn too.  Cleared on
+  // the fresh path by applyFreshnessGateDetailed (static lane) or the rescue
+  // below.  Gated strictly on contentChanged — version-only staleness stays
+  // green (we invalidated our own graph, the repo didn't move).
+  try {
+    const sentinelPath = path.join(root, ".planning", "intel", ".content_stale");
+    if (contentStale) {
+      fs.writeFileSync(sentinelPath, String(Date.now()), { mode: 0o600 });
+    } else {
+      try { fs.unlinkSync(sentinelPath); } catch {}
+    }
+  } catch {}
+
   // SYNC RESCUE ON THE RETRIEVAL LANE (docs/033 "Still open" #4). The Option-5
   // adaptive sync arm shipped inside lib/cli.js:applyFreshnessGate — the STATIC
   // summary path. This lane called bare checkFreshness and only ever took the
@@ -906,6 +920,9 @@ async function run() {
       stale = false;
       contentStale = false;
       graphResults = rescue.graphResults;
+      // Rescue succeeded — clear the content-stale sentinel so the statusline
+      // flips back to green (the injected body is now fresh structural claims).
+      try { fs.unlinkSync(path.join(root, ".planning", "intel", ".content_stale")); } catch {}
     }
   }
 

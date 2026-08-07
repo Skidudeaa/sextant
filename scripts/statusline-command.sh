@@ -82,7 +82,17 @@ coverage_alert=$(grep -oE '^ALERT: COVERAGE [A-Z_-]+' "$intel_summary" 2>/dev/nu
 [ -z "$files" ] && [ -z "$res" ] && [ -z "$coverage_alert" ] && exit 0
 
 # ── Health dot ────────────────────────────────────────
-if [ -n "$res" ]; then
+# Content-stale sentinel (009 #5): when the injected body is a content-stale
+# blackout (repo moved since last scan), flip the dot red regardless of the
+# resolution % — the green/yellow dot would otherwise lie about the health of
+# the injected claims.  Version-only and check-failed blackouts stay green:
+# those are "we invalidated our own graph," not "the repo moved under you."
+content_stale=""
+[ -f "$intel_dir/.content_stale" ] && content_stale="1"
+
+if [ -n "$content_stale" ]; then
+    dot="\e[31m◆\e[m"
+elif [ -n "$res" ]; then
     if [ "$res" -ge 90 ]; then dot="\e[32m◆\e[m"
     elif [ "$res" -ge 70 ]; then dot="\e[33m◆\e[m"
     else dot="\e[31m◆\e[m"; fi
