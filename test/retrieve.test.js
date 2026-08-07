@@ -121,3 +121,48 @@ test("rerankAndCapHits — hotspot boost preserved when any hit has def-site mat
   // plus symbol_contains_query +12% = ~+95% on 500 = ~975).
   assert.ok(hubHit.adjustedScore > 500 * 1.50, `def-site hotspot should keep multi-signal boost, got ${hubHit.adjustedScore}`);
 });
+
+test("rerankAndCapHits — entry-point boost halved for non-def files once a def-site match exists", () => {
+  // WHY: the entry-point boost pins shell/index files at the top of every
+  // query that mentions their module's symbols (the "same file tops every
+  // query" pathology). The fan-in suppression pass now halves it alongside
+  // fan-in/hotspot when a true definition match exists elsewhere.
+  const fileByPath = new Map([
+    ["index.js", { path: "index.js", isEntryPoint: true, isHotspot: false, fanIn: 0 }],
+    ["feature.js", { path: "feature.js", isEntryPoint: false, isHotspot: false, fanIn: 0 }],
+  ]);
+  const opts = { useGraphBoost: true, maxHits: 10, hitsPerFileCap: 5, queryTerms: ["myFunc"] };
+
+  // Control: no definition match anywhere → no suppression, entry keeps +10%.
+  const control = rerankAndCapHits(
+    [
+      { path: "index.js", line: "myFunc();", score: 500 },
+      { path: "feature.js", line: "myFunc();", score: 500 },
+    ],
+    fileByPath,
+    opts
+  );
+  const controlEntry = control.find((h) => h.path === "index.js").adjustedScore;
+
+  // feature.js now defines myFunc → suppression halves index.js's entry boost.
+  const suppressed = rerankAndCapHits(
+    [
+      { path: "index.js", line: "myFunc();", score: 500 },
+      { path: "feature.js", line: "function myFunc() {}", score: 500 },
+    ],
+    fileByPath,
+    opts
+  );
+  const supEntry = suppressed.find((h) => h.path === "index.js").adjustedScore;
+
+  const expected = 500 * C.ENTRY_POINT_BOOST * C.FAN_IN_SUPPRESSION;
+  const reduction = controlEntry - supEntry;
+  assert.ok(
+    Math.abs(reduction - expected) < 0.01,
+    `expected entry boost halved (-${expected}), got -${reduction} (control ${controlEntry}, suppressed ${supEntry})`
+  );
+
+  // The definition file itself is untouched by suppression.
+  const defHit = suppressed.find((h) => h.path === "feature.js");
+  assert.ok(defHit.adjustedScore > 500, `def-site file should keep its boosts, got ${defHit.adjustedScore}`);
+});

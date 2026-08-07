@@ -3,7 +3,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { quoteIfPhrase, escapeForZoekt, rankByTokenCoverage } = require("../lib/zoekt");
+const { quoteIfPhrase, escapeForZoekt, rankByTokenCoverage, shapeAndFallbackHits } = require("../lib/zoekt");
 
 // WHY: zoekt's default query parser AND's whitespace-separated tokens as
 // independent substring clauses, while rg with -F treats the same query as
@@ -152,5 +152,56 @@ describe("rankByTokenCoverage", () => {
     assert.equal(ranked[0].path, "b.py"); // equal coverage (2), higher score wins
     assert.equal(ranked[0].score, 500); // keeps the best line
     assert.equal(ranked.length, 2);
+  });
+
+  it("keeps the line covering the most tokens, not the highest-scored line", () => {
+    // WHY: zoekt's top-scored line often mentions only one common token while
+    // a lower-scored line holds the tokens together — the kept line should be
+    // the on-topic one (real-repo miss: "navCensusLink addEventListener" kept
+    // a hub file's filterContainer.addEventListener line).
+    const hits = [
+      { path: "hub.js", line: "filterContainer.addEventListener('click', (evt) => {", score: 900 },
+      { path: "hub.js", line: "getElementById('navCensusLink')?.addEventListener('click'", score: 500 },
+    ];
+    const ranked = rankByTokenCoverage(hits, ["navCensusLink", "addEventListener"]);
+    assert.equal(ranked[0].line, "getElementById('navCensusLink')?.addEventListener('click'");
+  });
+});
+
+// WHY: shapeAndFallbackHits shapes the Tier-2 AND-fallback (phrase matched
+// nothing, unquoted AND matched scattered tokens). With 2+ real tokens it must
+// rank by token coverage so a hub file whose matches are scattered single-token
+// lines doesn't dominate the file that actually covers the query; for short
+// queries it degenerates to plain one-hit-per-file diversification.
+describe("shapeAndFallbackHits", () => {
+  it("prefers the file covering more tokens over the high-score single-token file", () => {
+    const hits = [
+      { path: "hub.js", line: "alpha alpha alpha", score: 900 }, // covers 1 token
+      { path: "canon.js", line: "alpha beta", score: 400 }, // covers 2 tokens
+    ];
+    const ranked = shapeAndFallbackHits(hits, "alpha beta");
+    assert.equal(ranked[0].path, "canon.js");
+  });
+
+  it("collapses to one hit per file so the cap covers distinct files", () => {
+    const hits = [
+      { path: "hub.js", line: "alpha beta", score: 900 },
+      { path: "hub.js", line: "alpha beta again", score: 850 },
+      { path: "other.js", line: "alpha beta", score: 300 },
+    ];
+    const ranked = shapeAndFallbackHits(hits, "alpha beta");
+    assert.equal(ranked.length, 2);
+  });
+
+  it("keeps the first (zoekt-ordered) hit per file for single-token queries", () => {
+    // Degenerate path: too few real tokens for coverage ranking to mean
+    // anything — preserve zoekt's own ordering, one hit per file.
+    const hits = [
+      { path: "a.js", line: "first foo", score: 100 },
+      { path: "a.js", line: "foo foo foo", score: 900 },
+    ];
+    const ranked = shapeAndFallbackHits(hits, "foo");
+    assert.equal(ranked.length, 1);
+    assert.equal(ranked[0].line, "first foo");
   });
 });
