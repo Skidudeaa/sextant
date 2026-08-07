@@ -455,6 +455,71 @@ describe("summary ### Commands block (007 T1.4)", () => {
   });
 });
 
+// ─── Schema/contract anchors block (009 #2) ────────────────────────────────
+
+describe("summary ### Schema block (009 #2)", () => {
+  let tmpDir, db;
+
+  before(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-summary-schema-"));
+    fs.mkdirSync(path.join(tmpDir, ".planning", "intel"), { recursive: true });
+    db = await graphMod.loadDb(tmpDir);
+  });
+  after(() => {
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("surfaces schema files as a Schema block", () => {
+    fs.writeFileSync(path.join(tmpDir, "schema.prisma"), "model User { id Int @id }\n");
+    fs.mkdirSync(path.join(tmpDir, "api"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "api", "schema.graphql"), "type Query { hello: String }\n");
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Schema"), `expected a Schema block; got:\n${md}`);
+    assert.ok(md.includes("schema.prisma"), md);
+    assert.ok(md.includes("api/schema.graphql"), md);
+  });
+
+  it("no Schema block when no schema files exist (degrade quietly)", () => {
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+    // Remove any schema files from the previous test
+    try { fs.unlinkSync(path.join(tmpDir, "schema.prisma")); } catch {}
+    try { fs.unlinkSync(path.join(tmpDir, "api", "schema.graphql")); } catch {}
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(!md.includes("### Schema"), "must not emit an empty Schema block");
+  });
+
+  it("N-caps at 8 schema files", () => {
+    // Clean up schema files from previous tests
+    for (const f of fs.readdirSync(tmpDir)) {
+      if (/\.(proto|prisma|graphql|gql|sql)$/.test(f)) fs.unlinkSync(path.join(tmpDir, f));
+    }
+    for (let i = 0; i < 12; i++) {
+      fs.writeFileSync(path.join(tmpDir, `file${i}.proto`), `message Msg${i} {}\n`);
+    }
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.includes("### Schema"));
+    const schemaLines = md.split("\n").filter((l) => /^- `.*\.(proto|prisma|graphql|gql|sql)`/.test(l));
+    assert.ok(schemaLines.length === 8, `expected 8 schema lines (cap), got ${schemaLines.length}`);
+  });
+
+  it("Schema block stays within 2200 char budget", () => {
+    // Clean up proto files from previous test
+    for (const f of fs.readdirSync(tmpDir)) {
+      if (/\.(proto|prisma|graphql|gql|sql)$/.test(f)) fs.unlinkSync(path.join(tmpDir, f));
+    }
+    for (let i = 0; i < 20; i++) {
+      fs.writeFileSync(path.join(tmpDir, `deep${i}.graphql`), `type T${i} { field: String }\n`);
+    }
+    populateGraphFromIndex(db, { "lib/core.js": { type: "js", imports: [] } });
+    const md = writeSummaryMarkdown(tmpDir, { db, graph: graphMod });
+    assert.ok(md.length <= 2200, `summary must be <= 2200 chars, got ${md.length}`);
+  });
+});
+
 // ─── Structure section (docs/021): displacement + omission ─────────────────
 
 describe("summary ### Structure section (docs/021)", () => {

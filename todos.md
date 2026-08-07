@@ -121,10 +121,12 @@ the classifier conf-0.4 mission in `docs/014` is unchanged and still the next de
   reproduction — both "refuted" verdicts overturned on reproduction. Full writeup + caveats:
   `docs/010-benefit-proof.md`. Reframed off the degenerate hallucinated-path metric (009 correction)
   toward orientation-latency + permutation-null lift.
-- [ ] [009 #2 · composite 45] **Schema/contract anchors** — `schema.prisma`/`*.graphql`/`*.proto`/
-  `openapi`/`schema.sql` `### Schema` block. NEW fast-glob pass (these exts aren't in `isIndexable`)
-  — the most expensive of the cheap tier; migration-dir anchors are a SEPARATE readdir op (adjacent
-  follow-up, NOT "one pass two signals"). Placement ABOVE Recent-changes (clamp guard). ~S
+- [x] [009 #2 · composite 45] **Schema/contract anchors** — SHIPPED 2026-08-07.
+  `### Schema` block via new `schemaFilesFromGlob` fast-glob pass for `*.prisma`/
+  `*.graphql`/`*.gql`/`*.proto`/`openapi.{json,yaml,yml}`/`schema.sql` (not in
+  `isIndexable`, not added to graph). Captured in `captureSummaryInputs` (frozen
+  snapshot). Placed above Recent-changes (END-truncating clamp drops Recent first).
+  N-cap 8, degrade-quietly when absent. Unit 1392/1392, self-eval 21/21. ~S
 - [ ] [009 #4 · composite 43] **Resolution-by-kind breakdown** — new `GROUP BY imports.kind`
   (`computeResolutionStats` returns no per-kind data today). NOT lockable on any existing fixture
   (all are single-kind/100%) — needs a NEW fixture with an unhonored tsconfig-paths import. Kind set
