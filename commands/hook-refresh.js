@@ -232,7 +232,14 @@ async function trySyncRescue(root, freshnessResult, runGraphRetrieval) {
     const decision = freshnessLib.shouldSyncRescan(root, { versionOnly });
     if (!decision || !decision.sync) return null;
 
-    const syncResult = freshnessLib.syncRescan(root, decision.timeoutMs);
+    // Content staleness keeps the per-file mtime+size cache (non-force);
+    // version reasons win checkFreshness's reason race, so a content reason
+    // implies the version stamps match and cached extractions are valid.
+    const syncResult = freshnessLib.syncRescan(root, decision.timeoutMs, {
+      forceReindex:
+        freshnessResult.reason !== "head_changed" &&
+        freshnessResult.reason !== "status_changed",
+    });
     try {
       recordEvent(root, "freshness.sync_rescan", {
         ok: syncResult.state === "completed",
@@ -942,7 +949,11 @@ async function run() {
       });
     } catch {}
     try {
-      require("../lib/freshness").enqueueRescan(root);
+      require("../lib/freshness").enqueueRescan(root, {
+        forceReindex:
+          freshness.reason !== "head_changed" &&
+          freshness.reason !== "status_changed",
+      });
     } catch {}
   }
 

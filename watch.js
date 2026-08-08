@@ -417,12 +417,13 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
 
     w.on("add", onChange)
       .on("change", onChange)
-      .on("unlink", (rel) => {
-        // deletion drift is handled by nightly rescan; keep unlink cheap
-        if (!isTTY) {
-          process.stderr.write(`[intel] ${root}: unlink ignored ${rel}\n`);
-        }
-      })
+      // Deletions used to be deferred to "nightly rescan drift" — which in
+      // practice meant the anchor sat stale (the vanished file changes the
+      // status fingerprint) until a read blacked out and spawned a full
+      // rescan. updateFile handles a missing file (prunes the row), and the
+      // incremental membership repair re-resolves its dangling importers, so
+      // an unlink is now an ordinary in-process reconcile.
+      .on("unlink", onChange)
       .on("error", (err) => {
         dashState.errors += 1;
         if (!isTTY) {
@@ -436,6 +437,51 @@ async function watchRoots(roots, { loadRepoConfig, summaryEverySecOverride = nul
       });
 
     watchers.push(w);
+
+    // Git operations (commit, add, checkout, rebase) touch only .git/, which
+    // the main watcher ignores — so the freshness anchor rotted until a read
+    // blacked out and spawned a full rescan (head_changed alone was 44.8% of
+    // fleet stale_hits). Watch the handful of git-state files directly and
+    // schedule an incremental reconcile; intel re-anchors across the HEAD move
+    // in-process. `--absolute-git-dir` also resolves worktree-style `.git`
+    // files. Non-git roots simply skip the lane.
+    let gitDir = null;
+    try {
+      gitDir = require("child_process")
+        .execSync("git rev-parse --absolute-git-dir", {
+          cwd: root,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+        .trim() || null;
+    } catch {}
+    if (gitDir) {
+      const gw = chokidar.watch(
+        [
+          path.join(gitDir, "HEAD"),
+          path.join(gitDir, "index"),
+          path.join(gitDir, "packed-refs"),
+          path.join(gitDir, "refs"),
+        ],
+        {
+          ignoreInitial: true,
+          persistent: true,
+          depth: 3,
+          // Git writes via lock-file + rename; wait for the replacement to
+          // settle so we reconcile against the post-operation state.
+          awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+        }
+      );
+      const onGitStateEvent = () => {
+        dashState.lastEventTime = Date.now();
+        intel.notifyRepoStateChanged(root, { summaryThrottleMs: throttleMs });
+      };
+      gw.on("add", onGitStateEvent)
+        .on("change", onGitStateEvent)
+        .on("unlink", onGitStateEvent)
+        .on("error", () => {});
+      watchers.push(gw);
+    }
   }
 
   // Start dashboard refresh loop
