@@ -1,5 +1,9 @@
 # Project Todos
 
+> **FROZEN 2026-08-26:** Sextant is hibernating. These items are historical
+> research inventory, not an active roadmap. Resume from `HIBERNATION.md`, not
+> by selecting the next unchecked box.
+
 Roadmaps: `docs/ideas/006-next-targets-roadmap.md` (functional targets),
 `docs/ideas/007-signal-expansion-menu.md` (new target-codebase signals),
 `docs/ideas/008-iteration-review-findings.md` (review audit + ranked actions),

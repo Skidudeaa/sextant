@@ -72,6 +72,19 @@ const commandMap = {
     process.exit(0);
   }
 
+  // WHY: hibernation leaves project-local hooks and MCP declarations in place
+  // for a one-step resume. Ambient entry points must therefore go quiet before
+  // they initialize state or start a watcher. Explicit read-only/maintenance
+  // commands remain available so the archived project can still be inspected.
+  const { isHibernating, markerPath } = require("../lib/hibernation");
+  if (isHibernating()) {
+    if (cmd === "hook" || cmd === "inject") return;
+    if (cmd === "watch" || cmd === "watch-start") {
+      console.error(`sextant is hibernating (${markerPath()})`);
+      return;
+    }
+  }
+
   // ---- hook commands: dispatch by subcommand, no roots parsing ----
   if (cmd === "hook") {
     const sub = argv[1];

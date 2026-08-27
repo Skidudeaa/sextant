@@ -14,6 +14,7 @@ const { retrieve } = require("../lib/retrieve");
 const { normalizeRelPath } = require("../lib/utils");
 const { loadRepoConfig } = require("../lib/config");
 const { recordEvent } = require("../lib/telemetry");
+const { isHibernating } = require("../lib/hibernation");
 
 // --- Tool definitions ---------------------------------------------------
 
@@ -691,7 +692,7 @@ async function dispatch(method, params) {
         _client = name.trim().toLowerCase().slice(0, 64);
       }
     } catch {}
-    await ensureInit();
+    if (!isHibernating()) await ensureInit();
     return {
       protocolVersion: "2024-11-05",
       serverInfo: SERVER_INFO,
@@ -700,6 +701,7 @@ async function dispatch(method, params) {
   }
 
   if (method === "tools/list") {
+    if (isHibernating()) return { tools: [] };
     // The DENOMINATOR (docs/035 #3). This surface was completely unmeasured —
     // `grep -c recordEvent mcp/server.js` was 0, which is why nobody noticed
     // that a transcript census finds ~1 sextant tool invocation against
@@ -712,6 +714,12 @@ async function dispatch(method, params) {
   }
 
   if (method === "tools/call") {
+    if (isHibernating()) {
+      return {
+        content: [{ type: "text", text: "Sextant is hibernating; no tools are available." }],
+        isError: true,
+      };
+    }
     const toolName = params.name;
     const toolArgs = params.arguments || {};
     const handler = toolHandlers[toolName];

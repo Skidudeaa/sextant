@@ -1,5 +1,10 @@
 # sextant
 
+> **Project status — hibernating as of 2026-08-26.** Sextant is preserved, not
+> abandoned, but active development and ambient agent integration are paused.
+> See [HIBERNATION.md](HIBERNATION.md) and the
+> [results review](docs/041-hibernation-results-review.md).
+
 **A small, honest map of your repo — injected into your coding agent before it guesses.**
 
 Most "codebase intelligence" tools can't tell you whether they help. Sextant can:

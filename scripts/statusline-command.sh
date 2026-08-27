@@ -31,6 +31,12 @@ fi
 printf '\e[32m%s@%s\e[m \e[34m%s\e[m' "$user" "$host" "$cwd"
 [ -n "$git_branch" ] && printf ' \e[31m%s\e[m' "$git_branch"
 
+# Hibernation preserves repo-local wiring for a reversible resume. Suppress the
+# Sextant segment globally while the marker exists; the ordinary shell/git
+# statusline remains intact.
+sextant_config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
+[ -f "$sextant_config_home/sextant/hibernating" ] && exit 0
+
 # ── codebase-intel ─────────────────────────────────────
 intel_dir="$cwd/.planning/intel"
 intel_summary="$intel_dir/summary.md"

@@ -2,6 +2,29 @@
 
 All notable changes to sextant are recorded here. Entries are ordered newest first.
 
+## 2026-08-26 — Project hibernation
+
+Sextant is preserved but no longer active ambient infrastructure. A global
+marker at `${XDG_CONFIG_HOME:-$HOME/.config}/sextant/hibernating` makes hook and
+injection entry points silent before initialization, refuses watcher starts,
+keeps project-local MCP servers protocol-healthy while advertising zero tools,
+and suppresses the Sextant statusline segment. Explicit diagnostic commands and
+`watch-stop` remain available. Removing the marker is deliberately not the whole
+resume procedure; `HIBERNATION.md` requires a one-repo canary before restoring
+the fleet or global client registrations.
+
+The decision is documented as an allocation ruling, not a falsified hypothesis.
+Post-August-8 freshness improved, but the holdback result was underpowered,
+repo-dominated, and contaminated by mixed-arm sessions. The complete audit is
+`docs/041-hibernation-results-review.md`. The daily benefit cron, global Codex
+MCP registration, global Kimi prompt hook, watchers, and surviving Zoekt daemon
+were disabled at activation; repo-local wiring and all `.planning/intel` state
+were retained for a reversible resume.
+
+The hibernation gate is locked by `test/hibernation.test.js`. Full verification:
+1,411 passed, 0 failed, 2 skipped; all shell integration scripts passed; retrieval
+eval 21/21.
+
 ## 2026-08-08 — The stale problem: in-process re-anchoring across git operations
 
 A pooled 6-repo read showed **45.0% of all reads stale and 44.4% emitting the blackout body** — the freshness gate's honesty discipline meant sextant simply didn't speak on nearly half its opportunities, which dwarfs any ranking refinement as a value lever. The diagnosis found three compounding ratchets, each now closed. Net effect: the common causes of staleness (commit, `git add`, checkout, new file, deleted file) become sub-second in-process reconciles instead of 12–150s spawned rescans that had to land in a quiet window.
