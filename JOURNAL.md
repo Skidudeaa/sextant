@@ -6,3 +6,5 @@
 [2026-08-26] Disabled the Sextant cron, global Codex MCP registration, global Kimi hook, fleet watchers, and surviving Zoekt daemon — ambient work is stopped without deleting repo-local wiring or indexed evidence.
 [2026-08-26] Restored `/root/.local/bin/sextant` as a symlink to the preserved checkout — initialized repos now reach the silent hibernation gate instead of failing with command not found.
 [2026-08-26] Full hibernation verification passed — 1411 tests passed, 0 failed, 2 skipped; integration scripts passed and retrieval eval remained 21/21.
+[2026-08-26] Removed Sextant from the droplet's live projects — 125 integration files were narrowly cleaned and 105 generated index trees were moved into a verified root-only quarantine.
+[2026-08-26] Disabled three legacy codebase-intel user-service instances — two were still burning restart cycles after their command disappeared, so the unit, helper, and stale npm predecessor were quarantined too.

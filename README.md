@@ -2,6 +2,9 @@
 
 > **Project status — hibernating as of 2026-08-26.** Sextant is preserved, not
 > abandoned, but active development and ambient agent integration are paused.
+> The maintainer droplet's project hooks, MCP registrations, generated indexes,
+> watcher services, and global launchers have been removed into a verified local
+> quarantine; resumption starts with one disposable canary, not a fleet restore.
 > See [HIBERNATION.md](HIBERNATION.md) and the
 > [results review](docs/041-hibernation-results-review.md).
 

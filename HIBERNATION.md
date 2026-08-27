@@ -1,7 +1,7 @@
 # Sextant hibernation checkpoint
 
 Date: 2026-08-26
-Status: active; verification ledger below
+Status: active; droplet integrations removed; verification ledger below
 Resume posture: preserved project, no implied sunset
 
 ## Decision
@@ -59,6 +59,30 @@ claim that this experiment falsified Sextant.
 The full audit is in
 [`docs/041-hibernation-results-review.md`](docs/041-hibernation-results-review.md).
 
+## Post-checkpoint droplet removal
+
+After validating the reversible hibernation gate, the maintainer chose to remove
+Sextant from every live project on this droplet rather than leave dormant wiring
+in place. On 2026-08-26 the removal:
+
+- removed Sextant hooks, MCP entries, holdback environment values, and managed
+  AGENTS sections from 125 project configuration files while preserving every
+  unrelated key, hook, MCP server, and user-authored AGENTS section;
+- moved 105 generated `.planning/intel` trees (882 MiB) out of live projects;
+- removed the global launcher, marker, fleet files, statusline, legacy enable
+  helper, and stale npm-linked predecessor package from their active locations;
+- disabled three enabled legacy `codebase-intel-watcher@` user-service instances,
+  including two caught in command-not-found restart loops, then removed the unit;
+  and
+- retained the source repository, Git history, hibernation tag, GitHub project,
+  and the pre-existing untracked `.serena/` directory.
+
+The rollback material and exact manifests are root-only at
+`/root/backups/sextant-project-removal-20260826-20260827T020413Z`. It is a local
+quarantine, not an off-host backup. Do not restore it wholesale: install the
+current source, then restore one disposable canary using the manifest as a
+reference. Project settings may have legitimately changed during hibernation.
+
 ## Activation boundary
 
 Hibernation is active only after all of these are separately verified:
@@ -73,9 +97,9 @@ Hibernation is active only after all of these are separately verified:
 4. **Ambient injection stopped** — Claude, Codex, and Kimi integrations cannot
    auto-start watchers, inject context, or expose the MCP tool surface. Disabling
    must not leave agent startup errors.
-5. **State retained** — `.planning/intel` evidence is not deleted during
-   hibernation. Generated indexes can be discarded later only after the archive
-   is verified.
+5. **State retained before removal** — `.planning/intel` evidence is archived
+   before generated indexes leave active projects. The later fleet removal is
+   recorded separately above.
 6. **External posture set deliberately** — GitHub remains available and clearly
    described as paused. Do not archive the GitHub repository unless the owner
    wants its read-only semantics; do not delete packages, releases, issues, or
@@ -150,7 +174,8 @@ an explicit success/kill criterion, and the smallest supported client surface.
 1. Read this file, `docs/040-handoff.md`, and `JOURNAL.md`.
 2. Verify the hibernation tag, archive checksums, current agent-client contracts,
    Node/runtime compatibility, and remote state.
-3. Restore integrations on one disposable repository only.
+3. Reinstall the global launcher from current source and restore integrations on
+   one disposable repository only; do not replay the quarantine wholesale.
 4. Run the full suite and one end-to-end hook/MCP proof.
 5. Expand to the fleet only after the disposable canary is clean.
 
@@ -168,7 +193,8 @@ because the source commit or tag exists.
   three stale locks were cleaned; the final Sextant Zoekt daemon was terminated
 - Daily cron disabled: DONE — the exact holdback-benefit entry was removed;
   unrelated cron entries were preserved
-- Global hibernation marker active: DONE — root-owned mode 0600
+- Global hibernation marker: DONE, THEN REMOVED — it proved the reversible gate
+  before the later full droplet uninstall; its prior contents are quarantined
 - Global client registrations disabled: DONE — Codex MCP entry removed and Kimi
   `UserPromptSubmit` hook removed; their pre-change files are in the archive
 - Dormant hook/MCP/statusline proof: DONE — hook stdout/stderr empty, MCP
@@ -176,3 +202,11 @@ because the source commit or tag exists.
   watcher/Zoekt process remained
 - Commit and annotated tag pushed: DONE — `hibernate-2026-08-26`
 - Remote README and repository description updated: DONE
+- Project integration removal: DONE — 125 project files cleaned without
+  overwriting unrelated configuration; active hook/MCP/managed-AGENTS residue is
+  zero
+- Generated state removal: DONE — 105 live index trees (882 MiB) moved to the
+  root-only quarantine; active `.planning/intel` residue is zero
+- Legacy service removal: DONE — three enabled watcher instances disabled; the
+  template, helper, npm predecessor, launcher, statusline, and fleet files are no
+  longer active
