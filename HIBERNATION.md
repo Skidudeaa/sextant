@@ -210,3 +210,7 @@ because the source commit or tag exists.
 - Legacy service removal: DONE — three enabled watcher instances disabled; the
   template, helper, npm predecessor, launcher, statusline, and fleet files are no
   longer active
+- Project Git cleanup: DONE — 68 tracked config paths were isolated into 30
+  cleanup-only commits across 29 checked-out branches; 27 commits were verified
+  on 26 remote branches and three remain local-only because those repositories
+  have no remote. Pre-existing staged and unstaged project edits were preserved.

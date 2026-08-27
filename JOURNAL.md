@@ -8,3 +8,4 @@
 [2026-08-26] Full hibernation verification passed — 1411 tests passed, 0 failed, 2 skipped; integration scripts passed and retrieval eval remained 21/21.
 [2026-08-26] Removed Sextant from the droplet's live projects — 125 integration files were narrowly cleaned and 105 generated index trees were moved into a verified root-only quarantine.
 [2026-08-26] Disabled three legacy codebase-intel user-service instances — two were still burning restart cycles after their command disappeared, so the unit, helper, and stale npm predecessor were quarantined too.
+[2026-08-26] Made project cleanup durable without absorbing existing work — 68 tracked config paths landed in cleanup-only commits across 29 branches, with all 26 remotely backed branches pushed and three no-remote repositories retained locally.
