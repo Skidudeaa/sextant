@@ -85,8 +85,8 @@ async function withCoherenceEnv(enabled, fn) {
 // ---------------------------------------------------------------------------
 
 describe("MCP server — tool definitions", () => {
-  it("exposes exactly 9 tools", () => {
-    assert.equal(TOOLS.length, 9); // +focus, +task_status (027), +closure (029)
+  it("exposes exactly 10 tools", () => {
+    assert.equal(TOOLS.length, 10); // +focus, +task_status (027), +closure (029), +challenge (Jev)
   });
 
   it("every tool has name, description, and inputSchema", () => {
@@ -181,9 +181,10 @@ describe("MCP server — tools/list", () => {
   it("returns the tool list", async () => {
     const result = await dispatch("tools/list", {});
     assert.ok(Array.isArray(result.tools));
-    assert.equal(result.tools.length, 9);
+    assert.equal(result.tools.length, 10);
     const names = result.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
+      "sextant_challenge",
       "sextant_closure",
       "sextant_explain",
       "sextant_focus",

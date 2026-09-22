@@ -210,6 +210,21 @@ async function buildHookFixture(prefix) {
   return dir;
 }
 
+// Repo config is a tracked-tree change: writing it dirties `git status`, which
+// makes the next hook turn content-stale (and a content-stale turn never
+// consults Jev — that is asserted separately above). Commit it and re-anchor the
+// scan state so the lane-switch cases exercise the lanes, not the freshness gate.
+async function setRepoConfig(dir, cfg) {
+  fs.writeFileSync(path.join(dir, ".codebase-intel.json"), JSON.stringify(cfg));
+  execSync("git add -A && git commit -q -m cfg", { cwd: dir });
+  const db = await graph.loadDb(dir);
+  freshness.recordScanState(db, dir);
+  await graph.persistDb(dir);
+  const rawSummary = "## Codebase intelligence\n- test\n";
+  fs.writeFileSync(path.join(dir, ".planning", "intel", "summary.md"), rawSummary);
+  assert.equal(await require("../lib/summary-binding").writeManifest(dir, rawSummary, { db, graph }), true);
+}
+
 function runHook(dir, prompt, { jev, mock, cfgHome, sessionId = "jev-hook" }) {
   const logFile = path.join(dir, ".planning", "jev-mock.log");
   const env = { ...process.env, XDG_CONFIG_HOME: cfgHome, SEXTANT_SYNC_RESCAN: "0", SEXTANT_JEV_MOCK_LOG: logFile };
@@ -336,15 +351,19 @@ describe("hook-refresh: opt-in Jev rerank + intent lanes (mock provider via NODE
   it("lane switches: jev.lanes.rerank=false keeps intent; jev.lanes.intent=false keeps rerank", async () => {
     const dir = await buildHookFixture("lanes");
     try {
-      fs.writeFileSync(path.join(dir, ".codebase-intel.json"), JSON.stringify({ jev: { lanes: { rerank: false } } }));
+      await setRepoConfig(dir, { jev: { lanes: { rerank: false } } });
       let r = runHook(dir, "thanks for resolveImportPath", { jev: true, cfgHome, mock: { noul: { needs_code_evidence: 0.9, "*": 0.9 }, choiceByPath: { best_file: "lib/resolveImportPathCache.js" } }, sessionId: "l1" });
       assert.ok(r.events.some((e) => e.name === "jev.intent"));
       assert.ok(!r.events.some((e) => e.name === "jev.rerank"));
       assert.deepEqual(blockOrder(r.stdout), ["lib/resolveImportPath.js", "lib/resolveImportPathCache.js"]);
-      fs.writeFileSync(path.join(dir, ".codebase-intel.json"), JSON.stringify({ jev: { lanes: { intent: false } } }));
+      await setRepoConfig(dir, { jev: { lanes: { intent: false } } });
+      // Telemetry accumulates per repo: scope the second half's assertions to
+      // the events THIS turn produced, or the first half's jev.intent leaks in.
+      const priorEvents = telemetry.readEvents(dir).length;
       r = runHook(dir, "thanks for resolveImportPath", { jev: true, cfgHome, mock: { noul: { needs_code_evidence: 0.1, "*": 0.9 }, choiceByPath: { best_file: "lib/resolveImportPathCache.js" } }, sessionId: "l2" });
-      assert.ok(!r.events.some((e) => e.name === "jev.intent"));
-      assert.ok(r.events.some((e) => e.name === "jev.rerank"));
+      const turnEvents = r.events.slice(priorEvents);
+      assert.ok(!turnEvents.some((e) => e.name === "jev.intent"));
+      assert.ok(turnEvents.some((e) => e.name === "jev.rerank"));
       assert.deepEqual(blockOrder(r.stdout), ["lib/resolveImportPathCache.js", "lib/resolveImportPath.js"]);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
