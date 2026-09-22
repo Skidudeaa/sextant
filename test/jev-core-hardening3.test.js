@@ -33,14 +33,16 @@ describe("jev hardening 3: returned model must be the requested model (or a dash
   });
   afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); fs.rmSync(cfgHome, { recursive: true, force: true }); });
 
-  it("accepts exact and dash-suffixed matches; rejects any other charset-valid string, including a credential-shaped one", async () => {
+  it("accepts only the exact requested model; rejects any other charset-valid string, including a credential-shaped one", async () => {
+    // (Review 3 closed the earlier dash-suffix allowance: a suffix is an
+    // unbounded channel. See test/jev-core-hardening4.test.js.)
     const { ask } = require("../lib/jev");
-    for (const good of ["jev-1.13.0", "jev-1.13.0-rc.2"]) {
+    for (const good of ["jev-1.13.0"]) {
       const r = await ask(root, { purpose: "unit", state: "s", questions: NOUL_Q, env, fetch: async () => okResponse(answer(good)) });
       assert.equal(r.ok, true, good);
       assert.equal(r.model, good);
     }
-    for (const bad of [KEY, "jev-1.13.1", "jev-1.13", "jev-1.13.0rc2", "jev", "jev-2.0.0"]) {
+    for (const bad of [KEY, "jev-1.13.1", "jev-1.13", "jev-1.13.0rc2", "jev-1.13.0-rc.2", "jev", "jev-2.0.0"]) {
       const r = await ask(root, { purpose: "unit", state: "s", questions: NOUL_Q, env, fetch: async () => okResponse(answer(bad)) });
       assert.deepEqual([r.ok, r.reason], [false, "invalid_contract"], `model ${bad} must be rejected for requested jev-1.13.0`);
       assert.ok(!JSON.stringify(r).includes(KEY));
@@ -119,7 +121,12 @@ describe("jev hardening 3: parent-directory symlink swap is refused after open",
       let code = null;
       let text = null;
       try { text = compileScope(root, { path: "lib/a.js", symbol: "alpha" }).text; } catch (e) { code = e instanceof JevStateError ? e.code : e.message; }
-      assert.equal(code, "not_regular_file", `parent swap must be refused; got code=${code} text=${text}`);
+      // Invariant: bytes from outside the root are never returned. Either the
+      // read is refused (not_regular_file) or — with a descriptor-pinned
+      // traversal that never re-resolves the path string — the ORIGINAL in-root
+      // bytes are returned regardless of the name swap.
+      if (code !== null) assert.equal(code, "not_regular_file", `unexpected refusal ${code}`);
+      else assert.equal(text, "function alpha() {\n  return 1;\n}", `outside-root bytes must never be returned; got ${text}`);
     } finally {
       fs.lstatSync = realLstat;
       fs.rmSync(outsideDir, { recursive: true, force: true });

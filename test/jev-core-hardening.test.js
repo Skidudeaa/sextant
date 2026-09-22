@@ -85,9 +85,10 @@ describe("jev hardening: successful responses are projected onto the contract sh
       assert.deepEqual([r.ok, r.reason], [false, "invalid_contract"], `model ${JSON.stringify(bad)} must be rejected`);
       assert.ok(!JSON.stringify(r).includes(KEY));
     }
+    // Review 3: no suffix allowance at all — only the exact requested model is accepted.
     const fetch = async () => okResponse({ ...fullAnswer(), model: "jev-1.13.0-rc.2" });
     const r = await ask(root, { purpose: "unit", state: "s", questions: QUESTIONS, fetch, env });
-    assert.equal(r.ok, true);
+    assert.deepEqual([r.ok, r.reason], [false, "invalid_contract"]);
     const raw = fs.readFileSync(path.join(root, ".planning", "intel", "telemetry.jsonl"), "utf8");
     assert.ok(!raw.includes(KEY), "a rejected model string must not be recorded");
   });
