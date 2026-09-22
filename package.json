@@ -10,6 +10,8 @@
     "codebase-intel": "bin/intel.js"
   },
   "scripts": {
+    "test:jev": "node --test experiments/jev/*.test.js",
+    "lab:jev": "node experiments/jev/lab.js",
     "test": "node --test test/*.test.js test/extractors/*.test.js && bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh && bash scripts/test-holdback-benefit.sh && node scripts/eval-retrieve.js",
     "test:unit": "node --test test/*.test.js test/extractors/*.test.js",
     "test:integration": "bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh && bash scripts/test-holdback-benefit.sh",

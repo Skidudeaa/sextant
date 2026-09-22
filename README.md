@@ -1,7 +1,10 @@
 # sextant
 
-> **Project status — hibernating as of 2026-08-26.** Sextant is preserved, not
-> abandoned, but active development and ambient agent integration are paused.
+> **Project status — experimental research resumed 2026-09-21.** A TypeSafe Jev
+> laboratory is testing new codebase-intelligence applications; ambient agent
+> integration remains paused. See the [experiment ledger](docs/045-jev-lab.md),
+> [live measurements](docs/046-jev-live-findings.md), and
+> [representation and decomposition probes](docs/047-jev-mechanism-probes.md).
 > The maintainer droplet's project hooks, MCP registrations, generated indexes,
 > watcher services, and global launchers have been removed into a verified local
 > quarantine; resumption starts with one disposable canary, not a fleet restore.
