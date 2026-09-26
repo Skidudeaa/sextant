@@ -42,3 +42,20 @@
 [2026-09-22] Tested atomic equality decomposition in 64 live requests — structured inputs improved 23/32 to 24/32 while literal inputs regressed 31/32 to 30/32; decomposition alone did not reliably repair semantic errors.
 [2026-09-22] Finished coordination decomposition and independent execution audit — all-three accuracy rose 14/32 to 19/32 within the same requests, but true emergent-conflict detection collapsed 8/8 to 1/8; logical coherence is not an acceptable substitute for finding real interactions.
 [2026-09-22] Completed the experimental campaign with 174 passing tests — preserved all live evidence including the partial failure, left ambient integrations paused, and terminated the temporary credential-holding process after the last provider call.
+[2026-09-25] Ran mutation-labeled test-witness selection (120 mutants, 68 killed, 82 test files) — Jev tied the static ranking (p=0.31, shuffled p=0.57) and added nothing over coverage plus static order (hit@1 0.91 vs 0.89, p=0.39); every kill was inside coverage. docs/049.
+[2026-09-25] Measured commit-focus weighting for co-change on a 197/50 temporal split — Jev weighting was indistinguishable from baseline (p≈0.83); an initial table that looked favorable came from the count floor pruning fractional weights.
+[2026-09-25] Ran doc/memory drift lint — 0 dead symbols and 62 dead-path mentions after triage; the semantic support check reached only AUC 0.64 and its low scores flagged under-cited claims, not stale ones.
+[2026-09-25] Ran claim-vs-evidence over 26 Codex rollouts — 35/46 "tests passed" sentences lacked a same-turn test run, but lead sessions relay worker results, so a per-turn check measures relaying, not fabrication.
+[2026-09-25] Found jev-1.13.0 rounds Choice/Score probabilities to cents — the 0.001 sum check rejected ~13% of 6-option and most 45-option Choices; the experiment client now allows n×0.005 only for cent-quantized values. The unmerged lib/jev-client.js still rejects them.
+[2026-09-25] Left tree-walk (E09) undecided — 2 empty-graph queries and 54% rounding rejections before the client fix; needs a larger natural-language query set first.
+
+[2026-09-25] Ran semantic locate on Sextant's own commits — Jev over thin file descriptors lost to graph retrieval (hit@1 .063 vs .124, n=46); line ranking inside the true file led term matching on every metric but the sign test was 65/62. Multi-repo v2 with a full-content ceiling is running.
+[2026-09-25] Measured defect-location prediction on five repos (868 files) — a single "business rules" Noul beat fan-in overall (AUC .779 vs .668) and beat churn on low-history files (.70-.72 vs .63, both label sources); the broad "will need a fix" Noul scored .61. First Jev result today that is not a tie.
+[2026-09-25] Ran the semantic role map on five repos — Jev tagged pattern-detectable roles with recall ≥0.8 on 6 of 7 (llm_call 0.62), but routing commit subjects through role tags did not beat directory routing at matched set size (11 vs 17, p=0.34).
+[2026-09-25] Added churn to the workset HAZARDS — per-file commit counts from the co-change git-log parse persist in a new file_churn table (schema 6), and files at the repo p90 (min 3 commits) list first; chosen because churn beat fan-in as a fix predictor (AUC .82 vs .67) and top-decile files were later fixed 69-100% of the time.
+
+## GRAVEYARD
+- Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
+- Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
+- Jev semantic doc-claim support lint (2026-09-25) — died at AUC 0.64 with 5/28 paired discrimination; the deterministic dead-reference scan is the part worth keeping (docs/049 §3).
+- Jev role-tag routing as an orientation map (2026-09-25) — died because it did not beat directory routing at matched set size (docs/049 §8). The tags themselves are accurate and stay available as file facts.

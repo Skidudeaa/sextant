@@ -117,8 +117,8 @@ const TOOLS = [
     description:
       "Compile a role-based Task Capsule for what you're about to work on: the files " +
       "grouped as PRIMARY (the thing to change, with its region), SUPPORT (needed to " +
-      "understand it), WITNESSES (its tests/fixtures), HAZARDS (high-fan-in/blast " +
-      "surfaces), and UNKNOWNS (what sextant can't verify). A sharper first call than a " +
+      "understand it), WITNESSES (its tests/fixtures), HAZARDS (high-churn and " +
+      "high-fan-in surfaces), and UNKNOWNS (what sextant can't verify). A sharper first call than a " +
       "flat file list when starting a task. Returns nothing structural when the index is " +
       "stale (silent absence — stale claims are withheld).",
     inputSchema: {
@@ -549,7 +549,7 @@ async function handleFocus(args) {
   try {
     const graph = require("../lib/graph");
     const freshness = require("../lib/freshness");
-    const { compileWorkset } = require("../lib/workset");
+    const { compileWorkset, churnOptions } = require("../lib/workset");
     const { buildCapsule, writeCapsule } = require("../lib/capsule");
     const { formatCapsule } = require("../lib/format-capsule");
 
@@ -578,7 +578,11 @@ async function handleFocus(args) {
       }
     }
     const res = graph.computeResolutionStats(db);
-    const workset = compileWorkset(files, { root: _root, resolutionPct: res && res.resolutionPct });
+    const workset = compileWorkset(files, {
+      root: _root,
+      resolutionPct: res && res.resolutionPct,
+      ...churnOptions(graph, db, files.map((f) => f.path)),
+    });
     const capsule = buildCapsule({ root: _root, sessionKey: "mcp", taskText: task, workset });
     writeCapsule(_root, "mcp", capsule);
     const detailed = formatCapsule(capsule, { maxChars: 1400 });

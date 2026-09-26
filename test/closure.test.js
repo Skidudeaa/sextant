@@ -77,7 +77,7 @@ describe("structural-delta — computeStructuralDelta vs graph pre-image", () =>
 describe("closure — buildClosure / renderClosure", () => {
   // A temp repo with a persisted capsule (Phase B/C/D shape) + a blast-radius
   // touched-state file (the observed set).
-  function fixture(touchedRegions) {
+  function fixture(touchedRegions, hazards) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sx-closure-"));
     fs.mkdirSync(path.join(dir, ".planning", "intel"), { recursive: true });
     const capsule = {
@@ -89,7 +89,7 @@ describe("closure — buildClosure / renderClosure", () => {
         primary: [{ path: "lib/orient.js" }],
         support: [],
         witnesses: [{ path: "test/orient.test.js" }, { path: "test/hook-pretask.test.js" }],
-        hazards: ["lib/graph.js high fan-in (34)"],
+        hazards: hazards || ["lib/graph.js high fan-in (34)"],
         unknowns: ["1 primary file(s) in a language sextant can't resolve to regions"],
       },
       servedClaims: [], // empty → claim diff all zero
@@ -106,6 +106,17 @@ describe("closure — buildClosure / renderClosure", () => {
     );
     return dir;
   }
+
+  it("recovers the path from churn hazard notes as a consumer", () => {
+    const dir = fixture(undefined, ["lib/hot.js high churn (12 commits), high fan-in (20)", "lib/cold.js high churn (6 commits)"]);
+    try {
+      const r = buildClosure(dir, { sessionKey: "sX" });
+      assert.ok(r.consumersNotInspected.includes("lib/hot.js"));
+      assert.ok(r.consumersNotInspected.includes("lib/cold.js"));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it("summarizes structural changes, witnesses observed vs not, and consumers", () => {
     const dir = fixture();

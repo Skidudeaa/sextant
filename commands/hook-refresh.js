@@ -1026,12 +1026,17 @@ async function run() {
   let parentSnapshotToPersist = null;
   try {
     if (useCapsule) {
-      const { compileWorkset } = require("../lib/workset");
+      const { compileWorkset, churnOptions } = require("../lib/workset");
       const { buildCapsule, readCapsule, carryForwardCapsule } = require("../lib/capsule");
       const { formatCapsule } = require("../lib/format-capsule");
       const claimsLib = require("../lib/claims");
 
-      const workset = compileWorkset((merged && merged.files) || [], { root });
+      const graphMod = require("../lib/graph");
+      const mergedFiles = (merged && merged.files) || [];
+      const workset = compileWorkset(mergedFiles, {
+        root,
+        ...churnOptions(graphMod, await graphMod.loadDb(root), mergedFiles.map((f) => f.path)),
+      });
       const priorCapsule = readCapsule(root, sessionKey);
       let capsule = buildCapsule({ root, sessionKey, taskText: prompt, workset });
       // The workset came from the graph state checkFreshness validated. Do not

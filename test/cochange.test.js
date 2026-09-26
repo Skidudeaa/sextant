@@ -68,6 +68,23 @@ describe("cochange.computeCoChange", () => {
     assert.equal(degree.size, 0);
   });
 
+  it("returns per-file churn over included, non-bulk commits", () => {
+    const commits = [
+      { files: ["lib/a.js", "lib/b.js"] },
+      { files: ["lib/a.js", "docs/x.md"] },
+      { files: ["lib/a.js"] },
+      // bulk commit: excluded by raw count, so it adds no churn
+      { files: Array.from({ length: 60 }, (_, i) => (i === 0 ? "lib/b.js" : `gen/f${i}.js`)) },
+    ];
+    const { churn } = cochange.computeCoChange(commits, {
+      isIncluded: (f) => f.startsWith("lib/"),
+      maxFilesPerCommit: 40,
+    });
+    assert.equal(churn.get("lib/a.js"), 3);
+    assert.equal(churn.get("lib/b.js"), 1);
+    assert.equal(churn.has("docs/x.md"), false);
+  });
+
   it("dedupes files within a commit", () => {
     const commits = [
       C("1", ["a.js", "a.js", "b.js"]),
@@ -160,6 +177,9 @@ describe("cochange.parseGitLog / mineCoChange", () => {
     assert.equal(res.pairs[0].a, "lib/a.js");
     assert.equal(res.pairs[0].b, "lib/b.js");
     assert.equal(res.pairs[0].count, 3);
+    assert.equal(res.churn.get("lib/a.js"), 3);
+    assert.equal(res.churn.get("lib/only.js"), 1);
+    assert.equal(res.churn.has("CHANGELOG.md"), false);
   });
 
   it("returns empty (never throws) on a non-git directory", () => {
@@ -208,6 +228,21 @@ describe("graph co-change storage", () => {
     // wholesale replace
     graph.replaceCoChangePairs(db, [{ a: "x.js", b: "y.js", count: 3, confidence: 0.5 }], new Map([["x.js", 1], ["y.js", 1]]));
     assert.equal(graph.countCoChangePairs(db), 1);
+  });
+
+  it("stores churn with the co-change rows, wholesale, and reports its quantile", () => {
+    const churn = new Map(Array.from({ length: 10 }, (_, i) => [`lib/f${i}.js`, i + 1]));
+    graph.replaceCoChangePairs(db, [], new Map(), churn);
+    assert.deepEqual(
+      [...graph.churnByPaths(db, ["lib/f0.js", "lib/f9.js", "lib/absent.js"]).entries()].sort(),
+      [["lib/f0.js", 1], ["lib/f9.js", 10]]
+    );
+    // ascending counts 1..10, index floor(0.9*10)=9 -> 10
+    assert.equal(graph.churnQuantile(db, 0.9), 10);
+    assert.equal(graph.churnQuantile(db, 0.5), 6);
+    graph.replaceCoChangePairs(db, [], new Map());
+    assert.equal(graph.churnQuantile(db, 0.9), null, "a replace without churn clears it");
+    assert.equal(graph.churnByPaths(db, ["lib/f9.js"]).size, 0);
   });
 
   it("findCoChangePartners returns partners from either pair side, ranked by confidence", () => {
@@ -269,5 +304,40 @@ describe("graph co-change storage", () => {
     assert.deepEqual(partners.map((p) => p.partner), ["lib/b.js"]);
     const limited = graph.findCoChangePartners(db, "lib/a.js", { limit: 1 });
     assert.equal(limited.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A real bulk scan persists churn next to the co-change tables.
+describe("scan populates file_churn", () => {
+  let repo;
+  before(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), "sextant-churn-scan-"));
+    const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    const commit = (files, msg) => {
+      for (const [f, body] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
+        fs.writeFileSync(path.join(repo, f), body);
+      }
+      git("add", "-A");
+      git("commit", "-qm", msg);
+    };
+    for (let i = 0; i < 4; i++) commit({ "lib/hot.js": `module.exports = ${i};\n` }, `hot ${i}`);
+    commit({ "lib/cold.js": "module.exports = 1;\n" }, "cold");
+  });
+  after(() => {
+    if (repo) fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("stores commit counts for scanned files", async () => {
+    const intel = require("../lib/intel");
+    await intel.scan(repo, ["**/*.js"], { ignore: [] });
+    const db = await graph.loadDb(repo);
+    const churn = graph.churnByPaths(db, ["lib/hot.js", "lib/cold.js"]);
+    assert.equal(churn.get("lib/hot.js"), 4);
+    assert.equal(churn.get("lib/cold.js"), 1);
   });
 });

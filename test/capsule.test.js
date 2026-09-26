@@ -49,6 +49,30 @@ describe("workset — compileWorkset roles", () => {
     assert.ok(ws2.hazards.some((h) => /resolution 80%/.test(h)));
   });
 
+  it("high-churn files become hazards ranked ahead of fan-in-only hazards", () => {
+    const churn = new Map([["lib/misc.js", 12], ["lib/graph.js", 9], ["lib/util.js", 2]]);
+    const ws3 = compileWorkset(HITS, { root: "/nonexistent", resolutionPct: 98, churn, churnFloor: 5 });
+    assert.deepEqual(ws3.hazards, [
+      "lib/misc.js high churn (12 commits)",
+      "lib/graph.js high churn (9 commits), high fan-in (34)",
+    ]);
+    // Below the floor, and no floor at all, leave the fan-in-only note unchanged.
+    const ws4 = compileWorkset(HITS, { root: "/nonexistent", resolutionPct: 98, churn, churnFloor: 20 });
+    assert.deepEqual(ws4.hazards, ["lib/graph.js high fan-in (34)"]);
+    const ws5 = compileWorkset(HITS, { root: "/nonexistent", resolutionPct: 98, churn });
+    assert.deepEqual(ws5.hazards, ["lib/graph.js high fan-in (34)"]);
+  });
+
+  it("churnOptions derives the floor from the repo quantile, never below the minimum", () => {
+    const { churnOptions, HAZARD_CHURN_MIN } = require("../lib/workset");
+    const fakeGraph = (q) => ({ churnQuantile: () => q, churnByPaths: (_db, paths) => new Map(paths.map((p) => [p, 7])) });
+    assert.deepEqual(churnOptions(fakeGraph(null), {}, ["a.js"]), {}, "no churn table rows: no churn hazards");
+    assert.deepEqual(churnOptions(fakeGraph(1), null, ["a.js"]), {}, "no db: no churn hazards");
+    assert.equal(churnOptions(fakeGraph(1), {}, ["a.js"]).churnFloor, HAZARD_CHURN_MIN);
+    assert.equal(churnOptions(fakeGraph(11), {}, ["a.js"]).churnFloor, 11);
+    assert.equal(churnOptions(fakeGraph(11), {}, ["a.js"]).churn.get("a.js"), 7);
+  });
+
   it("carries the {line, symbol} breadcrumb for the Phase-A region lane", () => {
     const g = ws.primary.find((e) => e.path === "lib/graph.js");
     assert.equal(g.line, 120);
