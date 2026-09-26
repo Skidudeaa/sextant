@@ -3,6 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { JevClient, JevError, validateResponse } = require('./client');
 
 const questions = {
@@ -122,6 +125,25 @@ test('distributions require complete exact coverage, normalization, and selected
   assert.equal(validateResponse(rounded, questions), rounded);
 });
 
+test('cent-rounded provider distributions get the rounding bound, nothing looser', () => {
+  const sixQuestions = { kind: { type: 'choice', instructions: 'Kind?', criteria: { a: null, b: null, c: null, d: null, e: null, f: null } } };
+  const answer = probabilities => ({ model: 'jev-1.13.0', usage: { input_tokens: 1, output_tokens: 1 },
+    answers: { kind: { type: 'choice', choice: 'c', confidence: 0.67, probabilities } } });
+  // Observed live 2026-09-25: six cent values summing to 0.99.
+  const observed = answer({ a: 0.2, b: 0.01, c: 0.67, d: 0, e: 0.09, f: 0.02 });
+  assert.equal(validateResponse(observed, sixQuestions), observed);
+  // Same sum without cent quantization keeps the strict bound.
+  assert.throws(() => validateResponse(answer({ a: 0.2, b: 0.0105, c: 0.6695, d: 0, e: 0.09, f: 0.02 }), sixQuestions), /sum to one/);
+  // Cent values beyond six roundings of drift are still rejected.
+  assert.throws(() => validateResponse(answer({ a: 0.2, b: 0.01, c: 0.63, d: 0, e: 0.09, f: 0.02 }), sixQuestions), /sum to one/);
+  // A three-level score reported from unrounded probabilities: 0.01 against a rounded one-hot.
+  const scoreQuestions = { focus: { type: 'score', instructions: 'Focus?', criteria: ['one', 'two', 'many'] } };
+  const score = value => ({ model: 'jev-1.13.0', usage: { input_tokens: 1, output_tokens: 1 },
+    answers: { focus: { type: 'score', score: value, confidence: 0.99, probabilities: { 0: 1, 1: 0, 2: 0 }, legend: { 0: 'one', 1: 'two', 2: 'many' } } } });
+  assert.equal(validateResponse(score(0.01), scoreQuestions).answers.focus.score, 0.01);
+  assert.throws(() => validateResponse(score(0.05), scoreQuestions), /weighted rubric/);
+});
+
 test('score is the probability weighted rubric, preserving full legend and finite range', () => {
   for (const score of [NaN, Infinity, -0.1, 3, 0, '1.05']) {
     const response = validResponse();
@@ -228,5 +250,26 @@ test('model discovery rejects malformed and duplicate cards', async () => {
   for (const response of [[], {}, { models: [{}] }, { models: [{ name: '', description: '', release_date: '' }] },
     { models: Array(2).fill({ name: 'jev', description: '', release_date: '' }) }]) {
     await assert.rejects(clientWithResponse(response).listModels(), JevError);
+  }
+});
+
+test('the key file fills in when the env var is absent, and an env var wins', () => {
+  const { keyFromFile } = require('./client');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jevkey-'));
+  const file = path.join(dir, 'api_key');
+  fs.writeFileSync(file, 'file-key\n', { mode: 0o600 });
+  assert.equal(keyFromFile(file), 'file-key');
+  assert.equal(keyFromFile(path.join(dir, 'missing')), undefined);
+  const saved = { key: process.env.TYPESAFE_API_KEY, file: process.env.TYPESAFE_API_KEY_FILE };
+  try {
+    delete process.env.TYPESAFE_API_KEY;
+    process.env.TYPESAFE_API_KEY_FILE = file;
+    assert.doesNotThrow(() => new JevClient({ fetch: async () => {} }));
+    process.env.TYPESAFE_API_KEY_FILE = path.join(dir, 'missing');
+    assert.throws(() => new JevClient({ fetch: async () => {} }), /TYPESAFE_API_KEY/);
+  } finally {
+    if (saved.key === undefined) delete process.env.TYPESAFE_API_KEY; else process.env.TYPESAFE_API_KEY = saved.key;
+    if (saved.file === undefined) delete process.env.TYPESAFE_API_KEY_FILE; else process.env.TYPESAFE_API_KEY_FILE = saved.file;
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

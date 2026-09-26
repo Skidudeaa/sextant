@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 
 // Contract checked against docs.typesafe.ai/api.md and the official JS SDK v0.6.0.
@@ -73,11 +76,20 @@ function validateQuestions(questions) {
   }
 }
 
+// jev-1.13.0 reports probabilities rounded to whole cents (observed 2026-09-25: a
+// 6-option Choice summing to 0.99; a 45-option Choice summing to 0.99 in 5 of 8
+// identical requests). n cent-rounded values can drift from their true sum by up
+// to n * 0.005, so that is the bound when every value is cent-quantized.
+const CENT_ROUNDING = 0.005;
+const isCent = value => Math.abs(value * 100 - Math.round(value * 100)) < 1e-9;
+
 function validateDistribution(distribution, keys) {
   requireCondition(sameKeys(distribution, keys), 'Probability distribution does not match requested criteria');
-  requireCondition(Object.values(distribution).every(probability), 'Probabilities must be finite numbers in [0, 1]');
-  const sum = Object.values(distribution).reduce((total, value) => total + value, 0);
-  requireCondition(Math.abs(sum - 1) <= PROBABILITY_TOLERANCE, 'Probabilities must sum to one within 0.001');
+  const values = Object.values(distribution);
+  requireCondition(values.every(probability), 'Probabilities must be finite numbers in [0, 1]');
+  const sum = values.reduce((total, value) => total + value, 0);
+  const tolerance = values.every(isCent) ? Math.max(PROBABILITY_TOLERANCE, values.length * CENT_ROUNDING) : PROBABILITY_TOLERANCE;
+  requireCondition(Math.abs(sum - 1) <= tolerance, `Probabilities must sum to one within ${tolerance}`);
 }
 
 function validateResponse(response, questions) {
@@ -108,11 +120,28 @@ function validateResponse(response, questions) {
       requireCondition(typeof answer.score === 'number' && Number.isFinite(answer.score)
         && answer.score >= 0 && answer.score <= keys.length - 1, 'Score must be finite and within the requested rubric');
       const expected = keys.reduce((sum, index) => sum + Number(index) * answer.probabilities[index], 0);
-      requireCondition(Math.abs(answer.score - expected) <= PROBABILITY_TOLERANCE * keys.length,
+      // The score is computed before the probabilities are rounded to cents; level i
+      // can then shift the weighted sum by up to i * 0.005.
+      const quantized = Object.values(answer.probabilities).every(isCent);
+      const scoreTolerance = Math.max(PROBABILITY_TOLERANCE * keys.length,
+        quantized ? CENT_ROUNDING * keys.reduce((sum, index) => sum + Number(index), 0) : 0);
+      requireCondition(Math.abs(answer.score - expected) <= scoreTolerance,
         'Score must match the probability-weighted rubric');
     }
   }
   return response;
+}
+
+// The owner keeps the key in ~/.config/typesafe/api_key (mode 0600). Reading it here
+// keeps `$(cat …)` out of every live command line. An env var still wins.
+const KEY_FILE = path.join(os.homedir(), '.config', 'typesafe', 'api_key');
+function keyFromFile(file = process.env.TYPESAFE_API_KEY_FILE || KEY_FILE) {
+  try {
+    return fs.readFileSync(file, 'utf8').trim();
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  }
 }
 
 class JevClient {
@@ -120,7 +149,7 @@ class JevClient {
   #fetch;
   #timeoutMs;
 
-  constructor({ apiKey = process.env.TYPESAFE_API_KEY, fetch = globalThis.fetch, timeoutMs = 30000 } = {}) {
+  constructor({ apiKey = process.env.TYPESAFE_API_KEY ?? keyFromFile(), fetch = globalThis.fetch, timeoutMs = 30000 } = {}) {
     requireCondition(typeof apiKey === 'string' && apiKey.trim().length > 0, 'TYPESAFE_API_KEY is required');
     requireCondition(typeof fetch === 'function', 'A fetch implementation is required');
     requireCondition(Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 2147483647,
@@ -194,4 +223,4 @@ class JevClient {
   }
 }
 
-module.exports = { JevClient, JevError, validateResponse };
+module.exports = { JevClient, JevError, validateResponse, keyFromFile };
