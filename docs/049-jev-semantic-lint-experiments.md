@@ -188,6 +188,40 @@ Function length alone (`scopeLoc`) reaches 0.615 on Gate A's measure, above ever
 
 **Caveats.** Regex fix labels are noisy and cap every AUC here. SZZ cannot label a fix that only adds lines. The 0.60 threshold was chosen in advance and not tuned; both arms missed it by 0.01 to 0.02. Two arms were tested.
 
+## 10. Rule guard: Jev checking shell commands against written rules (2026-10-12)
+
+Question: started from Jev's measured strengths instead of a Sextant seam. Jev is best at yes/no judgments about language against a small context, is slow to raise false alarms, and answers in under 200 ms. Can it check a pending Bash command against written working rules with few enough false alarms for a PreToolUse hook? Code: `experiments/jev/rule-guard.js`; artifacts: `.planning/jev/rule-guard/`. `jev-1.13.0`, 1,687 requests, 0 failures, 30 s wall at concurrency 8, p50 136 ms, p95 183 ms, $0.055.
+
+**Design.** Corpus: 1,607 distinct Bash commands from Sextant's Claude Code transcripts and Codex rollouts, redacted and cut at 1,500 characters. One request per command carrying eight rules as Nouls. Each rule also has 5 constructed violations, 5 near misses, and a hand-written regex, all written before any Jev answer. Preregistered: per-rule cutoff = highest of {0.5 … 0.95} that still flags 4 of the 5 constructed violations; kill if more than 0.5% of recorded commands raise a false alarm. Gold: Sonnet labelers that never saw a Jev score, on every (command, rule) pair flagged by Jev or the regex plus sampled unflagged pairs (411 pairs).
+
+**Constructed cases.** All 40 violations scored ≥ 0.64 and all 40 near misses ≤ 0.57.
+
+**Preregistered result: kill.** 9 of 1,607 commands raised a false alarm (0.56%); the limit was 8. The regex baseline raised 6 (0.37%). All nine Jev false alarms are on `reads_secret`; four are a task-queue `claim_token` UUID on the command line.
+
+| Rule (cutoff) | labeled violations | Jev caught / false alarms | regex caught / false alarms |
+| --- | --- | --- | --- |
+| kills_process (0.9) | 12 | 4 / 0 | 4 / 0 |
+| tmp_write (0.95) | 76 | 50 / 0 | 65 / 1 |
+| sleep_wait (0.9) | 84 | 58 / 0 | 84 / 0 |
+| reads_secret (0.7) | 29 | 11 / 9 | 29 / 6 |
+
+The other four rules had no violation in the corpus and neither system flagged anything at these cutoffs.
+
+**Exploratory, after seeing the labels.** Five constructed violations set the cutoffs too high. A second blind pass labeled the 53 remaining Jev flags at ≥ 0.5 (464 labels in total, 8 unclear). At a single cutoff of 0.7:
+
+| Rule | known violations | Jev caught / false alarms | regex caught / false alarms |
+| --- | --- | --- | --- |
+| kills_process | 12 | 12 / 0 | 4 / 0 |
+| tmp_write | 96 | 95 / 4 | 65 / 1 |
+| sleep_wait | 84 | 83 / 0 | 84 / 0 |
+| reads_secret | 29 | 11 / 9 | 29 / 6 |
+
+With `reads_secret` left to the regex, the other seven rules at 0.7 raise false alarms on 4 commands (0.25%) and catch 190 of 192 known violations; the regexes catch 153. Jev's extra catches are things a keyword cannot see: 8 `omc-pair-runtime team shutdown` commands, and 30 writes through a shell variable assigned under `/tmp` earlier in the command. On `reads_secret` Jev is worse than the regex at every cutoff (AUC 0.82 on the labeled pool).
+
+**Reading.** The guard as preregistered is dead. The exploratory numbers are the first place in this campaign where Jev beats a free baseline on real data, on two of four rules, and they are not evidence yet: the cutoff and the dropped rule were both chosen after seeing labels. The check that would settle it is a prospective run on commands not in this corpus, with cutoff 0.7 and the seven rules fixed in advance.
+
+**Caveats.** "Known violations" are those found by either system or by sampling, so recall is relative. Labels are from a model, not a person. The second labeling pass was told that a `claim_token` is not a credential; the first pass decided that unaided. Most `tmp_write` violations are an older harness scratchpad under `/tmp/claude-0/`, so the count says little about how often the scratch policy is broken. Rules that need context beyond the command (such as "commit only when asked") were not tested. A command cut at 1,500 characters can hide a violation in its tail.
+
 ## Provider rounds probabilities to cents
 
 `jev-1.13.0` returns Choice and Score probabilities rounded to 0.01. Summed, n rounded values can miss 1 by up to n × 0.005. The experiment client required |sum − 1| ≤ 0.001. Consequences:
