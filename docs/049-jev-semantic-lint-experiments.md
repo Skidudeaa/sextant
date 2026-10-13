@@ -127,6 +127,17 @@ Leave-one-repo-out logistic regression: adding the seven Jev features to churn, 
 
 **Reading.** Kill criterion not met. One narrow code-reading question beats fan-in everywhere and beats churn on the two-thirds of files that have almost no history. The two are complementary: churn finds the hot files, and Jev finds the risky ones among the quiet majority. The broad "will this need a fix" question is 0.17 AUC worse than the narrow one. Separately from Jev, churn is free from git, beats fan-in by 0.15 AUC, and Sextant does not use it for importance.
 
+**Amendment, 2026-10-12 (reanalysis of the frozen `report.json`, no new provider calls).** The low-history table above omits line count. On the same churn ≤ 2 subset, within-repo AUC weighted by file count:
+
+| Label source | LOC | Jev business rules | churn | fan-in |
+| --- | --- | --- | --- | --- |
+| Jev fix labels | 0.693 | 0.720 | 0.637 | 0.543 |
+| regex fix labels | 0.666 | 0.697 | 0.632 | 0.525 |
+
+Jev's margin over a free line count is about 0.03, not the 0.08 over churn. Spearman(Jev business rules, LOC) on these 592 files is 0.72; the per-file score is a max over chunks, so longer files get more draws. Comparing only fixed/unfixed pairs in the same repo and the same LOC quintile, Jev business rules scores 0.63 and churn (0, 1 or 2 commits) scores 0.69. DwoodAmo supplies 379 of the 592 files and 42 of the 72 positives; on Sextant, jan25 and defGen2 Jev is at or below LOC. The leave-one-repo-out gain is positive with a CI excluding zero in 2 of 5 repos under Jev labels and in none under regex labels. Read "beats churn on the two-thirds of files that have almost no history" as: a small size-adjusted signal, concentrated in one repo.
+
+The "v2 running" note in §6 is stale: v2 stopped after extracting Sextant's commits and produced no Jev responses or report.
+
 ## 8. Semantic role map
 
 Question: can Jev tag what each file does, and is a role map a better orientation map than the directory skeleton? Same five repos and cutoffs as section 7, 868 files (`role-map.js`, `.planning/jev/role-map/`; 11.3M tokens, $0.47).
@@ -148,6 +159,34 @@ A two-level taxonomy walk (Choice per level, beam 2) agreed with the flat tags o
 Routing: for commits after the cutoff, a commit subject was routed through the role tags (R1) or through a directory map (R2), and each arm's candidate set was checked for the changed file. At matched set size, R1 beat R2 on 11 commits and lost on 17 (94 ties, n=122, sign test p=0.34). By area under the coverage-vs-size curve, R1 won 3 repos narrowly and lost DwoodAmo and amoSportsCenter by a wide margin. Stage B was capped at 25 queries per repo after an oversized Stage A request format used most of the budget.
 
 **Reading.** Tagging works: Jev recovers pattern-detectable roles with recall ≥0.8 on 6 of 7. Routing prose requests through those tags does not beat routing through directories. The tags are useful as file facts (section 7's business-rules question is one), not as a route from a request to files.
+
+## 9. Hunk replay: Jev as diff triage (2026-10-12)
+
+Question: reading a changed function before and after, does Jev predict that the change will later need a fix, beyond change size and file history? This tests the unmerged edit sieve (`lib/jev-sieve.js`) as a review-time ranking of a diff. Code: `experiments/jev/hunk-replay.js`; artifacts: `.planning/jev/hunk-replay/`. Run on Sextant `74014c5`, `jev-1.13.0`, 7,820 requests, 0 failures, 15.99M input tokens, $0.67.
+
+**Design.** Same five repos as section 7. Unit = (commit, file, enclosing function) with at least one added code line, for commits in the first 70% of each history. Label = SZZ: a later commit whose subject matches the fix regex removed or rewrote a line that `git blame -w` attributes to that commit inside that function. Labels use the regex only. Two arms per unit on identical state (`path`, `symbol`, `before_source`, `after_source`): the sieve's six questions verbatim, and four narrow defect-risk questions. Gates were written to `manifest.json` before any provider call: (A) concordance of the arm's primary score over fixed/unfixed pairs in the same repo and changed-line bin ≥ 0.60; (B) pooled leave-one-repo-out AUC gain over eight baseline features with a bootstrap 95% CI above zero. An arm survives only with both.
+
+**Coverage.** The sieve accepts only edits to a function that already existed under a unique name.
+
+| | units | later fixed | changed lines |
+| --- | --- | --- | --- |
+| all changed units | 17,574 | 2,152 | 334,921 |
+| sieve-eligible | 3,910 (22%) | 604 (28%) | 34,832 (10%) |
+
+Of the 1,548 fixed units it cannot see, 860 are in new files, 306 are new functions and 297 are module-level code.
+
+**Results** (3,910 units, 604 fixed):
+
+| Arm | primary score | Gate A (≥ 0.60) | LORO AUC baseline → full | delta, 95% CI | recall at 20% of changed lines |
+| --- | --- | --- | --- | --- | --- |
+| sieve | behavior_changed | 0.583, fail | 0.658 → 0.680 | +0.022 (0.014 to 0.030), pass | 0.364 → 0.402 |
+| risk | interacting_conditions | 0.591, fail | 0.658 → 0.665 | +0.007 (0.002 to 0.013), pass | 0.364 → 0.382 |
+
+Function length alone (`scopeLoc`) reaches 0.615 on Gate A's measure, above every Jev answer (best: `sieve.units` 0.592, `risk.interacting_conditions` 0.591). The sieve's gain is positive in four of five repos (Sextant −0.001).
+
+**Reading.** Kill criterion met: neither arm passes both gates. The signal is real and small. Jev adds about 0.02 AUC on top of size and history, which moves recall from 36% to 40% of later-fixed functions at a fixed reading budget, inside the 28% of later-fixed units the sieve can see. A free line count of the function ranks better than any single Jev answer. The direct "introduces a defect" question (0.581) was no better than the narrow ones, as in section 7.
+
+**Caveats.** Regex fix labels are noisy and cap every AUC here. SZZ cannot label a fix that only adds lines. The 0.60 threshold was chosen in advance and not tuned; both arms missed it by 0.01 to 0.02. Two arms were tested.
 
 ## Provider rounds probabilities to cents
 
