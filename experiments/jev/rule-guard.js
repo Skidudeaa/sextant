@@ -326,5 +326,5 @@ async function main(argv) {
   console.log(JSON.stringify(await run(), null, 1));
 }
 
-module.exports = { RULES, RULE_IDS, QUESTIONS, CUTOFFS, CONFIRM, SECRET_HINT, buildRequest, recordedCommands, freeze, live, pickCutoff, labelTasks, report, SEED };
+module.exports = { RULES, RULE_IDS, QUESTIONS, CUTOFFS, CONFIRM, SECRET_HINT, walk, buildRequest, recordedCommands, freeze, live, pickCutoff, labelTasks, report, SEED };
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });

@@ -242,6 +242,28 @@ The seven false alarms, read by hand: `systemctl reload nginx` flagged as restar
 
 **Reading.** On single-command rules Jev generalizes past the keywords a regex needs: it catches about two thirds more violations at a false-alarm rate of roughly one command in 230. That margin is thin (7 against a limit of 8, and the first run failed by one), and a regex has zero false alarms. Some regex misses, such as `git stash -q`, are fixable once seen; others, such as a write through a variable or after a `cd`, are not. Rules that depend on the conversation ("commit only when asked") remain untested, and those are the ones a regex cannot express at all.
 
+## 11. Context rule: did the user ask for a commit or a push? (2026-10-12)
+
+Question: section 10 left out rules that depend on the conversation. The language half of "commit only when asked" is whether the recent user messages ask for or authorize a commit; whether the command is a commit stays a regex. Does Jev answer that better than a keyword check on the same messages? Code: `experiments/jev/context-rule.js`; artifacts: `.planning/jev/context-rule/`. `jev-1.13.0`, 231 requests, 0 failures, under $0.01.
+
+**Design.** Unit: a distinct window of up to three recent user messages (typed prompts and answers to questions the assistant asked, harness messages removed), taken at a Bash command in a Claude Code session of Sextant or the four repos of section 10. 217 windows exist; 211 remain after dropping any that mention a credential, somaNotes or patients; 44 preceded a recorded commit and 14 a push. Each window gets two Nouls (commit, push) with true/false criteria. Preregistered: authorized iff Noul ≥ 0.5; baselines are a keyword regex and the same with a negation guard; pass only if Jev is right more often than the better baseline with an exact sign test p < 0.05 on disagreements. Gold: 223 blind labels (8 unclear), covering every pair where Jev ≥ 0.2, a keyword hit, or a gated action followed, plus sampled controls. 20 authored trap windows are scored separately.
+
+**Result: not established.**
+
+| Set | n | Jev correct | keyword correct | Jev only / keyword only right | sign test |
+| --- | --- | --- | --- | --- | --- |
+| recorded windows, both questions | 215 | 201 | 195 | 18 / 12 | p = 0.36 |
+| windows that preceded that action | 55 | 53 | 53 | 2 / 2 | p = 1 |
+| commit question | 114 | 111 | 109 | 5 / 3 | p = 0.73 |
+| push question | 101 | 90 | 86 | 13 / 9 | p = 0.52 |
+| authored traps (commit) | 20 | 19 | 6 | 13 / 0 | p = 0.0002 |
+
+The negation guard changed no recorded verdict. Ten of Jev's eleven wrong authorizations are on the push question, and seven of them follow a plain "commit it" with a push score between 0.53 and 0.66: Jev leaks a commit request into push.
+
+**Reading.** Jev handles indirect and negated phrasing that a keyword cannot (the traps), and that phrasing barely occurs in the recorded sessions. The owner asks in the literal words ("yes commit it", "push it"), so a keyword check on the last three messages is right 91% of the time and Jev's 93% is not distinguishable from it at this size. For this owner's conversations the context half of the rule does not need a model.
+
+**Caveats.** 211 windows from 25 sessions and one person; windows from the same session are correlated. The traps are authored by the experimenter. A three-message window cannot see standing permission given earlier or in instructions files. Labels are from a model.
+
 ## Provider rounds probabilities to cents
 
 `jev-1.13.0` returns Choice and Score probabilities rounded to 0.01. Summed, n rounded values can miss 1 by up to n × 0.005. The experiment client required |sum − 1| ≤ 0.001. Consequences:
