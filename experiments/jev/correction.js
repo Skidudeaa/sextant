@@ -38,7 +38,12 @@ const DAYS = 60;
 // dropped at extraction, same labels protocol and pass rule. At the first
 // sample's rate (~4.7 human-typed units a day) 150 units take about a month;
 // fewer gives the sign test little chance even if the effect is real.
+// Amended the same day, before any confirmation unit was labeled or scored:
+// the 88 human-typed units the first freeze never sampled are unseen too.
+// They are snapshotted to heldout.json because their transcripts leave the
+// 60-day window before the new units reach the floor.
 const CONFIRM = { since: '2026-10-28T15:30:00.000Z', outDir: `${OUT_DIR}-confirm`, minUnits: 150 };
+const HELDOUT = path.join(CONFIRM.outDir, 'heldout.json');
 const SAMPLE = 300;
 const MAX_USER_CHARS = 800;
 const MAX_ASSISTANT_CHARS = 400;
@@ -88,6 +93,16 @@ function units({ projectsRoot = path.join(os.homedir(), '.claude', 'projects'), 
     }
   }
   return [...found.values()];
+}
+
+/** Write the human-typed units the first freeze did not sample, once; later calls keep the first snapshot. */
+function snapshotHeldout({ firstDir = OUT_DIR, file = HELDOUT, all = units({ dropNonHuman: true }) } = {}) {
+  if (fs.existsSync(file)) return { kept: readJson(file).length };
+  const seen = new Set(readJson(path.join(firstDir, 'frozen.json')).cases.map(c => `${c.assistant}\n${c.user}`));
+  const held = all.filter(u => !sensitive(u.user) && !sensitive(u.assistant) && !seen.has(`${dp.redact(u.assistant).text}\n${dp.redact(u.user).text}`));
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, JSON.stringify(held), { mode: 0o600 });
+  return { written: held.length };
 }
 
 function freeze({ outDir = OUT_DIR, all = units(), confirm = null } = {}) {
@@ -195,15 +210,17 @@ async function main(argv) {
   const run = {
     freeze: () => {
       if (argv[1] !== '--confirm') return freeze();
-      const all = units({ since: CONFIRM.since, dropNonHuman: true });
-      if (all.length < CONFIRM.minUnits) throw new Error(`confirmation needs ${CONFIRM.minUnits} units after ${CONFIRM.since}; ${all.length} so far`);
+      const pooled = [...(fs.existsSync(HELDOUT) ? readJson(HELDOUT) : []), ...units({ since: CONFIRM.since, dropNonHuman: true })];
+      const all = [...new Map(pooled.map(u => [`${u.assistant}\n${u.user}`, u])).values()];
+      if (all.length < CONFIRM.minUnits) throw new Error(`confirmation needs ${CONFIRM.minUnits} unseen units (held-out snapshot plus messages after ${CONFIRM.since}); ${all.length} so far`);
       return freeze({ outDir, all, confirm: CONFIRM });
     },
+    'snapshot-heldout': () => snapshotHeldout(),
     live: () => live({ outDir }), report: () => report({ outDir }),
   }[argv[0]];
-  if (!run) { console.error(`seed ${SEED}. usage: correction.js freeze | live | report [--confirm]`); process.exitCode = 1; return; }
+  if (!run) { console.error(`seed ${SEED}. usage: correction.js freeze | live | report [--confirm] | snapshot-heldout`); process.exitCode = 1; return; }
   console.log(JSON.stringify(await run(), null, 1));
 }
 
-module.exports = { CORRECTION_RE, NON_HUMAN, CONFIRM, QUESTION, buildRequest, units, freeze, live, kappa, score, report, SEED };
+module.exports = { CORRECTION_RE, NON_HUMAN, CONFIRM, snapshotHeldout, QUESTION, buildRequest, units, freeze, live, kappa, score, report, SEED };
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });

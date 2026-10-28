@@ -75,6 +75,8 @@
 
 [2026-10-28] Set `pinned` in ledger/registry.json at the owner's instruction: OWNER RULES and the somaNotes state footer pinned, the other six holdback-eligible — the footer carries deploy-gap and pending-prod-change flags for a production PHI app, so it is converted (flags to triggered notes, per-batch state to holdback) rather than withheld whole
 
+[2026-10-28] Snapshotted the 94 human-typed units the first correction freeze never sampled (`correction.js snapshot-heldout`) into the confirmation pool — they are unseen by labels, scores and the NON_HUMAN rule, and their transcripts would leave the 60-day window before new units alone reach the 150 floor (now about 2026-11-09 instead of late November)
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).

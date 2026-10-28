@@ -81,3 +81,13 @@ test('kappa is 1 for identical labels and 0 when agreement is what chance gives'
   assert.equal(co.kappa([[true, true], [false, false]]), 1);
   assert.equal(co.kappa([[true, true], [true, false], [false, true], [false, false]]), 0);
 });
+
+test('the held-out snapshot keeps only units the first freeze never sampled, and is written once', () => {
+  const firstDir = tmp();
+  const file = path.join(tmp(), 'heldout.json');
+  fs.writeFileSync(path.join(firstDir, 'frozen.json'), JSON.stringify({ cases: [{ id: 'c-0', assistant: 'done', user: 'no, revert that' }] }));
+  const all = [{ assistant: 'done', user: 'no, revert that' }, { assistant: 'done', user: 'wrong file' }, { assistant: 'done', user: 'my api_key is x' }];
+  assert.deepEqual(co.snapshotHeldout({ firstDir, file, all }), { written: 1 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), [{ assistant: 'done', user: 'wrong file' }]);
+  assert.deepEqual(co.snapshotHeldout({ firstDir, file, all: [] }), { kept: 1 });
+});
