@@ -73,6 +73,8 @@
 [2026-10-28] Fixed the correction confirmation in advance (`correction.js` CONFIRM: messages after 2026-10-28T15:30Z, non-human turns dropped at extraction, 150-unit floor, same pass rule) — the human-typed result came from a subset defined after labeling; run `node experiments/jev/correction.js freeze --confirm` once it stops refusing (about late November), then the labeler brief in docs/049 §13
 [2026-10-28] Removed the stale Sextant hooks from physioTheater, its ab1f301 worktree and sextant's own untracked .claude/settings.json, and fixed `sextant tune` ignoring its four flags — the hibernation removal missed these three files (299 exit-127 hook errors in 60 days)
 
+[2026-10-28] Set `pinned` in ledger/registry.json at the owner's instruction: OWNER RULES and the somaNotes state footer pinned, the other six holdback-eligible — the footer carries deploy-gap and pending-prod-change flags for a production PHI app, so it is converted (flags to triggered notes, per-batch state to holdback) rather than withheld whole
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).

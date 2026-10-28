@@ -1,7 +1,7 @@
 {
   "version": 1,
   "drafted": "2026-10-28",
-  "note": "Draft from `sextant ledger census` (60 days to 2026-10-28). Nothing reads this file yet; the broker in docs/050 will. `pinned` is the owner's call: true means never withheld, false means eligible for holdback. `match` is the transcript's recorded `command`, which is the hook's statusMessage when it has one. Claims are drafted from what each hook says it is for; minEffect waits for the power table.",
+  "note": "Draft from `sextant ledger census` (60 days to 2026-10-28). Nothing reads this file yet; the broker in docs/050 will. `pinned`: true means never withheld, false means eligible for holdback. Set by Claude on 2026-10-28 at the owner's instruction; the owner can flip any entry. `match` is the transcript's recorded `command`, which is the hook's statusMessage when it has one. Claims are drafted from what each hook says it is for; minEffect waits for the power table.",
   "sources": [
     {
       "id": "somanotes-state-footer",
@@ -9,10 +9,14 @@
       "event": "PostToolBatch",
       "match": "python3 -S \"${CLAUDE_PROJECT_DIR}/.claude/hooks/cc_hooks.py\" post_batch",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": true,
       "holdbackPct": 0,
-      "claim": { "metric": null, "direction": null, "minEffect": null },
-      "note": "62.6% of model-visible hook characters. somaNotes allows deterministic outcomes only. The owner states what the footer is for."
+      "claim": {
+        "metric": "testRunAfterEditShare",
+        "direction": "up",
+        "minEffect": null
+      },
+      "note": "62.6% of model-visible hook characters. cc_hooks.py post_batch emits branch, dirty files, deploy gap (NOT_DEPLOYED), tool-call budget, quality_pending (code edited since last test) and risk_pending (prod change awaiting approval) after every tool batch. Pinned because the deploy and risk flags guard a production PHI app. Convert first: the three flags become triggered notes and stay pinned; branch, dirty files and tool count repeat every batch and become holdback-eligible. Deterministic outcomes only."
     },
     {
       "id": "ponytail-mode",
@@ -20,9 +24,13 @@
       "event": "SessionStart",
       "match": "Loading ponytail mode...",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": false,
       "holdbackPct": 0,
-      "claim": { "metric": "diffLinesPerEdit", "direction": "down", "minEffect": null },
+      "claim": {
+        "metric": "diffLinesPerEdit",
+        "direction": "down",
+        "minEffect": null
+      },
       "note": "Fires on startup, resume, clear and compact. Plugin hook: wrapping it separately from the plugin's skills is unverified."
     },
     {
@@ -31,10 +39,14 @@
       "event": "SessionStart",
       "match": "[ -f /root/somaNotes/OWNER.md ] && { echo \"OWNER RULES (OWNER.md — outrank everything):\"; cat /root/somaNotes",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": true,
       "holdbackPct": 0,
-      "claim": { "metric": null, "direction": null, "minEffect": null },
-      "note": "Conduct rules. match is a prefix of the recorded command. Pinned candidate."
+      "claim": {
+        "metric": null,
+        "direction": null,
+        "minEffect": null
+      },
+      "note": "Conduct rules the file itself says outrank everything, in a PHI repo. Never withheld."
     },
     {
       "id": "omc-parallel-advisory",
@@ -42,9 +54,13 @@
       "event": "PreToolUse",
       "match": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/pre-tool-enforcer.mjs",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": false,
       "holdbackPct": 0,
-      "claim": { "metric": "parallelToolTurnShare", "direction": "up", "minEffect": null },
+      "claim": {
+        "metric": "parallelToolTurnShare",
+        "direction": "up",
+        "minEffect": null
+      },
       "note": "Text seen in context: \"Use parallel execution for independent tasks. Use run_in_background for long operations\". The hook may also write OMC state, so the broker must run it and withhold only its output."
     },
     {
@@ -53,9 +69,13 @@
       "event": "PostToolUse",
       "match": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-verifier.mjs",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": false,
       "holdbackPct": 0,
-      "claim": { "metric": "testRunAfterEditShare", "direction": "up", "minEffect": null },
+      "claim": {
+        "metric": "testRunAfterEditShare",
+        "direction": "up",
+        "minEffect": null
+      },
       "note": "Text seen in context: \"File written. Test the changes to ensure they work correctly.\""
     },
     {
@@ -64,9 +84,13 @@
       "event": "SessionStart",
       "match": "serena-hooks activate --client=claude-code",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": false,
       "holdbackPct": 0,
-      "claim": { "metric": "serenaToolCallsPerSession", "direction": "up", "minEffect": null },
+      "claim": {
+        "metric": "serenaToolCallsPerSession",
+        "direction": "up",
+        "minEffect": null
+      },
       "note": "Asks the agent to activate the project and read the Serena manual."
     },
     {
@@ -75,10 +99,14 @@
       "event": "UserPromptSubmit",
       "match": "python3 -S \"${CLAUDE_PROJECT_DIR}/.claude/hooks/orient_subsystem.py\"",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": false,
       "holdbackPct": 0,
-      "claim": { "metric": null, "direction": null, "minEffect": null },
-      "note": "Prompt-time orientation, the same shape as Sextant's retired retrieval push. The owner states what it is for."
+      "claim": {
+        "metric": "surfacedDocReadShare",
+        "direction": "up",
+        "minEffect": null
+      },
+      "note": "Matches the prompt and paths in play against docs/system/manifest.json and injects 'read the current-state doc FIRST' for the top subsystem. Claim: the agent reads the surfaced doc more often than without the line. Same shape as Sextant's retired retrieval push, so it is the first holdback candidate in somaNotes."
     },
     {
       "id": "last30days-banner",
@@ -86,9 +114,13 @@
       "event": "SessionStart",
       "match": "bash \"${CLAUDE_PLUGIN_ROOT:-${extensionPath:-.}}/hooks/scripts/check-config.sh\"",
       "kind": "ambient",
-      "pinned": null,
+      "pinned": false,
       "holdbackPct": 0,
-      "claim": { "metric": null, "direction": null, "minEffect": null },
+      "claim": {
+        "metric": null,
+        "direction": null,
+        "minEffect": null
+      },
       "note": "A readiness banner with no behavioral claim. Retirement candidate."
     }
   ],

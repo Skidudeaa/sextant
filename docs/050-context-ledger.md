@@ -53,7 +53,7 @@ The figures above replace those numbers. The ranking of the sources did not chan
 
 Nothing reads the registry yet.
 
-`pinned` is null on every entry and is the owner's call. Once the broker exists, `true` means the source is never withheld and `false` means it can be held back. The somaNotes footer, OWNER RULES and `orient_subsystem.py` have no claim, because their purpose is the owner's to state. somaNotes allows only deterministic outcomes. The UserPromptSubmit row matched no hook run, and its source has to be found before the broker ships.
+`pinned` was set on 2026-10-28 at the owner's instruction, and the owner can flip any entry. Two entries are pinned: OWNER RULES, and the somaNotes state footer. The footer is pinned because its deploy-gap, pending-prod-change and untested-edit flags guard a production app. It is the first conversion target: those flags become triggered notes, and the branch, dirty-file and tool-count parts, which repeat every batch, become holdback-eligible. The other six are holdback-eligible. `orient_subsystem.py` now claims a higher read rate for the doc it surfaces. somaNotes allows only deterministic outcomes. The UserPromptSubmit row matched no hook run, and its source has to be found before the broker ships.
 
 ## Correction outcome
 
