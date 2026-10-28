@@ -106,10 +106,10 @@ function printTune(r) {
 async function run(ctx) {
   const argv = ctx.argv || [];
   const projectsRoot =
-    flag(process.argv, "projects") || path.join(os.homedir(), ".claude", "projects");
-  const repo = flag(process.argv, "repo") || undefined;
-  const report = buildTuneReport(projectsRoot, { repo, includeSubagents: hasFlag(process.argv, "include-subagents") });
-  if (hasFlag(process.argv, "json")) {
+    flag(process.argv, "--projects") || path.join(os.homedir(), ".claude", "projects");
+  const repo = flag(process.argv, "--repo") || undefined;
+  const report = buildTuneReport(projectsRoot, { repo, includeSubagents: hasFlag(process.argv, "--include-subagents") });
+  if (hasFlag(process.argv, "--json")) {
     console.log(JSON.stringify(report, null, 2));
   } else {
     console.log(printTune(report));

@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "drafted": "2026-10-28",
+  "note": "Draft from `sextant ledger census` (60 days to 2026-10-28). Nothing reads this file yet; the broker in docs/050 will. `pinned` is the owner's call: true means never withheld, false means eligible for holdback. `match` is the transcript's recorded `command`, which is the hook's statusMessage when it has one. Claims are drafted from what each hook says it is for; minEffect waits for the power table.",
+  "sources": [
+    {
+      "id": "somanotes-state-footer",
+      "owner": "somaNotes .claude/hooks/cc_hooks.py",
+      "event": "PostToolBatch",
+      "match": "python3 -S \"${CLAUDE_PROJECT_DIR}/.claude/hooks/cc_hooks.py\" post_batch",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": null, "direction": null, "minEffect": null },
+      "note": "62.6% of model-visible hook characters. somaNotes allows deterministic outcomes only. The owner states what the footer is for."
+    },
+    {
+      "id": "ponytail-mode",
+      "owner": "ponytail plugin 4.9.0, hooks/ponytail-activate.js",
+      "event": "SessionStart",
+      "match": "Loading ponytail mode...",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": "diffLinesPerEdit", "direction": "down", "minEffect": null },
+      "note": "Fires on startup, resume, clear and compact. Plugin hook: wrapping it separately from the plugin's skills is unverified."
+    },
+    {
+      "id": "somanotes-owner-rules",
+      "owner": "somaNotes .claude/settings.json",
+      "event": "SessionStart",
+      "match": "[ -f /root/somaNotes/OWNER.md ] && { echo \"OWNER RULES (OWNER.md — outrank everything):\"; cat /root/somaNotes",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": null, "direction": null, "minEffect": null },
+      "note": "Conduct rules. match is a prefix of the recorded command. Pinned candidate."
+    },
+    {
+      "id": "omc-parallel-advisory",
+      "owner": "oh-my-claudecode plugin, scripts/pre-tool-enforcer.mjs",
+      "event": "PreToolUse",
+      "match": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/pre-tool-enforcer.mjs",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": "parallelToolTurnShare", "direction": "up", "minEffect": null },
+      "note": "Text seen in context: \"Use parallel execution for independent tasks. Use run_in_background for long operations\". The hook may also write OMC state, so the broker must run it and withhold only its output."
+    },
+    {
+      "id": "omc-post-tool-verifier",
+      "owner": "oh-my-claudecode plugin, scripts/post-tool-verifier.mjs",
+      "event": "PostToolUse",
+      "match": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-verifier.mjs",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": "testRunAfterEditShare", "direction": "up", "minEffect": null },
+      "note": "Text seen in context: \"File written. Test the changes to ensure they work correctly.\""
+    },
+    {
+      "id": "serena-activate",
+      "owner": "serena-hooks",
+      "event": "SessionStart",
+      "match": "serena-hooks activate --client=claude-code",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": "serenaToolCallsPerSession", "direction": "up", "minEffect": null },
+      "note": "Asks the agent to activate the project and read the Serena manual."
+    },
+    {
+      "id": "somanotes-orient-subsystem",
+      "owner": "somaNotes .claude/hooks/orient_subsystem.py",
+      "event": "UserPromptSubmit",
+      "match": "python3 -S \"${CLAUDE_PROJECT_DIR}/.claude/hooks/orient_subsystem.py\"",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": null, "direction": null, "minEffect": null },
+      "note": "Prompt-time orientation, the same shape as Sextant's retired retrieval push. The owner states what it is for."
+    },
+    {
+      "id": "last30days-banner",
+      "owner": "last30days plugin 3.18.4, hooks/scripts/check-config.sh",
+      "event": "SessionStart",
+      "match": "bash \"${CLAUDE_PLUGIN_ROOT:-${extensionPath:-.}}/hooks/scripts/check-config.sh\"",
+      "kind": "ambient",
+      "pinned": null,
+      "holdbackPct": 0,
+      "claim": { "metric": null, "direction": null, "minEffect": null },
+      "note": "A readiness banner with no behavioral claim. Retirement candidate."
+    }
+  ],
+  "unattributed": "81k characters of UserPromptSubmit additionalContext in jan25, somaNotes and theLongWay matched no hook run's stdout. Find the source before the broker ships."
+}

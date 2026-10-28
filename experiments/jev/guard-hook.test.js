@@ -43,6 +43,8 @@ test('an armed flag emits the owner\'s rule as PreToolUse context; a holdback fl
   assert.equal(gh.MODEL, 'jev-1.14.0');
   assert.equal(provider.model, gh.MODEL);
   assert.deepEqual(rows.map(row => row.model), [`served-${gh.MODEL}`, `served-${gh.MODEL}`]);
+  // The matched root names the repo on every row, so pooled units can be counted per repo.
+  assert.deepEqual(rows.map(row => row.repo), ['repo', 'repo']);
 });
 
 test('nothing reaches the provider for a credential-shaped command, a somaNotes mention, another repo, or another tool', async () => {
@@ -96,16 +98,25 @@ test('report reads recurrence per (session, rule) unit by arm and waits for the 
     found++;
     for (let i = 0; i <= gh.PREREG.minLater; i++) {
       repeat = i === 0 || arm === 'holdback';
-      await gh.decide({ payload: payload(`pkill -f job-${i}`, session), roots: [ROOT], client: provider.client, outDir });
+      await gh.decide({ payload: payload(repeat ? `pkill -f job-${i}` : `ls job-${i}`, session), roots: [ROOT], client: provider.client, outDir });
     }
   }
   const out = gh.report({ outDir });
-  assert.deepEqual(out.units, { all: 40, armed: 20, holdback: 20 });
+  assert.deepEqual(out.units, { all: 40, armed: 20, holdback: 20, byRepo: { repo: 40 } });
   assert.deepEqual([out.recurrence.armed, out.recurrence.holdback], [0, 1]);
   assert.ok(out.recurrence.p < 0.001);
+  assert.deepEqual([out.regexRecurrence.armed, out.regexRecurrence.holdback], [0, 1]);
   assert.equal(out.verdict, 'PASS, pending false-alarm labels');
-  // One unit short of the floor in one arm: no verdict yet.
   const rows = events(outDir);
+  // Armed sessions that keep running pkill while Jev stops flagging it: the regex
+  // still sees the rule broken, so the pass is the classifier's alone.
+  const armedSessions = new Set(rows.filter(row => row.arms?.kills_process === 'armed').map(row => row.session));
+  const rephrased = rows.map(row => (armedSessions.has(row.session) ? { ...row, command: row.command.replace(/^ls /, 'pkill -f ') } : row));
+  fs.writeFileSync(path.join(outDir, 'events.jsonl'), rephrased.map(row => JSON.stringify(row)).join('\n'));
+  const classifierOnly = gh.report({ outDir });
+  assert.equal(classifierOnly.regexRecurrence.armed, 1);
+  assert.match(classifierOnly.verdict, /^PASS on the classifier only/);
+  // One unit short of the floor in one arm: no verdict yet.
   const drop = rows.find(row => row.arms?.kills_process === 'armed').session;
   fs.writeFileSync(path.join(outDir, 'events.jsonl'), rows.filter(row => row.session !== drop).map(row => JSON.stringify(row)).join('\n'));
   assert.equal(gh.report({ outDir }).verdict, 'ACCRUING');

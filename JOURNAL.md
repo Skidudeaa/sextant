@@ -65,6 +65,14 @@
 
 [2026-10-28] Switched the jan25 guard-trial hook to jev-1.14.0 at the owner's request. The section 10 confirmation set re-scored on 1.14.0 gave 4 false-alarm commands against 7, and 188 violations caught against 185, so the 0.7 cutoff still holds. Units are pooled across the switch and each row now records the served model (docs/049 §12 amendment). The other lab pins stay on 1.13.0, where their frozen results were measured.
 
+[2026-10-28] Enrolled the guard trial in theLongWay, defGen2, physioTheater, DwoodAmo with regex recurrence as a fixed second outcome (docs/049 §12 amendment) — jan25 alone gave 9 units in 15 days against a floor of 20 per arm, and Jev-scored recurrence cannot tell compliance from rephrasing
+
+[2026-10-28] Added `sextant ledger census` (commands/ledger.js) and a draft injection-source registry (ledger/registry.json, docs/050) as the first step of the Context Ledger bet — the moonshot's hook budget counted output that never reaches the model, and the corrected figure is 8.27M chars, 16.7% of tool results, median 28.9k/session (was 10.0M, 20.5%, 34.6k)
+[2026-10-28] Ran the correction probe (docs/049 §13): preregistered all-units comparison not established (p=0.54); on 189 human-typed messages Jev 1.14 beat the regex 175 to 156 (p=0.0003, precision 0.86, recall 0.71) on a subset defined after labeling — the census regex caught 1 of 35 corrections, and about a third of "typed user messages" were relayed or harness turns
+
+[2026-10-28] Fixed the correction confirmation in advance (`correction.js` CONFIRM: messages after 2026-10-28T15:30Z, non-human turns dropped at extraction, 150-unit floor, same pass rule) — the human-typed result came from a subset defined after labeling; run `node experiments/jev/correction.js freeze --confirm` once it stops refusing (about late November), then the labeler brief in docs/049 §13
+[2026-10-28] Removed the stale Sextant hooks from physioTheater, its ab1f301 worktree and sextant's own untracked .claude/settings.json, and fixed `sextant tune` ignoring its four flags — the hibernation removal missed these three files (299 exit-127 hook errors in 60 days)
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).

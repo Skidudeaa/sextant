@@ -27,6 +27,7 @@ Usage:
   sextant telemetry --review <incidentId> --verdict <verdict> --reviewed-findings <N>
   sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
   sextant tune [--projects <path>] [--repo <name>] [--json]
+  sextant ledger census [--projects <path>] [--days <N>] [--json]
   sextant hook sessionstart
   sextant hook refresh
   sextant hook posttooluse
@@ -57,6 +58,7 @@ const commandMap = {
   telemetry: "../commands/telemetry",
   "eval-trajectory": "../commands/eval-trajectory",
   tune: "../commands/tune",
+  ledger: "../commands/ledger",
   retrieve: "../commands/retrieve",
   zoekt: "../commands/zoekt",
 };
