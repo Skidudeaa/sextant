@@ -293,6 +293,12 @@ Question: section 10 showed Jev can tell which commands break a written rule. No
 
 **Limits.** The outcome is recurrence of the same flag, read by the same classifier, so a note that teaches the agent to phrase commands differently would look like compliance. Subagent commands share the parent's session id in the log and a note given to a subagent does not reach the parent. At roughly 7% of replay commands flagged on the four noted rules, 20 units per arm may take weeks on one repo.
 
+**Amendment (2026-10-28): model switched to `jev-1.14.0` mid-trial, at the owner's request.** `jev-latest` now resolves to 1.14.0. Before the switch the trial had 2,386 scored commands on 1.13.0, with 9 units (3 armed, 6 holdback) and p=0.67. The design above is unchanged except for the model. The hook now sends `MODEL` from `guard-hook.js` and records the model the provider served on every row. Rows from before the switch have no `model` field.
+
+- Re-check before the switch: the section 10 confirmation set (1,600 commands, same labels, cutoff 0.7, no vetoes) re-scored on 1.14.0 in `.planning/jev/rule-guard/confirm-1.14/`. 4 false-alarm commands against 7 on 1.13.0, and 188 violations caught against 185 (regex 111). One 1.14.0 flag had no label: a `cd` into an old `/tmp/claude-0/.../scratchpad` scored 0.71 on `tmp_write`. Counted as a false alarm, the total is still 5, inside the limit of 8. Provider p95 was 94 ms against 183 ms. Cost was $0.05.
+- Units are pooled across the switch. Arms come from a hash of (session, rule) and the model does not depend on the arm, so both arms always see the same classifier. A session that spans the switch has its first flag and later flags scored by different models, in both arms alike. `report` adds `scoredByModel` so the split stays visible.
+- The two vetoes and the probe observations above were seen on 1.13.0 and have not been re-checked on 1.14.0.
+
 ## Provider rounds probabilities to cents
 
 `jev-1.13.0` returns Choice and Score probabilities rounded to 0.01. Summed, n rounded values can miss 1 by up to n × 0.005. The experiment client required |sum − 1| ≤ 0.001. Consequences:

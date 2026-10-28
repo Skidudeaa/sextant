@@ -3,7 +3,8 @@
 
 // Live trial of the docs/049 §10 rule guard as a Claude Code PreToolUse hook
 // (docs/049 §12). One Jev request per Bash command: the same eight-question
-// request the replay confirmed, read at the same 0.7 cutoff. A flagged rule
+// request the replay confirmed, read at the same 0.7 cutoff, sent to MODEL
+// (switched from the replay's jev-1.13.0 on 2026-10-28). A flagged rule
 // that maps to a rule the owner wrote gets a one-line note quoting it. Half of
 // the (session, rule) pairs are withheld, so the note's effect on the commands
 // that follow can be read against sessions that never saw it.
@@ -25,6 +26,7 @@ const { mulberry32 } = require('./witness');
 
 const OUT_DIR = path.join(__dirname, '../../.planning/jev/guard-trial');
 const CUTOFF = rg.CONFIRM.cutoff;
+const MODEL = 'jev-1.14.0';
 const SALT = 'guard-trial-20261013';
 const TIMEOUT_MS = 1500;
 
@@ -88,7 +90,9 @@ async function decide({ payload, roots, client, outDir = OUT_DIR }) {
   row.command = dp.redact(cut).text;
   let answers;
   try {
-    answers = (await client().systemOne(rg.buildRequest(row.command))).answers;
+    const response = await client().systemOne({ ...rg.buildRequest(row.command), model: MODEL });
+    answers = response.answers;
+    row.model = response.model;
   } catch (error) {
     log(outDir, { ...row, ms: Math.round(performance.now()), error: { code: error.code, message: error.message } });
     return null;
@@ -143,6 +147,8 @@ function report({ outDir = OUT_DIR } = {}) {
   return {
     prereg: PREREG, seed: rg.SEED, verdict,
     commands: { seen: rows.length, dropped: rows.filter(row => row.dropped).length, errors: rows.filter(row => row.error).length, scored: scored.length },
+    // Rows before 2026-10-28 carry no model field; the pin was jev-1.13.0 then.
+    scoredByModel: scored.reduce((counts, row) => ({ ...counts, [row.model || 'unrecorded']: (counts[row.model || 'unrecorded'] || 0) + 1 }), {}),
     hookMs: { p50: ms.length ? ms[Math.floor(ms.length / 2)] : null, p95 },
     flags: Object.fromEntries(rg.CONFIRM.ruleIds.map(id => [id, scored.filter(row => row.flagged.includes(id)).length])),
     notes: scored.filter(row => row.noted.length).length,
@@ -167,4 +173,4 @@ async function main(argv) {
 
 if (require.main === module) main(process.argv.slice(2));
 
-module.exports = { PREREG, NOTES, CUTOFF, armOf, bareTmp, sessionKey, decide, report };
+module.exports = { PREREG, NOTES, CUTOFF, MODEL, armOf, bareTmp, sessionKey, decide, report };

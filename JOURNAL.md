@@ -63,6 +63,8 @@
 [2026-10-13] Checked, with no provider call, how `lib/classifier.js:shouldRetrieve` does on 182 typed prompts from four repos against "the agent then used a file tool" — it fires on 26% of those turns and is at chance overall (47% against a 51% base rate), missing prose tasks like "change the llm model for the main generation"; the label is a rough proxy (74 turns used Bash only), and a better gate would feed a retrieval lane that returned nothing on prose half the time, so this is recorded as headroom and not as a Jev result.
 [2026-10-13] Built the rule guard as a non-blocking PreToolUse hook for one repo (`experiments/jev/guard-hook.js`, docs/049 §12) with notes only for rules the owner wrote and half of (session, rule) pairs withheld — the owner chose the live trial because whether a note changes the next command cannot be read from recorded commands; a log-only hook was dropped as a repeat of the replay.
 
+[2026-10-28] Switched the jan25 guard-trial hook to jev-1.14.0 at the owner's request. The section 10 confirmation set re-scored on 1.14.0 gave 4 false-alarm commands against 7, and 188 violations caught against 185, so the 0.7 cutoff still holds. Units are pooled across the switch and each row now records the served model (docs/049 §12 amendment). The other lab pins stay on 1.13.0, where their frozen results were measured.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).

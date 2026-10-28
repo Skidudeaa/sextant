@@ -15,10 +15,11 @@ const payload = (command, session = 's', cwd = ROOT) => ({ tool_name: 'Bash', to
 // A fake provider that scores the given rules high and counts its calls.
 function fake(high) {
   const state = { calls: 0 };
-  state.client = () => ({ systemOne: async ({ state: sent, questions }) => {
+  state.client = () => ({ systemOne: async ({ state: sent, questions, model }) => {
     state.calls++;
     state.sent = sent;
-    return { answers: Object.fromEntries(Object.keys(questions).map(id => [id, { type: 'noul', noul: high(sent.command).includes(id) ? 0.9 : 0.01 }])) };
+    state.model = model;
+    return { model: `served-${model}`, answers: Object.fromEntries(Object.keys(questions).map(id => [id, { type: 'noul', noul: high(sent.command).includes(id) ? 0.9 : 0.01 }])) };
   } });
   return state;
 }
@@ -38,6 +39,10 @@ test('an armed flag emits the owner\'s rule as PreToolUse context; a holdback fl
   assert.deepEqual(rows.map(row => row.noted), [['discards_work'], []]);
   assert.deepEqual(rows.map(row => row.arms.discards_work), ['armed', 'holdback']);
   assert.deepEqual(provider.sent, { tool: 'Bash', command: 'git reset --hard HEAD~1' });
+  // The hook's own model, not the replay's pin, and the served model is kept per row.
+  assert.equal(gh.MODEL, 'jev-1.14.0');
+  assert.equal(provider.model, gh.MODEL);
+  assert.deepEqual(rows.map(row => row.model), [`served-${gh.MODEL}`, `served-${gh.MODEL}`]);
 });
 
 test('nothing reaches the provider for a credential-shaped command, a somaNotes mention, another repo, or another tool', async () => {
