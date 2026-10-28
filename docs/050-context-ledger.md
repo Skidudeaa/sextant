@@ -8,7 +8,7 @@ The runner-up bet was Sextant as the agent's search primitive. It lost on a repl
 
 ## Census: what hooks put into context
 
-`sextant ledger census [--projects <path>] [--days <N>] [--json]` (`commands/ledger.js`, `test/ledger.test.js`). It reads top-level Claude Code transcripts and counts every hook injection by the hook command that produced it. It prints no injected text, because some transcripts carry PHI.
+`sextant ledger census [--projects <path>] [--days <N>] [--json]` (`commands/ledger.js`, `test/ledger.test.js`). The `sextant` binary was unlinked at hibernation, so run it as `node /root/sextant/bin/intel.js ledger census`. It reads top-level Claude Code transcripts and counts every hook injection by the hook command that produced it. It prints no injected text, because some transcripts carry PHI.
 
 What counts as reaching the model:
 - `additionalContext` on any event;
