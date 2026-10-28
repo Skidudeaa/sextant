@@ -66,7 +66,7 @@ Details are in docs/049 §13 (`experiments/jev/correction.js`). The moonshot's l
   - the linked worktree `/root/physioTheater-head-ab1f301` (tracked);
   - `/root/sextant/.claude/settings.json` (untracked).
 
-  In the last 60 days, 3 physioTheater sessions logged 299 exit-127 non-blocking errors from them. Each file held nothing else, so each is now `{}`. The two physioTheater copies are left uncommitted in that repo.
+  In the last 60 days, 3 physioTheater sessions logged 299 exit-127 non-blocking errors from them. Each file held nothing else, so each is now `{}`. The physioTheater change is committed there (8b24992). The detached worktree's copy is left uncommitted.
 - `commands/tune.js` passed flag names without `--` to `lib/cli.js:flag`, which matches the literal argument. `--projects`, `--repo`, `--include-subagents` and `--json` were ignored, so the command always printed text for the whole of `~/.claude/projects`. All four flags now take effect.
 
 ## Critical path and kill criteria
