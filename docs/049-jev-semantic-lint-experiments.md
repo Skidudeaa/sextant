@@ -353,6 +353,8 @@ The human-typed result comes from a subset defined after labeling, so it is not 
 
 *Amended the same day, before any confirmation unit was labeled or scored.* The first freeze sampled 300 of the eligible units, so 94 human-typed units were never labeled or scored. `snapshot-heldout` wrote them to `heldout.json` on 2026-10-28, because their transcripts leave the 60-day window before new units reach the floor. No transcripts older than 60 days remain on disk. The confirmation pools the snapshot with messages after 2026-10-28T15:30Z, and the 150-unit floor now applies to the pool. That moves the expected date to about 2026-11-09. The `NON_HUMAN` rule was written from prefixes of the first sample only, so the held-out units are unseen by every part of the decision.
 
+*Amended 2026-10-28, still before any confirmation unit was labeled or scored.* The floor was counted before `freeze` drops credential, somaNotes and patient mentions, so a pool of 150 could freeze fewer than 150 usable units. The first freeze dropped 42 of 480 this way. `confirmPool` now drops those units and repeats before the count (`correction.test.js`). Repeats are expected because compaction rewrites recent messages with new timestamps. On 2026-10-28 the pool was 100.
+
 Steps:
 1. `node experiments/jev/correction.js freeze --confirm`, which pools `heldout.json` with the new units. It writes `.planning/jev/correction-confirm/label-tasks.json`.
 2. Two Sonnet labelers, run in parallel, each with the brief below. Labeler A writes `labels-a.json` in that directory and labeler B writes `labels-b.json`. B works in reverse order.

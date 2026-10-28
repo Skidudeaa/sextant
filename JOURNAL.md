@@ -79,6 +79,8 @@
 
 [2026-10-28] Snapshotted the 94 human-typed units the first correction freeze never sampled (`correction.js snapshot-heldout`) into the confirmation pool — they are unseen by labels, scores and the NON_HUMAN rule, and their transcripts would leave the 60-day window before new units alone reach the 150 floor (now about 2026-11-09 instead of late November)
 
+[2026-10-28] Counted the correction-confirmation floor after the sensitive drop (`correction.js:confirmPool`) — the floor was counted before `freeze` dropped credential/somaNotes/patient units (42 of 480 in the first freeze), so 150 could have frozen fewer usable units. Pool 100 today; mutations removing the drop or the dedupe each fail the new test.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).

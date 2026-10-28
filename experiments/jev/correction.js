@@ -105,6 +105,12 @@ function snapshotHeldout({ firstDir = OUT_DIR, file = HELDOUT, all = units({ dro
   return { written: held.length };
 }
 
+/** Held-out plus post-start units, deduplicated, without the units freeze would drop; the 150 floor counts these. */
+function confirmPool(heldout, fresh) {
+  const pooled = [...heldout, ...fresh].filter(u => !sensitive(u.user) && !sensitive(u.assistant));
+  return [...new Map(pooled.map(u => [`${u.assistant}\n${u.user}`, u])).values()];
+}
+
 function freeze({ outDir = OUT_DIR, all = units(), confirm = null } = {}) {
   const clean = all.filter(u => !sensitive(u.user) && !sensitive(u.assistant));
   const rand = mulberry32(SEED);
@@ -210,8 +216,7 @@ async function main(argv) {
   const run = {
     freeze: () => {
       if (argv[1] !== '--confirm') return freeze();
-      const pooled = [...(fs.existsSync(HELDOUT) ? readJson(HELDOUT) : []), ...units({ since: CONFIRM.since, dropNonHuman: true })];
-      const all = [...new Map(pooled.map(u => [`${u.assistant}\n${u.user}`, u])).values()];
+      const all = confirmPool(fs.existsSync(HELDOUT) ? readJson(HELDOUT) : [], units({ since: CONFIRM.since, dropNonHuman: true }));
       if (all.length < CONFIRM.minUnits) throw new Error(`confirmation needs ${CONFIRM.minUnits} unseen units (held-out snapshot plus messages after ${CONFIRM.since}); ${all.length} so far`);
       return freeze({ outDir, all, confirm: CONFIRM });
     },
@@ -222,5 +227,5 @@ async function main(argv) {
   console.log(JSON.stringify(await run(), null, 1));
 }
 
-module.exports = { CORRECTION_RE, NON_HUMAN, CONFIRM, snapshotHeldout, QUESTION, buildRequest, units, freeze, live, kappa, score, report, SEED };
+module.exports = { CORRECTION_RE, NON_HUMAN, CONFIRM, confirmPool, snapshotHeldout, QUESTION, buildRequest, units, freeze, live, kappa, score, report, SEED };
 if (require.main === module) main(process.argv.slice(2)).catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });

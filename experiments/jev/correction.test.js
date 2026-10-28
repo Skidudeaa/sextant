@@ -91,3 +91,9 @@ test('the held-out snapshot keeps only units the first freeze never sampled, and
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), [{ assistant: 'done', user: 'wrong file' }]);
   assert.deepEqual(co.snapshotHeldout({ firstDir, file, all: [] }), { kept: 1 });
 });
+
+test('the confirmation floor counts units after dropping repeats and sensitive ones', () => {
+  const heldout = [{ assistant: 'done', user: 'wrong file' }];
+  const fresh = [{ assistant: 'done', user: 'wrong file' }, { assistant: 'done', user: 'my api_key is x' }, { assistant: 'ok', user: 'thanks' }];
+  assert.deepEqual(co.confirmPool(heldout, fresh), [{ assistant: 'done', user: 'wrong file' }, { assistant: 'ok', user: 'thanks' }]);
+});
