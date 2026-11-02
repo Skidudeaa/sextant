@@ -28,6 +28,9 @@ Usage:
   sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
   sextant tune [--projects <path>] [--repo <name>] [--json]
   sextant ledger census [--projects <path>] [--days <N>] [--json]
+  sextant atoms compile --dry-run [--roots <a,b>] [--json]
+  sextant atoms replay [--roots <a,b>] [--projects <path>] [--days <N>] [--json]
+  sextant atoms exposure
   sextant hook sessionstart
   sextant hook refresh
   sextant hook posttooluse
@@ -59,6 +62,7 @@ const commandMap = {
   "eval-trajectory": "../commands/eval-trajectory",
   tune: "../commands/tune",
   ledger: "../commands/ledger",
+  atoms: "../commands/atoms",
   retrieve: "../commands/retrieve",
   zoekt: "../commands/zoekt",
 };

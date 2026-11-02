@@ -81,6 +81,15 @@
 
 [2026-10-28] Counted the correction-confirmation floor after the sensitive drop (`correction.js:confirmPool`) — the floor was counted before `freeze` dropped credential/somaNotes/patient units (42 of 480 in the first freeze), so 150 could have frozen fewer usable units. Pool 100 today; mutations removing the drop or the dedupe each fail the new test.
 
+[2026-11-01] Measured instruction-file load from transcript `instructions` attachments — 124 sessions in 60 days, 12.37M characters, median 126,428 per session; the docs/050 census counted only hook text (median 28,884), so it saw about 40% of the context load.
+[2026-11-01] Verified path-scoped rules on Claude Code 2.1.309 with two headless probes (/root/scratch/20261101-pathrule-probe) — the rule loads on Read of a matching file, InstructionsLoaded reports path_glob_match with agent_id, and a subagent's load does not reach its parent.
+[2026-11-01] Proposed the instruction-compiler moonshot (reply only, no doc yet) — it absorbs the docs/050 hook-only broker; Jev Stage-2 pruning from the pasted note was rejected as a re-proposal of graveyard items.
+
+[2026-11-02] Built `sextant atoms` (commands/atoms.js, test/atoms.test.js; docs/052) — compile --dry-run binds 76-94% of each CLAUDE.md to cited files; replay scores decision events against channel sets; exposure is an InstructionsLoaded hook. Six mutations each fail the test.
+[2026-11-02] Wired the exposure hook into the settings.local.json of jan25, defGen2, theLongWay and sextant — observation only, paths only; backups in /root/scratch/20261102-atoms-settings-backup; somaNotes left out because the offline replay already covers it.
+[2026-11-02] Replayed 102 sessions and 126 subagent transcripts in six repos — native `paths` delivery reaches 42.0% of governing atoms in time (reviews 28.3%, spawns 25.2%) and fails the 90% gate; a relay for paths in Bash commands and git diff output reaches 97.3% at a median 48.4% of CLAUDE.md characters per request; reading all Bash output adds 0.8 points for 10.5 points of cost.
+[2026-11-02] Fixed the atoms replay review classifier to count `git -C <root> diff` and `git --no-pager show` — the first run missed 76 of 1,779 diff/show commands; the rerun gives native 41.7% and native plus command relay 97.4% (docs/052).
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
@@ -90,3 +99,4 @@
 - Jev "business rules" Noul as a file risk map (2026-10-12) — died on reanalysis: 0.03 over line count on low-history files, Spearman 0.72 with LOC, one repo supplying 64% of the files (docs/049 §7 amendment).
 - Jev as a detector of secret-reading commands (2026-10-12) — died because it lost to a keyword regex at every cutoff (11 of 29 caught with 9 false alarms at 0.7, AUC 0.82) and read a task-queue claim_token as a credential (docs/049 §10).
 - Jev for "did the user ask for a commit or push" (2026-10-12) — died because a keyword check on the last three user messages matched it on recorded sessions (195 vs 201 of 215, p=0.36); its edge exists only on indirect or negated phrasing, which the recorded sessions almost never contain (docs/049 §11). Reopen for a user who phrases requests indirectly, or with a much larger window corpus.
+- Child relay for subagent atoms (2026-11-02) — died because only 5 of 1,404 replayed decision events were subagent returns with governed edits, and it added 0.0 points of pooled recall (docs/052). Reopen if delegated edits become common.
