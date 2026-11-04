@@ -90,6 +90,8 @@
 [2026-11-02] Replayed 102 sessions and 126 subagent transcripts in six repos — native `paths` delivery reaches 42.0% of governing atoms in time (reviews 28.3%, spawns 25.2%) and fails the 90% gate; a relay for paths in Bash commands and git diff output reaches 97.3% at a median 48.4% of CLAUDE.md characters per request; reading all Bash output adds 0.8 points for 10.5 points of cost.
 [2026-11-02] Fixed the atoms replay review classifier to count `git -C <root> diff` and `git --no-pager show` — the first run missed 76 of 1,779 diff/show commands; the rerun gives native 41.7% and native plus command relay 97.4% (docs/052).
 
+[2026-11-03] Hand-trimmed CLAUDE.md from 105,738 to 3,265 chars and moved the old text verbatim to docs/ARCHITECTURE.md — on replay of sextant's 5 sessions in 60 days the compiler on the old file carried a median 17,095 chars per request, so the trim alone costs 5x less than the compiler; the compiler on the trimmed file saves about 1,500 more. The case for the compiler now rests on repos whose CLAUDE.md is mostly live guidance.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
