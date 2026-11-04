@@ -104,6 +104,8 @@
 [2026-11-03] Archived the retrieval-era service (81a11d0, tag archive/retrieval-era-2026-11-03) — removed 201 files and about 49k lines that nothing live calls; kept every lib module the Jev experiments import plus lib/closure.js, which counterfactual/refutation read as data. npm test 483/483, the same as before the cut; atoms exposure and guard-hook report run from the checkout.
 [2026-11-03] Amended docs/052: the hand split replaced compiler steps 1-2; the command relay is unbuilt and its only clear use is loading somaNotes deploy.md when bin/deploy runs.
 
+[2026-11-03] Pushed sextant main + tag archive/retrieval-era-2026-11-03, /root/omc b62532e, jan25 b90d8c9d6, and somaNotes 97e5adb7b (AGENTS.md now points Codex at CLAUDE.md and the matching rules, and drops the nonexistent `npm run dev`; codex exec answers bin/deploy and port 8080 from it). The OMC kit reinstall is still owed, at a time when no OMC session is live.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
