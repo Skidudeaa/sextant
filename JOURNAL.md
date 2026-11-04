@@ -92,6 +92,10 @@
 
 [2026-11-03] Hand-trimmed CLAUDE.md from 105,738 to 3,265 chars and moved the old text verbatim to docs/ARCHITECTURE.md — on replay of sextant's 5 sessions in 60 days the compiler on the old file carried a median 17,095 chars per request, so the trim alone costs 5x less than the compiler; the compiler on the trimmed file saves about 1,500 more. The case for the compiler now rests on repos whose CLAUDE.md is mostly live guidance.
 
+[2026-11-03] Split defGen2 and somaNotes CLAUDE.md into a core file plus verbatim `.claude/rules/*.md` path rules (defGen2 5e461f5 on master, somaNotes ad3012194 on feat/deploy-separation) — a split script required every non-blank line in exactly one output and every glob to match a tracked file; defGen2 core 77,905 → 8,660 chars with 19 rules and dead sections (ChunkHound, memory MCP, nohup server, `sg` as ast-grep) archived; somaNotes core 79,150 → 43,450 with 16 rules, owner rules and deploy warnings kept whole.
+[2026-11-03] Replayed 60 days: somaNotes median per-request instruction text 79,150 → 46,246 chars (60 sessions, 68 subagents), rule text in context before 92.6% of edits, 40% of git diff reviews, 53.6% of spawn briefs; defGen2 has only 7 Claude sessions and no edits because Codex does its source work, and Codex there reads no project doc at all (no AGENTS.md, no CLAUDE.md fallback).
+[2026-11-03] Verified path rules live on Claude Code 2.1.318 — `**` and exact globs load on Read and a `*.css` rule stays out on a `.js` read (scratch probe), isw.md loaded in /root/defGen2 with its first exposure-hook rows, static-assets.md and toast.md loaded in /root/somaNotes.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
