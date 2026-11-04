@@ -1,5 +1,7 @@
 # sextant
 
+> **2026-11-03: the retrieval-era CLI was archived.** `scan`, `init`, `watch`, `doctor`, the hooks and the MCP server described below are no longer in this tree; they live at the tag `archive/retrieval-era-2026-11-03` (`git show archive/retrieval-era-2026-11-03:<path>`). `bin/intel.js` now runs only `atoms` and `ledger`. Do not `npm link` this checkout. Current state: `CLAUDE.md` and `JOURNAL.md`.
+
 > **Project status — experimental research resumed 2026-09-21.** A TypeSafe Jev
 > laboratory is testing new codebase-intelligence applications; ambient agent
 > integration remains paused. See the [experiment ledger](docs/045-jev-lab.md),

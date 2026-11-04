@@ -1,0 +1,14 @@
+{
+ "repo": "/root/jan25",
+ "source": "/root/scratch/tmp/claude-0/-root-sextant/2fcc662e-f32c-48d7-ba24-692303f9d4b2/scratchpad/jan25-CLAUDE.orig.md",
+ "outputs": [
+ {"path": "CLAUDE.md", "text": "{{L 1-3}}\n\nSubsystem guidance lives in `.claude/rules/*.md`. Each file has a `paths:` list and Claude Code loads it when you read or edit a matching file. When you review a diff or plan work in a subsystem without opening its files, open the rule file yourself. The index is at the end of this file. `scripts/field_guide.py` drift-checks this file and every rule file.\n\n{{L 5-221}}\n\n{{L 295-295}}\n\nPer-service notes load with their code: `services-genius.md`, `biography.md`, `photos.md`, `apple-canvas.md`, and `timeline.md` for the Living Timeline and its contract.\n\n{{L 317-321}}\n\n{{L 365-382}}\n\nThe endpoint list is in `.claude/rules/endpoints.md` (loads with `routes/**` and `feb8.py`); the field guide is the canonical route map.\n\n{{L 420-445}}\n\nChecked 2026-11-03: `oldScripts/` is gone; legacy code lives in `archive/`.\n\n{{L 447-522}}\n\n## Rule index (`.claude/rules/`)\n\n| File | Loads with |\n|---|---|\n| `timeline.md` | `routes/timeline.py`, `services/timeline/**`, `tests/test_timeline*.py` |\n| `services-genius.md` | `services/genius/**` |\n| `biography.md` | `services/biography/**` |\n| `photos.md` | `services/photos/**` |\n| `apple-canvas.md` | `services/apple/**`, `services/canvas/**` |\n| `endpoints.md` | `routes/**`, `feb8.py` |\n\nThe search-first section that described a `code_search` tool, which is not installed, is in `docs/2026-11-03-claude-md-archive.md`.\n"},
+ {"path": ".claude/rules/timeline.md", "paths": ["routes/timeline.py", "services/timeline/**", "tests/test_timeline*.py"], "text": "## Living Timeline\n\n{{L 323-330}}\n\n{{L 332-363}}"},
+ {"path": ".claude/rules/services-genius.md", "paths": ["services/genius/**"], "text": "## Genius API\n\n{{L 297-300}}"},
+ {"path": ".claude/rules/biography.md", "paths": ["services/biography/**"], "text": "## Biography System\n\n{{L 302-305}}"},
+ {"path": ".claude/rules/photos.md", "paths": ["services/photos/**"], "text": "## Flickr and photos\n\n{{L 307-309}}"},
+ {"path": ".claude/rules/apple-canvas.md", "paths": ["services/apple/**", "services/canvas/**"], "text": "## Apple Music and Canvas\n\n{{L 311-315}}"},
+ {"path": ".claude/rules/endpoints.md", "paths": ["routes/**", "feb8.py"], "text": "{{L 384-418}}"},
+ {"path": "docs/2026-11-03-claude-md-archive.md", "text": "# CLAUDE.md archive (2026-11-03)\n\nMoved out of CLAUDE.md on 2026-11-03. This section described a `code_search` semantic-search tool that is not configured for this repo (`.mcp.json` has only `memory`); its command examples were empty, and an unclosed code fence at its end ran on for about 150 lines of the old file.\n\n{{L 224-293}}\n\n```"}
+ ]
+}

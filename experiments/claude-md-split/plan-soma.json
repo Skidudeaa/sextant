@@ -1,0 +1,176 @@
+{
+ "repo": "/root/somaNotes",
+ "source": "/root/scratch/tmp/claude-0/-root-sextant/2fcc662e-f32c-48d7-ba24-692303f9d4b2/scratchpad/soma-CLAUDE.orig.md",
+ "outputs": [
+  {
+   "path": "CLAUDE.md",
+   "text": "{{L 1-3}}\n\nSubsystem guidance lives in `.claude/rules/*.md`. Each file has a `paths:` list and Claude Code loads it when you read or edit a matching file. When you review a diff, plan, or brief a subagent for a subsystem without opening its files, open the rule file yourself. The index is at the end of this file. Every rule file is the old CLAUDE.md text moved word for word on 2026-11-03.\n\n{{L 5-25}}\n\n{{L 27-49}}\n\n{{L 55-59}}\n\n{{L 63-63}}\n\n{{L 69-69}}\n\n{{L 79-81}}\n\n{{L 85-89}}\n\nAdding or reading a feature flag: `.claude/rules/flags.md` (a flag defined only in the working tree fails silently to OFF). LLM client timeouts and model swaps: `.claude/rules/llm-calls.md`.\n\n{{L 93-106}}\n\n{{L 110-120}}\n\n{{L 122-214}}\n\n## Surface depth and theme (summary)\n\nBefore any depth, tint, elevation, theme or CSS-token change, read `.claude/rules/theme-and-depth.md`: adjacent desk depths must differ by at least 10 CIE76 ΔE on all 12 census themes (measured with `tools/desk_depth_check.py`, owner 2026-10-12), and `packages/dark-roast/` is a stale v3.0.0 vendored copy whose `crater` value differs from v5.\n\n{{L 251-280}}\n\n### Note Rail\n\n{{D 284-284}} Before changing the rail read `.claude/rules/note-rail.md` and `docs/architecture/RAIL_PROGRESS_NOTE_HISTORY.md`.\n\n{{D 315-317}}\n\n{{L 319-323}}\n\nChecked 2026-11-03: `circuit_breaker.py` is at `utils/circuit_breaker.py`, `hyperdrive/service.py` no longer exists (the HyperDrive code is under `hyperdrive/`), and the deprecated root `models.py` and `core/unified_models.py` are gone.\n\n## Patient data isolation (summary)\n\nPatient A's data once leaked into Patient B's note through frontend state; this is a patient-safety contract. Before changing `NoteGenerationManager`, `ChatPanel`, `NoteViewerManager`, `PriorNotesPanel` or `EhrFinalModal`, read `.claude/rules/patient-isolation.md`. Two of its rules apply to every backend endpoint:\n\n{{D 331-333}}\n\n{{L 382-404}}\n\n{{D 433-433}} Conventions are in `.claude/rules/playwright.md`.\n\n{{L 462-484}}\n\n## Subsystem pointers\n\n- Progress-note pipeline files carry a same-PR doc rule: `.claude/rules/progress-note-pipeline.md`.\n- Any H&P prompt or rule change: read `.claude/rules/handp-corpus.md` first. The ten P0 rulings are owner decisions, and some make the current code the wrong side.\n- Note-evolution, north-star or takeover work: open `docs/architecture/NOTE_EVOLUTION_DATAFLOW.md` first (`.claude/rules/note-evolution.md`).\n- Transfer Center work: `.claude/rules/transfer-center.md` holds the Avera facts and the normative Transfer Event Contract rules.\n\n{{L 541-550}}\n\n{{D 561-561}} Adapters: `.claude/rules/problem-models.md`.\n\n{{L 583-631}}\n\n{{L 690-770}}\n\n## Browser automation (summary)\n\nStart with `playwright-cli` (shell, about 27K tokens a task). Escalate to the Playwright MCP plugin only for long multi-step flows, and use Chrome DevTools MCP for performance, Lighthouse, accessibility and network work. Details and the anti-bot notes: `.claude/rules/browser-automation.md`.\n\n{{L 837-883}}\n\n## Rule index (`.claude/rules/`)\n\n| File | Loads with |\n|---|---|\n| `chart-text-provenance.md` | rail generate and save path files |\n| `static-assets.md` | `static/**`, `templates/**`: `?v=` stamping and the Cloudflare chain |\n| `testing.md` | `tests/**`: failure baseline history, collection hangs |\n| `flags.md` | `core/settings.py` |\n| `llm-calls.md` | `services/llm_service.py`, `core/llm_registry.py`, BHC service |\n| `theme-and-depth.md` | `static/css/**`, `packages/dark-roast/**` |\n| `note-rail.md` | rail JS/CSS and its history doc |\n| `patient-isolation.md` | the five patient-scoped frontend classes |\n| `toast.md` | `static/js/**` |\n| `playwright.md`, `browser-automation.md` | `tests/playwright/**` |\n| `progress-note-pipeline.md` | the five pipeline files |\n| `handp-corpus.md` | H&P generator, prompts, corpus |\n| `note-evolution.md` | `services/note_evolution/**` and the router |\n| `problem-models.md` | Problem models and adapters |\n| `transfer-center.md` | transfer endpoints, services, JS, prompts |\n"
+  },
+  {
+   "path": ".claude/rules/chart-text-provenance.md",
+   "paths": [
+    "static/js/census/note-generation.js",
+    "api/endpoints/generation_stream.py",
+    "generators/progress_generator.py",
+    "services/dailystate_from_save.py",
+    "services/note_evolution/course_projection_worker.py",
+    "hyperdrive/router.py"
+   ],
+   "text": "{{L 51-53}}"
+  },
+  {
+   "path": ".claude/rules/static-assets.md",
+   "paths": [
+    "static/**",
+    "templates/**",
+    "services/versioned_static.py"
+   ],
+   "text": "## Static assets: `?v=` and the Cloudflare edge\n\n{{L 61-61}}\n\n{{L 65-67}}"
+  },
+  {
+   "path": ".claude/rules/testing.md",
+   "paths": [
+    "tests/**",
+    "pytest.ini",
+    "conftest.py"
+   ],
+   "text": "## Test suite history (from Development Workflow)\n\n{{L 71-77}}"
+  },
+  {
+   "path": ".claude/rules/llm-calls.md",
+   "paths": [
+    "core/llm_registry.py",
+    "services/rail_bhc_service.py",
+    "services/llm_service.py"
+   ],
+   "text": "{{L 91-91}}\n\n{{L 108-108}}"
+  },
+  {
+   "path": ".claude/rules/theme-and-depth.md",
+   "paths": [
+    "static/css/**",
+    "packages/dark-roast/**",
+    "tools/desk_depth_check.py"
+   ],
+   "text": "{{L 216-249}}"
+  },
+  {
+   "path": ".claude/rules/note-rail.md",
+   "paths": [
+    "static/js/census/note-rail.js",
+    "static/js/census/note-generation.js",
+    "static/js/census/index.js",
+    "static/css/note-rail-terminal.css",
+    "docs/architecture/RAIL_PROGRESS_NOTE_HISTORY.md"
+   ],
+   "text": "{{L 282-317}}"
+  },
+  {
+   "path": ".claude/rules/patient-isolation.md",
+   "paths": [
+    "static/js/census/note-generation.js",
+    "static/js/census/note-rail.js",
+    "static/js/census/index.js",
+    "static/js/census/components/chat-panel.js",
+    "static/js/census/services/chat-service.js",
+    "static/js/census/components/prior-notes-panel.js",
+    "static/js/census/components/ehr-final-modal.js"
+   ],
+   "text": "{{L 325-380}}"
+  },
+  {
+   "path": ".claude/rules/toast.md",
+   "paths": [
+    "static/js/**"
+   ],
+   "text": "Checked 2026-11-03: the bridge is `static/js/core/toast-bridge.js`.\n\n{{L 406-429}}"
+  },
+  {
+   "path": ".claude/rules/playwright.md",
+   "paths": [
+    "tests/playwright/**"
+   ],
+   "text": "{{L 431-460}}"
+  },
+  {
+   "path": ".claude/rules/progress-note-pipeline.md",
+   "paths": [
+    "static/js/census/note-generation.js",
+    "static/js/census/note-rail.js",
+    "api/endpoints/progress_analysis_stream.py",
+    "api/endpoints/generation_stream.py",
+    "generators/progress_generator.py",
+    "docs/architecture/PROGRESS_NOTE_PIPELINE.md"
+   ],
+   "text": "{{L 486-497}}"
+  },
+  {
+   "path": ".claude/rules/handp-corpus.md",
+   "paths": [
+    "docs/decisions/handp/**",
+    "tools/handp_decision_corpus.py",
+    "generators/handp_generator.py",
+    "generators/clinical_context_mixin.py",
+    "api/endpoints/handp_analysis_stream.py",
+    "api/endpoints/admissions_compile_stream.py",
+    "templates/prompts/handp.txt",
+    "knowledge/guidelines/handp.md",
+    "handpLinter_v0.1.py",
+    "handpLintList_v0.1.yaml"
+   ],
+   "text": "{{L 499-521}}"
+  },
+  {
+   "path": ".claude/rules/note-evolution.md",
+   "paths": [
+    "services/note_evolution/**",
+    "api/schemas/note_evolution.py",
+    "services/clinical_update_router.py",
+    "static/js/census/note-evolution-workspace.js",
+    "docs/architecture/NOTE_EVOLUTION_DATAFLOW.md"
+   ],
+   "text": "{{L 523-539}}"
+  },
+  {
+   "path": ".claude/rules/problem-models.md",
+   "paths": [
+    "core/models.py",
+    "hyperdrive/models.py",
+    "hyperdrive/adapters.py",
+    "base_models.py"
+   ],
+   "text": "Checked 2026-11-03: root `models.py` and `core/unified_models.py` no longer exist.\n\n{{L 552-581}}"
+  },
+  {
+   "path": ".claude/rules/transfer-center.md",
+   "paths": [
+    "api/endpoints/transfer*.py",
+    "api/schemas/transfer*.py",
+    "services/transfer_*.py",
+    "static/js/transfer/**",
+    "generators/utility_generators.py",
+    "templates/prompts/transfer.txt",
+    "knowledge/templates/transfer.txt",
+    "scripts/transfer_capture_coverage.py",
+    "docs/domain/**",
+    "docs/architecture/TRANSFER_CENTER_CURRENT.md"
+   ],
+   "text": "{{L 633-688}}"
+  },
+  {
+   "path": ".claude/rules/browser-automation.md",
+   "paths": [
+    "tests/playwright/**",
+    "tools/desk_depth_check.py"
+   ],
+   "text": "{{L 772-835}}"
+  },
+  {
+   "path": ".claude/rules/flags.md",
+   "paths": [
+    "core/settings.py"
+   ],
+   "text": "{{L 83-83}}"
+  }
+ ]
+}
