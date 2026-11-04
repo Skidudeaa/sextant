@@ -101,6 +101,21 @@ Median share of each CLAUDE.md in context, with eager delivery as 100%:
 3. Probe whether `git diff`, `sed -n` and `grep` on one file count as native reads.
 4. Run the A/A test of the hook channel and write the power table before any live trial (docs/050 kill criteria, months 2 to 3).
 
+## Amendment 2026-11-03: hand split instead of the compiler
+
+The owner chose a hand trim over building `atoms compile` and the command relay. Each repo's CLAUDE.md was split by hand into a core file plus verbatim `.claude/rules/*.md` files with `paths:` lists. A split script checked that every non-blank line landed in exactly one output and that every glob matched a tracked file.
+
+| Repo | Commit | CLAUDE.md before → after | Rules |
+| --- | --- | --- | --- |
+| sextant | 231734f | 105,738 → 3,265 | none (reference moved to docs/ARCHITECTURE.md) |
+| defGen2 | 5e461f5, 3410a62 | 77,905 → 11,193 | 19 |
+| somaNotes | ad3012194, e3c454414, f65689c13 | 79,150 → 36,934 | 18 |
+| jan25 | b90d8c9d6 | 29,348 → 18,836 | 6 |
+
+Why it beat the compiler: on sextant's old file the compiler still carried a median 17,095 chars per request, and the hand trim costs 3,265. On somaNotes, replaying 60 days gives a median 46,246 chars per request after the first split, against 79,150. Rule text was in context before 92.6% of edits, but only 40% of git diff reviews and 53.6% of spawn briefs. Path rules were verified live on Claude Code 2.1.318 in a scratch repo, defGen2, somaNotes and jan25.
+
+What this changes in "Next": step 1 (write rule files) is done by hand. Step 2 (the command relay) is not built. Its only clear use now is loading `deploy.md` when `bin/deploy` runs in somaNotes. Steps 3 and 4 stay open but have no consumer. The decisions above are unchanged; this amendment records the change of course.
+
 ## Kill criteria
 
 - **Month 2:** recall below 90% with the chosen channels. Today it is 97.4% on replay.
