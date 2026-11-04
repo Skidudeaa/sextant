@@ -1,5 +1,7 @@
 # Developer Guide
 
+> **2026-11-03:** most of what this guide describes (the command map, hooks, watcher, MCP server) was archived at the tag `archive/retrieval-era-2026-11-03`. `bin/intel.js` now dispatches only `atoms` and `ledger`.
+
 For contributors and anyone working on sextant internals.
 See `README.md` for user docs, `CLAUDE.md` for the AI agent guide.
 
