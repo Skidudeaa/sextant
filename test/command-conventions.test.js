@@ -52,7 +52,7 @@ describe("command conventions", () => {
       "Non-hook commands must use rootsFromArgs() or ctx.roots, not process.cwd(). " +
         "Offenders: " +
         offenders.join(", ") +
-        ". See commands/watch-stop.js or commands/inject.js for the correct pattern."
+        ". See commands/ledger.js for the correct pattern."
     );
   });
 

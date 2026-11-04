@@ -1,4 +1,0 @@
-# Sextant state directory created by `sextant scan --root fixtures/swift-eval --force`.
-# Eval fixtures must stay clean — they're test inputs, not real projects.
-.planning/
-.claude/

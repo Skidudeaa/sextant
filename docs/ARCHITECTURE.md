@@ -1,6 +1,6 @@
 # Sextant architecture reference (retrieval era)
 
-Moved verbatim from CLAUDE.md on 2026-11-03, when CLAUDE.md was trimmed to the current state. It describes the orientation service as it stood at hibernation (2026-08-26). Read the section for a module before editing it.
+Moved verbatim from CLAUDE.md on 2026-11-03, when CLAUDE.md was trimmed to the current state. It describes the orientation service as it stood at hibernation (2026-08-26). Most of that code was archived on 2026-11-03: read it at the tag `archive/retrieval-era-2026-11-03` (`git show archive/retrieval-era-2026-11-03:<path>`). The `lib/` modules still in the tree are the ones the Jev experiments and atoms/ledger import.
 
 
 ## What This Project Is

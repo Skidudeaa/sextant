@@ -4,20 +4,15 @@
   "description": "Health-aware codebase intelligence for LLM coding agents",
   "private": true,
   "type": "commonjs",
-  "main": "lib/intel.js",
+  "main": "bin/intel.js",
   "bin": {
     "sextant": "bin/intel.js",
     "codebase-intel": "bin/intel.js"
   },
   "scripts": {
+    "test": "node --test test/*.test.js experiments/jev/*.test.js",
     "test:jev": "node --test experiments/jev/*.test.js",
-    "lab:jev": "node experiments/jev/lab.js",
-    "test": "node --test test/*.test.js test/extractors/*.test.js && bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh && bash scripts/test-holdback-benefit.sh && node scripts/eval-retrieve.js",
-    "test:unit": "node --test test/*.test.js test/extractors/*.test.js",
-    "test:integration": "bash scripts/test-refresh.sh && bash scripts/test-scoring.sh && bash scripts/test-rg.sh && bash scripts/test-watcher.sh && bash scripts/test-corrupt-recovery.sh && bash scripts/test-holdback-benefit.sh",
-    "test:eval": "node scripts/eval-retrieve.js",
-    "test:eval:hook": "node scripts/eval-hook.js",
-    "test:eval:python": "node bin/intel.js scan --root fixtures/python-eval --force && node scripts/eval-retrieve.js --root fixtures/python-eval --dataset fixtures/python-eval-dataset.json"
+    "lab:jev": "node experiments/jev/lab.js"
   },
   "dependencies": {
     "@babel/parser": "^7.29.2",

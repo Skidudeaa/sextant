@@ -16,10 +16,10 @@ At session start, read `JOURNAL.md` (tail plus `## GRAVEYARD`) and the latest ha
 node bin/intel.js atoms replay --roots /root/jan25,/root/defGen2 [--days N] [--json]
 node bin/intel.js atoms compile --dry-run --roots /root/jan25
 node bin/intel.js ledger census
-node --test test/atoms.test.js test/command-conventions.test.js test/ledger.test.js
+npm test        # test/*.test.js plus experiments/jev/*.test.js
 ```
 
-CommonJS, no build step. The full unit suite has 73 known failures (missing unmerged `lib/jev*` modules, the MCP tool-count test, `spawn sextant ENOENT`), so run targeted test files.
+CommonJS, no build step.
 
 ## Standing rules
 
@@ -27,7 +27,7 @@ CommonJS, no build step. The full unit suite has 73 known failures (missing unme
 - somaNotes transcripts carry PHI: print aggregates only. Keep somaNotes out of hooks unless the owner says otherwise.
 - jan25's `.claude/settings.local.json` holds plaintext MongoDB credentials. Never copy them anywhere.
 - The `InstructionsLoaded` exposure hook in jan25, defGen2, theLongWay and sextant runs `node /root/sextant/bin/intel.js atoms exposure`. A checkout without `commands/atoms.js` breaks it in all four repos.
-- The retrieval-era code (about 17k lines) stays in place. Ask the owner before removing working code.
+- The retrieval-era service (CLI, hooks, MCP server, watcher, their tests and eval fixtures) was archived on 2026-11-03 at the tag `archive/retrieval-era-2026-11-03`; restore a file with `git show archive/retrieval-era-2026-11-03:<path>`. `lib/` keeps the modules the Jev experiments and the atoms/ledger instruments still import.
 - New `commands/*.js` export `{ run }` taking `ctx = { argv, roots, root }`. Hook commands that read `process.cwd()` must be whitelisted in `test/command-conventions.test.js`.
 
 ## Hook output channels
@@ -42,6 +42,6 @@ CommonJS, no build step. The full unit suite has 73 known failures (missing unme
 
 ## Retrieval-era reference
 
-`docs/ARCHITECTURE.md` holds the full description of the hibernated service: the pipeline (extractors, resolver, graph, intel, summary, retrieve, watcher, classifier, MCP server, freshness gate, telemetry, blast-radius lane, subagent orientation, the context-coherence arc), per-repo state in `.planning/intel/`, key design decisions, the eval harness and its baselines, and `init --codex` / `--kimi` wiring. Read the section for a module in `lib/`, `commands/`, `mcp/` or `scripts/` before editing it.
+The code it describes is at the tag `archive/retrieval-era-2026-11-03`. `docs/ARCHITECTURE.md` holds the full description of the hibernated service: the pipeline (extractors, resolver, graph, intel, summary, retrieve, watcher, classifier, MCP server, freshness gate, telemetry, blast-radius lane, subagent orientation, the context-coherence arc), per-repo state in `.planning/intel/`, key design decisions, the eval harness and its baselines, and `init --codex` / `--kimi` wiring. Read the section for a module in `lib/` before editing it.
 
 What not to add: embeddings or vector search, LLM calls in the retrieval pipeline, semantic (LSP-like) claims, summaries over 2200 chars, hook UI on stderr.

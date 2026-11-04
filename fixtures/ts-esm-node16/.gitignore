@@ -1,4 +1,0 @@
-# Sextant state directory created by `sextant scan --root fixtures/ts-esm-node16 --force`.
-# Eval fixtures must stay clean — they're test inputs, not real projects.
-.planning/
-.claude/

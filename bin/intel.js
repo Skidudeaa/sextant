@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+// The retrieval-era CLI (scan, watch, hooks, MCP server, telemetry and the
+// rest) was archived on 2026-11-03; restore any file with
+// `git show archive/retrieval-era-2026-11-03:<path>`. What remains are the
+// commands with live callers: the atoms exposure hook in four repos and the
+// ledger/atoms instruments.
+
 const { rootsFromArgs } = require("../lib/cli");
 
 function usage(exitCode = 1) {
@@ -7,148 +13,28 @@ function usage(exitCode = 1) {
   console.log(`sextant v${pkg.version}
 
 Usage:
-  sextant init [--root <path> | --roots <a,b> | --roots-file <file>] [--codex] [--kimi]
-  sextant scan [--root/--roots/--roots-file] [--force]
-  sextant rescan [--root/--roots/--roots-file] [--force]
-  sextant update --file <relPath> [--root <path>]
-  sextant watch [--root/--roots/--roots-file] [--summary-every <sec>] [--no-dashboard]
-  sextant summary [--root <path>]
-  sextant health [--root <path>] [--pretty]
-  sextant doctor [--root <path>]
-  sextant query <imports|dependents|exports> --file <relPath> [--root <path>]
-  sextant explain <file|dir/> [--root <path>] [--json]
-  sextant closure [--root <path>]
-  sextant reject "<description>" --files <a,b> --why "<reason>" [--root <path>]
-  sextant reject --list [--root <path>]
-  sextant reject --delete <id> [--root <path>]
-  sextant sprawl [--root <path>] [--within <N>] [--json]
-  sextant telemetry [--root <path> | --roots <a,b> | --roots-file <f>] [--json | --tail <N>] [--include-old] [--days <N>] [--since <iso>] [--until <iso>]
-  sextant telemetry --coherence-scorecard [--root <path>] [--days <N>] [--json]
-  sextant telemetry --review <incidentId> --verdict <verdict> --reviewed-findings <N>
-  sextant eval-trajectory [--projects <path>] [--repo <name>] [--json] [--size-matched] [--include-subagents]
-  sextant tune [--projects <path>] [--repo <name>] [--json]
   sextant ledger census [--projects <path>] [--days <N>] [--json]
   sextant atoms compile --dry-run [--roots <a,b>] [--json]
   sextant atoms replay [--roots <a,b>] [--projects <path>] [--days <N>] [--json]
-  sextant atoms exposure
-  sextant hook sessionstart
-  sextant hook refresh
-  sextant hook posttooluse
-  sextant hook pretask
-  sextant hook subagentstart
-  sextant inject
-  sextant retrieve <query>
-  sextant zoekt <index|serve|search>
-  sextant mcp`);
+  sextant atoms exposure`);
   process.exit(exitCode);
 }
 
-// Command map for commands that need roots parsing
 const commandMap = {
-  init: "../commands/init",
-  scan: "../commands/scan",
-  rescan: "../commands/scan",
-  update: "../commands/update",
-  watch: "../commands/watch",
-  summary: "../commands/summary",
-  health: "../commands/health",
-  doctor: "../commands/doctor",
-  query: "../commands/query",
-  explain: "../commands/explain",
-  closure: "../commands/closure",
-  sprawl: "../commands/sprawl",
-  reject: "../commands/reject",
-  telemetry: "../commands/telemetry",
-  "eval-trajectory": "../commands/eval-trajectory",
-  tune: "../commands/tune",
   ledger: "../commands/ledger",
   atoms: "../commands/atoms",
-  retrieve: "../commands/retrieve",
-  zoekt: "../commands/zoekt",
 };
 
 (async () => {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
 
-  // ---- version ----
   if (cmd === "version" || cmd === "--version" || cmd === "-v") {
     const pkg = require("../package.json");
     console.log(`sextant v${pkg.version}`);
     process.exit(0);
   }
 
-  // WHY: hibernation leaves project-local hooks and MCP declarations in place
-  // for a one-step resume. Ambient entry points must therefore go quiet before
-  // they initialize state or start a watcher. Explicit read-only/maintenance
-  // commands remain available so the archived project can still be inspected.
-  const { isHibernating, markerPath } = require("../lib/hibernation");
-  if (isHibernating()) {
-    if (cmd === "hook" || cmd === "inject") return;
-    if (cmd === "watch" || cmd === "watch-start") {
-      console.error(`sextant is hibernating (${markerPath()})`);
-      return;
-    }
-  }
-
-  // ---- hook commands: dispatch by subcommand, no roots parsing ----
-  if (cmd === "hook") {
-    const sub = argv[1];
-    if (sub === "sessionstart") {
-      const { run } = require("../commands/hook-sessionstart");
-      await run();
-      return;
-    }
-    if (sub === "refresh") {
-      const { run } = require("../commands/hook-refresh");
-      await run();
-      return;
-    }
-    if (sub === "posttooluse") {
-      const { run } = require("../commands/hook-posttooluse");
-      await run();
-      return;
-    }
-    if (sub === "pretask") {
-      const { run } = require("../commands/hook-pretask");
-      await run();
-      return;
-    }
-    if (sub === "subagentstart") {
-      const { run } = require("../commands/hook-subagentstart");
-      await run();
-      return;
-    }
-    usage(1);
-  }
-
-  // ---- early-exit commands: no roots parsing needed ----
-  if (cmd === "inject") {
-    const { run } = require("../commands/inject");
-    await run();
-    return;
-  }
-
-  if (cmd === "watch-start") {
-    const { run } = require("../commands/watch-start");
-    await run();
-    return;
-  }
-
-  if (cmd === "watch-stop") {
-    const { run } = require("../commands/watch-stop");
-    await run();
-    return;
-  }
-
-  // ---- mcp server: no roots parsing, long-running stdio ----
-  if (cmd === "mcp") {
-    const { startServer } = require("../mcp/server");
-    startServer();
-    return;
-  }
-
-  // ---- all other commands: parse roots, build ctx, dispatch ----
   const modPath = commandMap[cmd];
   if (!modPath) usage(1);
 
