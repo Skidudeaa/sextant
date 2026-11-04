@@ -108,6 +108,8 @@
 
 [2026-11-03] Built and wired the command relay (`atoms relay`, PostToolUse Bash; jan25, defGen2, somaNotes) — probe on 2.1.318: Read, Edit and one-file `sed -n` load path rules, `grep`, `git diff` and `git show` do not; replay recall with the relay 97.1% jan25, 98.8% somaNotes, 100% defGen2; live delivery verified in jan25 (`git show --stat` delivered endpoints.md and timeline.md). Kit install-line test added and the droplet kit paths fixed (/root/omc 7008d17); a real `kit.py plan` staged a 9,218-char CLAUDE.md without the charter.
 
+[2026-11-04] Ran the OMC kit install after the 17:30 session closed — global ~/.claude/CLAUDE.md 15,899 → 9,264 chars (kit block 561, charter gone); install activated then crashed in retention (KeyError previous_manifest from a live-session activation receipt), fixed in /root/omc 221c232; retention then refused on 81 dead session records whose runtimes were deleted outside the kit; the owner chose to retire them (moved to /root/scratch/20261103-omc-stale-sessions, keep-until 2026-12-03) and retention archived one superseded runtime; kit doctor ok.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
