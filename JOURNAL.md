@@ -98,6 +98,9 @@
 
 [2026-11-03] Pushed defGen2 master (2027851..3410a62) with AGENTS.md as a symlink to CLAUDE.md and a glob index of the rules — Codex had read no project doc there; `codex exec -s read-only` now names the first heading and the right rule file without running a command.
 
+[2026-11-03] Global instructions: /root/omc b62532e makes kit.py write only the OMC activation boundary plus a charter pointer into ~/.claude/CLAUDE.md (omc-launched leads already get the charter via --append-system-prompt); takes effect at the next kit install, which must wait for no live OMC session. The oh-my-claudecode block moved to ~/.claude/omc/oh-my-claudecode-5.4.0.md (~/.claude 7c58ef9): global file 21,600 → 15,899 now, about 9,300 after the install.
+[2026-11-03] Split jan25 CLAUDE.md 29,348 → 18,836 with six path rules (b90d8c9d6, local) — field_guide.py drift now covers .claude/rules (0 drift before and after on 116 routes; a planted wrong constant is caught with its file:line); timeline.md loaded live and jan25 wrote its first exposure rows.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
