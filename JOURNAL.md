@@ -96,6 +96,8 @@
 [2026-11-03] Replayed 60 days: somaNotes median per-request instruction text 79,150 → 46,246 chars (60 sessions, 68 subagents), rule text in context before 92.6% of edits, 40% of git diff reviews, 53.6% of spawn briefs; defGen2 has only 7 Claude sessions and no edits because Codex does its source work, and Codex there reads no project doc at all (no AGENTS.md, no CLAUDE.md fallback).
 [2026-11-03] Verified path rules live on Claude Code 2.1.318 — `**` and exact globs load on Read and a `*.css` rule stays out on a `.js` read (scratch probe), isw.md loaded in /root/defGen2 with its first exposure-hook rows, static-assets.md and toast.md loaded in /root/somaNotes.
 
+[2026-11-03] Pushed defGen2 master (2027851..3410a62) with AGENTS.md as a symlink to CLAUDE.md and a glob index of the rules — Codex had read no project doc there; `codex exec -s read-only` now names the first heading and the right rule file without running a command.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).
