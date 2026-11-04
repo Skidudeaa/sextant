@@ -25,4 +25,6 @@ const old = fs.readFileSync(oldFile, "utf8").length;
 console.log(JSON.stringify({ root, days: +days, sessions: r.sessions, subagents: r.subagents, oldEagerChars: old, coreChars: core.length, ruleChars: boundChars, rules: bound.length,
   perRequestMedianChars: Math.round(med(r.shares.map(s => s.perRequest[0])) * total), endMedianChars: Math.round(med(r.shares.map(s => s.end[0])) * total),
   ruleRecallNative: { all: rec(0), edit: rec(0, "edit"), review: rec(0, "review"), spawn: rec(0, "spawn") },
+  ruleRecallWithRelay: { all: rec(1), edit: rec(1, "edit"), review: rec(1, "review"), spawn: rec(1, "spawn") },
+  perRequestMedianCharsWithRelay: Math.round(med(r.shares.map(s => s.perRequest[1])) * total),
   events: Object.fromEntries(types.map(([k, t]) => [k, t.events])), writeBlind: r.tally.writeBlind || 0 }, null, 1));

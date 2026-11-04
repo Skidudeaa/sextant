@@ -116,6 +116,26 @@ Why it beat the compiler: on sextant's old file the compiler still carried a med
 
 What this changes in "Next": step 1 (write rule files) is done by hand. Step 2 (the command relay) is not built. Its only clear use now is loading `deploy.md` when `bin/deploy` runs in somaNotes. Steps 3 and 4 stay open but have no consumer. The decisions above are unchanged; this amendment records the change of course.
 
+### Amendment 2026-11-03 (later): read semantics probed, command relay built
+
+Read-semantics probe on Claude Code 2.1.318, in a scratch repo with a `src/**` rule, checked by the exposure log and a codeword:
+
+| Agent action | Rule loads |
+| --- | --- |
+| Read, or Edit (after the edit runs; Edit works without a prior Read) | yes |
+| one-file `sed -n <range>` | yes (now counted by `bashReadTarget`) |
+| `grep -n … <file>`, `git diff`, `git diff <file>`, `git show` | no |
+
+The command relay is `sextant atoms relay`, a PostToolUse Bash hook in `commands/atoms.js`. It shares `namedFiles`, `bashReadTarget` and `REVIEW_RE` with the replay. It is wired in the `settings.local.json` of jan25, defGen2 and somaNotes, and verified live in a scratch repo and jan25. Replay over 60 days with the relay channel:
+
+| Repo | Sessions | Old eager | Per request, native / with relay | Recall, native / with relay |
+| --- | --- | --- | --- | --- |
+| jan25 | 22 | 29,188 | 18,736 / 20,203 | 60.1% / 97.1% |
+| somaNotes | 62 | 79,150 | 44,397 / 57,632 | 67.9% / 98.8% |
+| defGen2 | 8 | 77,905 | 11,066 / 18,688 | 11.1% / 100% |
+
+The earlier jan25 edit gap (76.2%) was mostly edits to files the agent had seen only through Bash. With `sed -n` counted, native edit recall is 87.5%, and the relay brings it to 100%.
+
 ## Kill criteria
 
 - **Month 2:** recall below 90% with the chosen channels. Today it is 97.4% on replay.

@@ -9,6 +9,7 @@
 //   compile --dry-run  split each CLAUDE.md into atoms and bind them to the files they cite
 //   replay             would each decision's atoms have reached the deciding agent in time?
 //   exposure           InstructionsLoaded hook: one row per instruction-file load
+//   relay              PostToolUse Bash hook: deliver the .claude/rules a command or diff reaches
 //
 // Aggregates only: somaNotes transcripts carry PHI.
 
@@ -16,9 +17,10 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const crypto = require("crypto");
 const { flag, hasFlag } = require("../lib/cli");
 
-const USAGE = "usage: sextant atoms compile --dry-run [--roots a,b] [--json] | atoms replay [--roots a,b] [--projects <path>] [--days <N>] [--json] | atoms exposure";
+const USAGE = "usage: sextant atoms compile --dry-run [--roots a,b] [--json] | atoms replay [--roots a,b] [--projects <path>] [--days <N>] [--json] | atoms exposure | atoms relay";
 const EXPOSURE_LOG = path.join(__dirname, "..", ".planning", "atoms", "exposure.jsonl");
 // Hook strings are capped at 10,000 characters, so a larger atom cannot travel
 // through the hook lane whole.
@@ -141,11 +143,21 @@ function namedFiles(text, ctx) {
   return out;
 }
 
-// What the Claude Code docs call a Bash command that counts as a read.
+// A Bash command that Claude Code counts as a read of one file, so a matching
+// `paths` rule loads with its result: a one-file cat/head (docs), and a one-file
+// `sed -n <range>` (probed on 2.1.318, 2026-11-03). `grep`, `git diff` and
+// `git show` do not load rules (same probe).
 function bashReadTarget(cmd) {
-  const m = /^\s*(?:cat|head)\s+((?:-[nc]\s*\d+\s+|-\S+\s+)*)(\S+)\s*$/.exec(String(cmd));
+  const c = String(cmd);
+  const m = /^\s*(?:cat|head)\s+((?:-[nc]\s*\d+\s+|-\S+\s+)*)(\S+)\s*$/.exec(c)
+    || /^\s*sed\s+-n\s+(["']?[0-9,$]+p["']?)\s+(\S+)\s*$/.exec(c);
   return m ? m[2].replace(/^["']|["']$/g, "") : null;
 }
+
+// git diff / git show, with global options before the subcommand
+// (`git -C <root> diff`, `git --no-pager show`). Their output names the files
+// under review.
+const REVIEW_RE = /\bgit\s+(?:-[Cc]\s+\S+\s+|--\S+\s+)*(diff|show)\b/;
 
 const resultText = c => (Array.isArray(c) ? c.map(x => (typeof x === "string" ? x : x.text || "")).join("\n") : String(c ?? ""));
 
@@ -194,8 +206,7 @@ function replayAgent(rows, ctx, tally, children) {
           const target = bashReadTarget(inp.command);
           if (target && ctx.gov.has(relTo(target, ctx.root))) effect.native.add(relTo(target, ctx.root));
           effect.bash = String(inp.command || "");
-          // Global options may precede the subcommand: `git -C <root> diff`, `git --no-pager show`.
-          effect.review = /\bgit\s+(?:-[Cc]\s+\S+\s+|--\S+\s+)*(diff|show)\b/.test(effect.bash);
+          effect.review = REVIEW_RE.test(effect.bash);
         }
         pending.set(c.id, effect);
       } else if (c.type === "tool_result" && pending.has(c.tool_use_id)) {
@@ -290,9 +301,106 @@ function appendExposure(payload, out = EXPOSURE_LOG) {
   fs.appendFileSync(out, JSON.stringify(row) + "\n", { mode: 0o600 });
 }
 
+// ---- relay ----
+//
+// PostToolUse hook on Bash. Claude Code loads a .claude/rules file when the agent
+// Reads or edits a matching file, but not when a command such as grep, git diff
+// or git show reaches it. The relay sends the rules for the files a command
+// names, and for git diff/show also the files its output prints: the "+cmd"
+// channel of the replay (97.4% recall at a median 48% of CLAUDE.md per request,
+// docs/052). Each rule goes to each agent once per session, and a rule the
+// exposure log shows was already loaded natively is skipped.
+
+const RELAY_DIR = path.join(__dirname, "..", ".planning", "atoms", "relay");
+const RELAY_LOG = path.join(__dirname, "..", ".planning", "atoms", "relay.jsonl");
+// additionalContext is capped at 10,000 characters.
+const RELAY_MAX = 9500;
+
+function rulesIn(root) {
+  const dir = path.join(root, ".claude", "rules");
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(dir).filter(n => n.endsWith(".md")).sort()) {
+    const text = fs.readFileSync(path.join(dir, f), "utf8");
+    const m = /^---\npaths:\n([\s\S]*?)\n---\n/.exec(text);
+    if (!m) continue;
+    out.push({ rel: `.claude/rules/${f}`, file: path.join(dir, f), body: text.slice(m[0].length).trim(),
+      globs: [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]) });
+  }
+  return out;
+}
+
+function nativeLoads(log, session, agent) {
+  if (!fs.existsSync(log)) return new Set();
+  const done = new Set();
+  for (const r of readLines(log)) {
+    if (r.session_id === session && (r.agent_id || "main") === agent && r.load_reason === "path_glob_match") done.add(r.file_path);
+  }
+  return done;
+}
+
+/**
+ * Decide what the relay sends for one PostToolUse payload.
+ * Returns { context, rules, trigger } or null when nothing is due. Writes the
+ * per-session delivery state and one log row when it returns a delivery.
+ */
+function relay(payload, opts = {}) {
+  const stateDir = opts.stateDir || RELAY_DIR;
+  const logFile = opts.logFile || RELAY_LOG;
+  const exposureLog = opts.exposureLog || EXPOSURE_LOG;
+  if (payload.tool_name !== "Bash" || !payload.session_id || !payload.cwd) return null;
+  const cmd = String((payload.tool_input || {}).command || "");
+  if (!cmd || bashReadTarget(cmd)) return null;
+  let root;
+  try {
+    root = execFileSync("git", ["-C", payload.cwd, "rev-parse", "--show-toplevel"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    return null; // not inside a git repository: no rules to relay
+  }
+  const rules = rulesIn(root);
+  if (!rules.length) return null;
+  const review = REVIEW_RE.test(cmd);
+  const resp = payload.tool_response;
+  const output = review ? (typeof resp === "string" ? resp : String((resp && resp.stdout) || "")) : "";
+  const tracked = execFileSync("git", ["-C", root, "ls-files"], { maxBuffer: 1 << 28 }).toString().split("\n").filter(Boolean);
+  const files = [...namedFiles(cmd + "\n" + output, { root, gov: new Set(tracked) })];
+  const hit = rules.filter(r => files.some(f => r.globs.some(g => path.matchesGlob(f, g))));
+  if (!hit.length) return null;
+
+  const agent = payload.agent_id || "main";
+  const key = crypto.createHash("sha256").update(payload.session_id).digest("hex").slice(0, 32);
+  const stateFile = path.join(stateDir, key + ".json");
+  const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : {};
+  const sent = new Set(state[agent] || []);
+  const native = nativeLoads(exposureLog, payload.session_id, agent);
+  const due = hit.filter(r => !sent.has(r.file) && !native.has(r.file));
+  if (!due.length) return null;
+
+  let context = `Project rules for files this ${review ? "diff" : "command"} reached. They load by themselves only when a file is Read or edited:\n`;
+  const included = [], pointed = [];
+  for (const r of due) {
+    const block = `\n## ${r.rel}\n${r.body}\n`;
+    if (context.length + block.length <= RELAY_MAX) { context += block; included.push(r); } else pointed.push(r);
+  }
+  if (pointed.length) context += `\nAlso applies; read it before acting: ${pointed.map(r => r.rel).join(", ")}\n`;
+
+  state[agent] = [...sent, ...due.map(r => r.file)];
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  fs.appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), session_id: payload.session_id, agent_id: agent, root,
+    trigger: review ? "review" : "command", rules: due.map(r => r.rel), whole: included.length, chars: context.length }) + "\n", { mode: 0o600 });
+  return { context, rules: due.map(r => r.rel), trigger: review ? "review" : "command" };
+}
+
 async function run(ctx) {
   const sub = ctx.argv[1];
   if (sub === "exposure") return appendExposure(JSON.parse(fs.readFileSync(0, "utf8")));
+  if (sub === "relay") {
+    const r = relay(JSON.parse(fs.readFileSync(0, "utf8")));
+    if (r) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: r.context } }));
+    return;
+  }
   const json = hasFlag(process.argv, "--json");
   if (sub === "compile") {
     if (!hasFlag(process.argv, "--dry-run")) throw new Error("atoms compile: writing rule files is not built yet; pass --dry-run");
@@ -315,4 +423,4 @@ async function run(ctx) {
   throw new Error(USAGE);
 }
 
-module.exports = { run, splitAtoms, citedGlobs, repoIndex, compileRepo, replayRepo, bashReadTarget, appendExposure };
+module.exports = { run, splitAtoms, citedGlobs, repoIndex, compileRepo, replayRepo, bashReadTarget, appendExposure, relay };

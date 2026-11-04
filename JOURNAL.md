@@ -106,6 +106,8 @@
 
 [2026-11-03] Pushed sextant main + tag archive/retrieval-era-2026-11-03, /root/omc b62532e, jan25 b90d8c9d6, and somaNotes 97e5adb7b (AGENTS.md now points Codex at CLAUDE.md and the matching rules, and drops the nonexistent `npm run dev`; codex exec answers bin/deploy and port 8080 from it). The OMC kit reinstall is still owed, at a time when no OMC session is live.
 
+[2026-11-03] Built and wired the command relay (`atoms relay`, PostToolUse Bash; jan25, defGen2, somaNotes) — probe on 2.1.318: Read, Edit and one-file `sed -n` load path rules, `grep`, `git diff` and `git show` do not; replay recall with the relay 97.1% jan25, 98.8% somaNotes, 100% defGen2; live delivery verified in jan25 (`git show --stat` delivered endpoints.md and timeline.md). Kit install-line test added and the droplet kit paths fixed (/root/omc 7008d17); a real `kit.py plan` staged a 9,218-char CLAUDE.md without the charter.
+
 ## GRAVEYARD
 - Jev test-witness ranking (2026-09-25) — died because it does not beat static signals, with or without coverage (docs/049 §1). Reopen only for a repo whose tests lack module-per-file naming.
 - Jev commit-focus weighting of co-change pairs (2026-09-25) — died because re-ranking with focus weights did not change partner prediction (p≈0.83, docs/049 §2).

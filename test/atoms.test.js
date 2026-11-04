@@ -6,7 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
-const { splitAtoms, citedGlobs, repoIndex, compileRepo, replayRepo, bashReadTarget, appendExposure } = require("../commands/atoms");
+const { splitAtoms, citedGlobs, repoIndex, compileRepo, replayRepo, bashReadTarget, appendExposure, relay } = require("../commands/atoms");
 
 const CLAUDE_MD = [
   "# Project",
@@ -55,11 +55,14 @@ test("citedGlobs binds files, directories and unique basenames, and drops dead p
   assert.equal(r.oversize, 0);
 });
 
-test("bashReadTarget matches one-file cat or head only", () => {
+test("bashReadTarget matches one-file cat, head or sed -n only", () => {
   assert.equal(bashReadTarget("cat lib/a.js"), "lib/a.js");
   assert.equal(bashReadTarget("head -n 40 /root/x/lib/a.js"), "/root/x/lib/a.js");
   assert.equal(bashReadTarget("cat lib/a.js lib/b.js"), null);
   assert.equal(bashReadTarget("grep foo lib/a.js"), null);
+  // sed -n on one file loads a paths rule (probed on Claude Code 2.1.318).
+  assert.equal(bashReadTarget("sed -n 1,40p lib/a.js"), "lib/a.js");
+  assert.equal(bashReadTarget("sed -n '5,9p' lib/a.js lib/b.js"), null);
 });
 
 test("replay scores each decision against atoms that arrived in time, per channel set", () => {
@@ -88,7 +91,8 @@ test("replay scores each decision against atoms that arrived in time, per channe
   fs.writeFileSync(path.join(tdir, "s2.jsonl"), [
     use(1, "x1", "Bash", { command: "git status --short" }), result(1, "x1", " M lib/b.js"),
     use(2, "x2", "Write", { file_path: `${root}/lib/b.js` }), result(2, "x2"),
-    use(3, "x3", "Bash", { command: "sed -n 1,5p lib/a.js" }), result(3, "x3", "x"),
+    // grep names the file without loading its rule (2.1.318 probe); a one-file sed -n would load it.
+    use(3, "x3", "Bash", { command: "grep -n x lib/a.js" }), result(3, "x3", "x"),
     use(4, "x4", "Edit", { file_path: `${root}/lib/a.js` }), result(4, "x4"),
   ].join("\n"));
   // s3: a diff run with git's global options before the subcommand.
@@ -102,7 +106,7 @@ test("replay scores each decision against atoms that arrived in time, per channe
   assert.equal(subagents, 1);
   // s1 Edit after a Read: native. s1 Write of b.js: the diff relay. Child Edit
   // after its own Read: native. s2 Write of b.js: only plain output named it.
-  // s2 Edit of a.js: only the sed command named it. s3 Edit of b.js: the diff relay.
+  // s2 Edit of a.js: only the grep command named it. s3 Edit of b.js: the diff relay.
   assert.deepEqual(tally.edit, { events: 6, pairs: 7, covered: [3, 6, 7, 7], full: [2, 5, 6, 6] });
   assert.equal(tally.writeBlind, 2);
   // The parent named y.py in a spawn prompt before anything delivered its atoms.
@@ -128,4 +132,48 @@ test("appendExposure keeps the listed path fields and nothing else", () => {
   assert.deepEqual(row.globs, ["lib/a.js"]);
   assert.equal(row.content, undefined);
   assert.equal(fs.statSync(out).mode & 0o777, 0o600);
+});
+
+function rulesRepo() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "relay-"));
+  for (const f of ["src/a.js", "lib/b.js"]) {
+    fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+    fs.writeFileSync(path.join(root, f), "x\n");
+  }
+  fs.mkdirSync(path.join(root, ".claude/rules"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".claude/rules/src.md"), '---\npaths:\n  - "src/**"\n---\nSRC RULE BODY\n');
+  execFileSync("git", ["-C", root, "init", "-q"]);
+  execFileSync("git", ["-C", root, "add", "-A"]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "relay-state-"));
+  return { root, opts: { stateDir: path.join(dir, "state"), logFile: path.join(dir, "relay.jsonl"), exposureLog: path.join(dir, "exposure.jsonl") } };
+}
+const bash = (root, session, command, stdout = "", agent) => ({ tool_name: "Bash", session_id: session, agent_id: agent, cwd: root, tool_input: { command }, tool_response: { stdout } });
+
+test("relay sends the rule for files a git diff prints, once per agent per session", () => {
+  const { root, opts } = rulesRepo();
+  const diff = "diff --git a/src/a.js b/src/a.js\n--- a/src/a.js\n+++ b/src/a.js\n";
+  const first = relay(bash(root, "s1", "git diff", diff), opts);
+  assert.ok(first, "a diff of a bound file must relay its rule");
+  assert.deepEqual(first.rules, [".claude/rules/src.md"]);
+  assert.equal(first.trigger, "review");
+  assert.match(first.context, /SRC RULE BODY/);
+  assert.equal(relay(bash(root, "s1", "git diff", diff), opts), null, "the same agent gets it once");
+  assert.ok(relay(bash(root, "s1", "git diff", diff, "child-1"), opts), "a subagent gets its own copy");
+  assert.ok(relay(bash(root, "s2", "git -C " + root + " diff", diff), opts), "a new session gets it again");
+});
+
+test("relay reads output only for git diff/show, and skips native reads and unbound files", () => {
+  const { root, opts } = rulesRepo();
+  assert.equal(relay(bash(root, "s", "git status", " M src/a.js\n"), opts), null, "status output is not read");
+  assert.equal(relay(bash(root, "s", "sed -n 1,5p src/a.js"), opts), null, "a native read already loaded it");
+  assert.equal(relay(bash(root, "s", "grep -n x lib/b.js"), opts), null, "no rule binds lib/b.js");
+  const named = relay(bash(root, "s", "grep -n x src/a.js"), opts);
+  assert.ok(named, "a command naming a bound file relays its rule");
+  assert.equal(named.trigger, "command");
+});
+
+test("relay skips a rule the exposure log shows was loaded natively", () => {
+  const { root, opts } = rulesRepo();
+  fs.writeFileSync(opts.exposureLog, JSON.stringify({ session_id: "s", load_reason: "path_glob_match", file_path: path.join(root, ".claude/rules/src.md") }) + "\n");
+  assert.equal(relay(bash(root, "s", "grep -n x src/a.js"), opts), null);
 });

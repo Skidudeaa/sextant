@@ -26,7 +26,7 @@ CommonJS, no build step.
 - Do not `npm link` sextant. Do not delete `refs/archive/pre-push-protection-20261028`.
 - somaNotes transcripts carry PHI: print aggregates only. Keep somaNotes out of hooks unless the owner says otherwise.
 - jan25's `.claude/settings.local.json` holds plaintext MongoDB credentials. Never copy them anywhere.
-- The `InstructionsLoaded` exposure hook in jan25, defGen2, theLongWay and sextant runs `node /root/sextant/bin/intel.js atoms exposure`. A checkout without `commands/atoms.js` breaks it in all four repos.
+- Two hooks run from this checkout. The `InstructionsLoaded` exposure hook (jan25, defGen2, theLongWay, sextant) runs `node /root/sextant/bin/intel.js atoms exposure`. The PostToolUse Bash relay (jan25, defGen2, somaNotes, since 2026-11-03) runs `node /root/sextant/bin/intel.js atoms relay` and delivers the `.claude/rules` that a command or a git diff/show reaches. A checkout without `commands/atoms.js` breaks both. Remove the relay by deleting its PostToolUse group from that repo's `.claude/settings.local.json`; backups are in /root/scratch/20261103-relay-settings-backup.
 - The retrieval-era service (CLI, hooks, MCP server, watcher, their tests and eval fixtures) was archived on 2026-11-03 at the tag `archive/retrieval-era-2026-11-03`; restore a file with `git show archive/retrieval-era-2026-11-03:<path>`. `lib/` keeps the modules the Jev experiments and the atoms/ledger instruments still import.
 - New `commands/*.js` export `{ run }` taking `ctx = { argv, roots, root }`. Hook commands that read `process.cwd()` must be whitelisted in `test/command-conventions.test.js`.
 
